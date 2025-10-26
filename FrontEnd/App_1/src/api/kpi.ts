@@ -1,6 +1,6 @@
 // src/api/kpi.ts
 // Backend base
-const BASE = import.meta.env?.VITE_API_BASE ?? "https://backend-v85n.onrender.com";
+const BASE = import.meta.env?.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
 
 /* =====================
  * Tipos base del backend

@@ -1,7 +1,7 @@
 /**
  * Config común para API KPI (compat X-Org-Id y x_org_id)
  */
-const API_BASE_RAW = (import.meta.env.VITE_API_BASE ?? "https://backend-v85n.onrender.com").toString().trim();
+const API_BASE_RAW = (import.meta.env.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com").toString().trim();
 export const API_BASE = API_BASE_RAW.replace(/\/$/, "");
 
 const ORG_ID_RAW = (import.meta.env.VITE_ORG_ID ?? "").toString().trim();

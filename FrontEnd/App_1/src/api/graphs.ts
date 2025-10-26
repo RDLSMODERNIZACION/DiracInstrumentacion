@@ -1,5 +1,5 @@
 // src/api/graphs.ts
-const BASE = import.meta.env?.VITE_API_BASE ?? "https://backend-v85n.onrender.com";
+const BASE = import.meta.env?.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
 
 export type Bucket = { local_hour: string };
 export type PumpsActive = { local_hour: string; pumps_count: number };

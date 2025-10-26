@@ -12,9 +12,9 @@ const InfraestructuraGraph = () => {
     const fetchNodes = async () => {
       try {
         // Llamada a la API de tanques
-        const tanksResponse = await axios.get('https://backend-v85n.onrender.com/infraestructura/get_tanks_with_config');
+        const tanksResponse = await axios.get('https://diracinstrumentacion.onrender.com/infraestructura/get_tanks_with_config');
         // Llamada a la API de bombas
-        const pumpsResponse = await axios.get('https://backend-v85n.onrender.com/infraestructura/get_pumps_with_status');
+        const pumpsResponse = await axios.get('https://diracinstrumentacion.onrender.com/infraestructura/get_pumps_with_status');
 
         // Mapear los tanques al formato que espera el front-end
         const tankNodes = tanksResponse.data.map((tank) => ({
@@ -51,7 +51,7 @@ const InfraestructuraGraph = () => {
     const fetchEdges = async () => {
       try {
         // Llamada a la API de conexiones
-        const edgesResponse = await axios.get('https://backend-v85n.onrender.com/infraestructura/get_layout_edges');
+        const edgesResponse = await axios.get('https://diracinstrumentacion.onrender.com/infraestructura/get_layout_edges');
         // Mapear las conexiones al formato que espera el front-end
         const edgesData = edgesResponse.data.map((edge) => ({
           from: edge.src_node_id, // El id del nodo origen

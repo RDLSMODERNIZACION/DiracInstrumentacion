@@ -13,7 +13,7 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 // ==============================
 const API_BASE =
   (import.meta as any)?.env?.VITE_API_BASE?.replace(/\/+$/, "") ||
-  "https://backend-v85n.onrender.com";
+  "https://diracinstrumentacion.onrender.com";
 
 async function fetchJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);

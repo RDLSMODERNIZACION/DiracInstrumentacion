@@ -73,7 +73,7 @@ const ONLINE_DEAD_SEC = 60;
 const API_BASE =
   (window as any).__API_BASE__ ||
   (import.meta as any).env?.VITE_API_BASE?.trim?.() ||
-  "https://backend-v85n.onrender.com";
+  "https://diracinstrumentacion.onrender.com";
 
 async function getJSON(path: string) {
   const url = new URL(`${API_BASE}${path}`);

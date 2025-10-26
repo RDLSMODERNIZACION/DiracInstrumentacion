@@ -1,5 +1,5 @@
 // src/services/loadDashboard.ts
-const BASE = import.meta.env?.VITE_API_BASE ?? "https://backend-v85n.onrender.com";
+const BASE = import.meta.env?.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
 
 type Pump = {
   pump_id: number;

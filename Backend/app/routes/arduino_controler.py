@@ -4,10 +4,11 @@ from typing import Optional, Literal, List
 from datetime import datetime, timezone
 from app.db import get_conn
 from psycopg.rows import dict_row
+from psycopg.types.json import Json  # <-- ADAPTADOR JSON (psycopg3)
 
 router = APIRouter(prefix="/arduino-controler", tags=["arduino-controler"])
 
-# ===== Modelos (ahora toleran simple) =====
+# ===== Modelos =====
 class CommandIn(BaseModel):
     pump_id: int
     action: Literal["start", "stop"]
@@ -39,7 +40,7 @@ class CommandOut(BaseModel):
     requested_at: datetime
     sent_at: Optional[datetime] = None
 
-# ========== Front -> crear comando (opcional centralizado acá) ==========
+# ========== Front -> crear comando ==========
 @router.post("/command")
 def create_command(cmd: CommandIn):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -54,7 +55,10 @@ def create_command(cmd: CommandIn):
         """, (cmd.pump_id, cmd.action, cmd.user))
         row = cur.fetchone()
 
-        cur.execute("UPDATE public.pump_commands SET status='sent', sent_at=now() WHERE id=%s", (row["id"],))
+        cur.execute(
+            "UPDATE public.pump_commands SET status='sent', sent_at=now() WHERE id=%s",
+            (row["id"],),
+        )
         conn.commit()
 
     return {"ok": True, "command_id": row["id"], "status": "sent"}
@@ -62,19 +66,34 @@ def create_command(cmd: CommandIn):
 # ========== Arduino -> heartbeat ==========
 @router.post("/heartbeat")
 def push_heartbeat(body: HeartbeatIn):
-    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT 1 FROM public.pumps WHERE id=%s", (body.pump_id,))
-        if cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail="pump not found")
+    """
+    Inserta heartbeat. 'payload' puede ser un dict y se adapta con Json(...) a json/jsonb.
+    """
+    try:
+        with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            # valida bomba
+            cur.execute("SELECT 1 FROM public.pumps WHERE id=%s", (body.pump_id,))
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="pump not found")
 
-        cur.execute("""
-            INSERT INTO public.pump_heartbeat (pump_id, rssi, payload)
-            VALUES (%s, %s, %s)
-            RETURNING id, created_at
-        """, (body.pump_id, body.rssi, body.payload))
-        row = cur.fetchone()
-        conn.commit()
-    return {"ok": True, "hb_id": row["id"], "ts": row["created_at"]}
+            # Adaptar dict a json/jsonb (psycopg3)
+            payload = Json(body.payload) if body.payload is not None else None
+            rssi = body.rssi if body.rssi is not None else None  # si tu col es NOT NULL, usa 0
+
+            cur.execute("""
+                INSERT INTO public.pump_heartbeat (pump_id, rssi, payload)
+                VALUES (%s, %s, %s)
+                RETURNING id, created_at
+            """, (body.pump_id, rssi, payload))
+            row = cur.fetchone()
+            conn.commit()
+
+        return {"ok": True, "hb_id": row["id"], "ts": row["created_at"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Devuelve 500 con detalle para facilitar diagnóstico (podés loguearlo en lugar de exponerlo)
+        raise HTTPException(status_code=500, detail=f"heartbeat insert failed: {e}")
 
 # Variante ultra simple por querystring
 @router.get("/hb")
@@ -143,7 +162,7 @@ def state_get(pump_id: int = Query(...), relay: int = Query(...)):
         conn.commit()
     return {"ok": True, "event_id": ev["id"], "state": state, "ts": ev["created_at"]}
 
-# ========== Backend -> Arduino: comandos pendientes (si usás pull) ==========
+# ========== Backend -> Arduino: comandos pendientes (pull) ==========
 @router.get("/next_commands")
 def next_commands(pump_id: int = Query(...), limit: int = Query(5, ge=1, le=50)):
     now = datetime.now(timezone.utc)
