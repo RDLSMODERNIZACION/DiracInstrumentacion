@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "framework": "vite",
+  "buildCommand": "npm run vercel-build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/kpi/(.*)",
+      "destination": "/kpi/$1"
+    },
+    {
+      "source": "/infraestructura/(.*)",
+      "destination": "/infraestructura/$1"
+    },
+    {
+      "source": "/((?!kpi|infraestructura|assets|img|favicon\\.ico|robots\\.txt|manifest\\.json).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://*.vercel.app https://*.tu-dominio.com;"
+        }
+      ]
+    }
+  ]
+}
