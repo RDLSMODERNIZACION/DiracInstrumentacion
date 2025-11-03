@@ -1,19 +1,27 @@
 import React from "react";
-import { createRoot } from "react-dom/client";
+import ReactDOM from "react-dom/client";
 import App from "./App";
-import "./index.css";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-// Busca el contenedor principal
-const rootElement = document.getElementById("root");
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Actualiza cada 1s, incluso en background
+      refetchInterval: 1000,
+      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      staleTime: 0,
+      retry: 1,
+      gcTime: 5 * 60 * 1000,
+    },
+  },
+});
 
-if (!rootElement) {
-  throw new Error("No se encontró el elemento #root en el HTML");
-}
-
-const root = createRoot(rootElement);
-
-root.render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
   </React.StrictMode>
 );

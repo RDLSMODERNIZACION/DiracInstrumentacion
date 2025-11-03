@@ -91,7 +91,7 @@ export function Valve({ n }: { n: NodeBase }) {
     <g>
       <rect x={n.x - 16} y={n.y - 10} width={32} height={20} rx={4} className="fill-white stroke-slate-300" />
       <circle cx={n.x} cy={n.y} r={7} className={`stroke-white ${color}`} />
-      <text x={n.x} y={n.y + 26} textAnchor="middle" className="fill-slate-700 text-[11px]">{n.name} • {n.state}</text>
+      {/* etiqueta removida: {n.name} • {n.state} */}
     </g>
   )
 }
@@ -100,7 +100,7 @@ export function Manifold({ n }: { n: NodeBase }) {
   return (
     <g>
       <rect x={n.x - 50} y={n.y - 8} width={100} height={16} rx={6} className="fill-slate-200 stroke-slate-300" />
-      <text x={n.x} y={n.y - 14} textAnchor="middle" className="fill-slate-600 text-[11px]">{n.name}</text>
+      {/* etiqueta removida: {n.name} */}
     </g>
   )
 }
