@@ -1,3 +1,4 @@
+// src/components/EnergyEfficiencyPage.tsx
 import React, { useMemo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
 import {
@@ -6,6 +7,15 @@ import {
   Pie,
   Cell,
   Tooltip,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
+  Brush,
+  BarChart,
+  Bar,
 } from "recharts";
 
 /** Serie agregada que arma loadDashboard: conteo de bombas con lectura por hora */
@@ -23,13 +33,15 @@ const EPEN_DEFAULT: TouSchedule = {
   pico:  { start: 19, end: 24 }, // 19:00 inclusive — 24:00 exclusive
 };
 
-function hourFromLocalIso(s?: string): number | null {
-  if (!s) return null;
-  const hh = s.slice(11, 13);
-  const n = Number(hh);
-  return Number.isFinite(n) ? n : null;
-}
+const COLORS: Record<"valle" | "resto" | "pico", string> = {
+  valle: "#10B981", // verde
+  resto: "#60A5FA", // celeste
+  pico:  "#F59E0B", // ámbar
+};
 
+// ------------------------------------------------------
+// Helpers
+// ------------------------------------------------------
 function classifyHour(hh: number, sch: TouSchedule): "valle" | "pico" | "resto" {
   const inRange = (h: number, start: number, end: number) => h >= start && h < end;
   if (inRange(hh, sch.valle.start, sch.valle.end)) return "valle";
@@ -37,35 +49,35 @@ function classifyHour(hh: number, sch: TouSchedule): "valle" | "pico" | "resto" 
   return "resto";
 }
 
-function StatCard({ title, hours, pct, color }: { title: string; hours: number; pct: number; color: string }) {
-  return (
-    <Card className="rounded-2xl">
-      <CardHeader className="pb-2 flex items-center gap-2">
-        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="text-3xl font-semibold">{hours.toFixed(1)} h</div>
-        <div className="text-sm text-gray-500 mt-1">{pct.toFixed(0)}%</div>
-      </CardContent>
-    </Card>
-  );
+function parseHourAny(s?: string): number | null {
+  if (!s) return null;
+  // Soporta "HH:MM"
+  const hhmm = /^(\d{2}):\d{2}$/;
+  const m = s.match(hhmm);
+  if (m) {
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+  // Intento Date parseable
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.getHours();
+  // Fallback ISO-like
+  const hh = s.slice(11, 13);
+  const n = Number(hh);
+  return Number.isFinite(n) ? n : null;
 }
 
-const COLORS: Record<"valle" | "resto" | "pico", string> = {
-  valle: "#10B981", // verde
-  resto: "#60A5FA", // celeste
-  pico:  "#F59E0B", // ámbar
-};
-
+// ------------------------------------------------------
+// Componente principal
+// ------------------------------------------------------
 export default function EnergyEfficiencyPage({
   pumpAgg,
   schedule = EPEN_DEFAULT,
-  debug = false,
+  capacity,
 }: {
   pumpAgg: AggTimeseries | null | undefined;
   schedule?: TouSchedule;
-  debug?: boolean;
+  capacity?: number; // para escalar el perfil horario
 }) {
   const ts = pumpAgg?.timestamps ?? [];
   const vals = pumpAgg?.is_on ?? [];
@@ -76,101 +88,213 @@ export default function EnergyEfficiencyPage({
     vals.length > 0 &&
     ts.length === vals.length;
 
-  const stats = useMemo(() => {
+  // Series y estadísticos
+  const { series, stats, pieData, stackedData, yMax } = useMemo(() => {
+    const out: Array<{ tLabel: string; t: number | string; on: number; band: "valle" | "resto" | "pico" }> = [];
     let valle = 0, pico = 0, resto = 0;
+
     if (valid) {
       for (let i = 0; i < ts.length; i++) {
-        const hh = hourFromLocalIso(ts[i]);
-        const count = Number(vals[i] ?? 0);
-        if (!Number.isFinite(count) || hh == null) continue;
+        const tLabel = String(ts[i] ?? "");
+        const hh = parseHourAny(tLabel);
+        const on = Number(vals[i] ?? 0);
+        if (!Number.isFinite(on) || hh == null) continue;
         const b = classifyHour(hh, schedule);
-        if (b === "valle") valle += count;
-        else if (b === "pico") pico += count;
-        else resto += count;
+        out.push({
+          tLabel,
+          t: /^\d{2}:\d{2}$/.test(tLabel) ? i : new Date(tLabel).getTime(),
+          on,
+          band: b === "pico" ? "pico" : b === "valle" ? "valle" : "resto",
+        });
+        if (b === "valle") valle += on;
+        else if (b === "pico") pico += on;
+        else resto += on;
       }
     }
-    const total = valle + pico + resto;
-    const pct = (x: number) => (total > 0 ? (x * 100) / total : 0);
-    return {
-      valle: { hours: valle, pct: pct(valle) },
-      resto: { hours: resto, pct: pct(resto) },
-      pico:  { hours: pico,  pct: pct(pico)  },
-      total,
-    };
-  }, [valid, ts, vals, schedule]);
 
-  const pieData = useMemo(
-    () => [
+    const ordered =
+      out.length && typeof out[0].t === "number"
+        ? [...out].sort((a, b) => Number(a.t) - Number(b.t))
+        : [...out];
+
+    const total = valle + pico + resto;
+    const stats = {
+      total,
+      valle: { hours: valle, pct: total > 0 ? (valle * 100) / total : 0 },
+      pico:  { hours: pico,  pct: total > 0 ? (pico  * 100) / total : 0 },
+      resto: { hours: resto, pct: total > 0 ? (resto * 100) / total : 0 },
+      avgOn: ordered.length ? total / ordered.length : 0,
+      peak: Math.max(0, ...ordered.map(d => d.on)),
+    };
+
+    const pieData = [
       { name: "Valle", key: "valle" as const, value: Number(stats.valle.hours.toFixed(3)) },
       { name: "Resto", key: "resto" as const, value: Number(stats.resto.hours.toFixed(3)) },
       { name: "Pico",  key: "pico"  as const, value: Number(stats.pico.hours.toFixed(3))  },
-    ],
-    [stats]
-  );
+    ];
 
-  if (debug) {
-    console.log("[EE-Pie] valid:", valid, "len", ts.length, vals.length, "stats", stats);
+    const stackedData = ordered.map(d => ({
+      label: d.tLabel,
+      valle: d.band === "valle" ? d.on : 0,
+      resto: d.band === "resto" ? d.on : 0,
+      pico:  d.band === "pico"  ? d.on : 0,
+    }));
+
+    const yMax = Math.max(stats.peak, capacity ?? 0, 1);
+
+    return { series: ordered, stats, pieData, stackedData, yMax };
+  }, [valid, ts, vals, schedule, capacity]);
+
+  if (!valid) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm text-gray-500">Eficiencia energética (24h)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-gray-500">Sin datos.</CardContent>
+        </Card>
+      </div>
+    );
   }
 
+  // Porcentajes para barra apilada
+  const pct = {
+    valle: stats.total > 0 ? (stats.valle.hours / stats.total) * 100 : 0,
+    resto: stats.total > 0 ? (stats.resto.hours / stats.total) * 100 : 0,
+    pico:  stats.total > 0 ? (stats.pico.hours  / stats.total) * 100 : 0,
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-4">
-      {/* Torta con distribución de horas-bomba (24h) */}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Resumen 24h (ahora con Valle/Resto/Pico adentro) */}
       <Card className="rounded-2xl">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-gray-500">Distribución de horas-bomba (24h)</CardTitle>
+          <CardTitle className="text-sm text-gray-500">Resumen (24h)</CardTitle>
         </CardHeader>
-        <CardContent className="h-72">
-          {valid && stats.total > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={65}
-                  outerRadius={95}
-                  isAnimationActive={true}
-                  labelLine={false}
-                  label={(d: any) => `${d.name} ${((d.value / stats.total) * 100).toFixed(0)}%`}
-                >
-                  {pieData.map((entry) => (
-                    <Cell key={entry.key} fill={COLORS[entry.key]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(v: any, _n: any, p: any) => {
-                    const pct = stats.total > 0 ? ((v as number) * 100) / stats.total : 0;
-                    return [`${Number(v).toFixed(1)} h (${pct.toFixed(0)}%)`, p?.payload?.name];
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full grid place-items-center text-sm text-gray-500">
-              {valid ? "Sin actividad en las últimas 24 h." : "No hay datos suficientes para graficar."}
+        <CardContent>
+          {/* KPIs arriba */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-gray-500">Horas-bomba</div>
+              <div className="text-2xl md:text-3xl font-semibold">{stats.total.toFixed(1)} h</div>
             </div>
-          )}
+            <div>
+              <div className="text-xs text-gray-500">Promedio ON</div>
+              <div className="text-2xl md:text-3xl font-semibold">{stats.avgOn.toFixed(1)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Pico ON</div>
+              <div className="text-2xl md:text-3xl font-semibold">{stats.peak.toFixed(0)}</div>
+            </div>
+          </div>
+
+          {/* Barra apilada por franja */}
+          <div className="mt-4">
+            <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
+              <div className="h-2" style={{ width: `${pct.valle}%`, backgroundColor: COLORS.valle }} />
+              <div className="h-2" style={{ width: `${pct.resto}%`, backgroundColor: COLORS.resto }} />
+              <div className="h-2" style={{ width: `${pct.pico}%`,  backgroundColor: COLORS.pico  }} />
+            </div>
+
+            {/* Chips con horas y % por franja */}
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.valle }} />
+                <span className="text-gray-700">Valle</span>
+                <span className="ml-auto font-medium">{stats.valle.hours.toFixed(1)} h</span>
+                <span className="text-gray-500">({pct.valle.toFixed(0)}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.resto }} />
+                <span className="text-gray-700">Resto</span>
+                <span className="ml-auto font-medium">{stats.resto.hours.toFixed(1)} h</span>
+                <span className="text-gray-500">({pct.resto.toFixed(0)}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS.pico }} />
+                <span className="text-gray-700">Pico</span>
+                <span className="ml-auto font-medium">{stats.pico.hours.toFixed(1)} h</span>
+                <span className="text-gray-500">({pct.pico.toFixed(0)}%)</span>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Tarjetas Valle / Resto / Pico */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard title="Valle" hours={stats.valle.hours} pct={stats.valle.pct} color={COLORS.valle} />
-        <StatCard title="Resto" hours={stats.resto.hours} pct={stats.resto.pct} color={COLORS.resto} />
-        <StatCard title="Pico"  hours={stats.pico.hours}  pct={stats.pico.pct}  color={COLORS.pico} />
-      </div>
-
-      {/* Esquema aplicado */}
+      {/* Distribución por franja */}
       <Card className="rounded-2xl">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-gray-500">Esquema horario aplicado (EPEN)</CardTitle>
+          <CardTitle className="text-sm text-gray-500">Distribución por franja</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-gray-600">
-          <div>Valle: {String(schedule.valle.start).padStart(2,"0")}:00–{String(schedule.valle.end).padStart(2,"0")}:00</div>
-          <div>Pico: {String(schedule.pico.start).padStart(2,"0")}:00–{String(schedule.pico.end).padStart(2,"0")}:00</div>
-          <div>Resto: restantes del día</div>
+        <CardContent className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={pieData}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius={65}
+                outerRadius={95}
+                isAnimationActive={true}
+                labelLine={false}
+                label={(d: any) => `${d.name} ${((d.value / (stats.total || 1)) * 100).toFixed(0)}%`}
+              >
+                {pieData.map((entry) => (
+                  <Cell key={entry.key} fill={COLORS[entry.key]} />
+                ))}
+              </Pie>
+              <Tooltip
+                formatter={(v: any, _n: any, p: any) => {
+                  const pct = stats.total > 0 ? ((v as number) * 100) / stats.total : 0;
+                  return [`${Number(v).toFixed(1)} h (${pct.toFixed(0)}%)`, p?.payload?.name];
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Perfil horario (24h) */}
+      <Card className="rounded-2xl">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-gray-500">Perfil horario (24h)</CardTitle>
+        </CardHeader>
+        <CardContent className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+              <XAxis dataKey="tLabel" tickMargin={8} minTickGap={24} />
+              <YAxis allowDecimals={false} domain={[0, Math.max(yMax, 1)]} width={28} />
+              <Tooltip cursor={{ strokeDasharray: "3 3" }} formatter={(v: any) => [String(v), "Bombas ON"]} />
+              <Legend />
+              <Line type="stepAfter" dataKey="on" name="Bombas ON" stroke="currentColor" strokeWidth={2} dot={false} isAnimationActive={false} />
+              {series.length > 24 && <Brush dataKey="tLabel" height={22} stroke="currentColor" travellerWidth={8} />}
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Horas por franja (apilado por punto) */}
+      <Card className="rounded-2xl">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-gray-500">Horas por franja (apilado)</CardTitle>
+        </CardHeader>
+        <CardContent className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={stackedData} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+              <XAxis dataKey="label" tickMargin={8} minTickGap={24} />
+              <YAxis allowDecimals={false} width={28} />
+              <Tooltip cursor={{ fillOpacity: 0.05 }} formatter={(v: any, name: any) => [`${v} h`, name]} />
+              <Legend />
+              <Bar stackId="a" dataKey="valle" name="Valle" fill={COLORS.valle} isAnimationActive={false} />
+              <Bar stackId="a" dataKey="resto" name="Resto" fill={COLORS.resto} isAnimationActive={false} />
+              <Bar stackId="a" dataKey="pico"  name="Pico"  fill={COLORS.pico}  isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
         </CardContent>
       </Card>
     </div>

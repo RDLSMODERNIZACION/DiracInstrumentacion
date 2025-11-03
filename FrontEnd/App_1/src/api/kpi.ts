@@ -90,9 +90,13 @@ export type Alarm = {
  * Helpers
  * ===================== */
 async function http<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json() as Promise<T>;
+  const res = await fetch(`${BASE}${path}`, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(`[API ${res.status}] ${res.statusText} ::`, body || "(sin cuerpo)");
+    throw new Error(`[API ${res.status}] ${res.statusText}`);
+  }
+  return res.json() as Promise<T>;
 }
 
 function slug(s: string) {

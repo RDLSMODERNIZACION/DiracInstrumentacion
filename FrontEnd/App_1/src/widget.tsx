@@ -79,7 +79,12 @@ export default function KpiWidget() {
     return { tanks, pumps };
   }, [byLocationFiltered]);
 
-  // Nombre legible de la ubicación actual
+  // Capacidad total de bombas (para eje Y del gráfico y para eficiencia)
+  const totalPumpsCap = useMemo(() => {
+    return kpis.pumps || undefined;
+  }, [kpis]);
+
+  // Nombre legible de la ubicación actual (por si lo necesitás en el título)
   const currentLocName = useMemo(() => {
     if (loc === "all") return "Todas";
     const found = locOptionsAll.find(o => o.id === loc);
@@ -88,8 +93,6 @@ export default function KpiWidget() {
 
   return (
     <div className="p-6 space-y-6">
-      
-
       <div className="flex gap-2 items-center">
         <span className="text-sm text-gray-500">Ubicación:</span>
         <select
@@ -133,27 +136,16 @@ export default function KpiWidget() {
           {/* Gráficos principales */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TankLevelChart ts={tankAgg} />
-            <PumpsOnChart pumpsTs={pumpAgg} />
+            {/* eje Y del gráfico de bombas ajustado a la capacidad total */}
+            <PumpsOnChart pumpsTs={pumpAgg} max={totalPumpsCap} />
           </section>
         </>
       )}
 
-      {/* Eficiencia */}
+      {/* Eficiencia — solo tarjetas/charts (sin notas) */}
       {tab === "eficiencia" && (
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <EnergyEfficiencyPage pumpAgg={pumpAgg} debug />
-          <Card className="rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-gray-500">Notas</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1">
-                <li>Bandas EPEN por defecto: <b>VALLE</b> 00–07 h, <b>PICO</b> 19–23 h (incluye 23), <b>RESTO</b> el resto.</li>
-                <li>Las tarjetas muestran horas-bomba y % por franja (24 h).</li>
-                <li>El selector de ubicación arriba recarga los datos y esta vista se actualiza sola.</li>
-              </ul>
-            </CardContent>
-          </Card>
+        <section>
+          <EnergyEfficiencyPage pumpAgg={pumpAgg} capacity={totalPumpsCap} />
         </section>
       )}
 
