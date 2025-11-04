@@ -2,15 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "framework": "vite",
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/instrumentacion", "destination": "https://dirac-instrumentacion.vercel.app/instrumentacion" },
-    { "source": "/instrumentacion/(.*)", "destination": "https://dirac-instrumentacion.vercel.app/instrumentacion/$1" },
+    { "source": "/instrumentacion/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/instrumentacion/favicon.ico", "destination": "/favicon.ico" },
+    { "source": "/instrumentacion/robots.txt", "destination": "/robots.txt" },
+    { "source": "/instrumentacion/manifest.json", "destination": "/manifest.json" },
 
-    { "source": "/kpi/(.*)", "destination": "/kpi/$1" },
-    { "source": "/infraestructura/(.*)", "destination": "/infraestructura/$1" },
-
-    { "source": "/((?!kpi|infraestructura|instrumentacion|assets|img|favicon\\.ico|robots\\.txt|manifest\\.json).*)", "destination": "/index.html" }
+    { "source": "/instrumentacion", "destination": "/index.html" },
+    { "source": "/instrumentacion/(.*)", "destination": "/index.html" }
   ]
 }
