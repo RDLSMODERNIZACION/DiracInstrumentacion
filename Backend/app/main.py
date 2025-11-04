@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.db import get_conn
 
-# Rutas existentes
+# ===== Rutas existentes =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
@@ -15,14 +15,12 @@ from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
 from app.routes.kpi import router as kpi_router
 
-
-# === Dirac (nuevo) ===
+# ===== Dirac (nuevo, en carpeta separada) =====
 from app.routes.dirac.me import router as dirac_me_router
 from app.routes.dirac.users import router as dirac_users_router
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
-
 
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -82,11 +80,11 @@ def health_db():
             cur.execute("select 1")
             cur.fetchone()
         return {"ok": True, "db": "up"}
-    except Exception as e:
+    except Exception:
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
-# ===== Rutas =====
+# ===== Rutas existentes =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
@@ -94,8 +92,7 @@ app.include_router(arduino_router)
 app.include_router(infraestructura_router)
 app.include_router(kpi_router)  # /kpi/*
 
-
-# === Dirac routers ===
+# ===== Dirac routers (nuevos) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_users_router)
 app.include_router(dirac_companies_router)
