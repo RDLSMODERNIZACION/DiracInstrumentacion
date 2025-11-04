@@ -15,6 +15,15 @@ from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
 from app.routes.kpi import router as kpi_router
 
+
+# === Dirac (nuevo) ===
+from app.routes.dirac.me import router as dirac_me_router
+from app.routes.dirac.users import router as dirac_users_router
+from app.routes.dirac.companies import router as dirac_companies_router
+from app.routes.dirac.locations import router as dirac_locations_router
+from app.routes.dirac.pumps import router as dirac_pumps_router
+
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -84,3 +93,11 @@ app.include_router(ingest_router)
 app.include_router(arduino_router)
 app.include_router(infraestructura_router)
 app.include_router(kpi_router)  # /kpi/*
+
+
+# === Dirac routers ===
+app.include_router(dirac_me_router)
+app.include_router(dirac_users_router)
+app.include_router(dirac_companies_router)
+app.include_router(dirac_locations_router)
+app.include_router(dirac_pumps_router)
