@@ -1,7 +1,9 @@
+// src/pages/Companies.tsx
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import Section from "../components/Section";
 import { useApi } from "../lib/api";
+import SlideOver from "../components/SlideOver";
+import CompanyEditor from "../components/CompanyEditor";
 
 type Company = { id: number; name: string; status: string };
 
@@ -11,6 +13,7 @@ export default function Companies() {
   const [name, setName] = useState("Nueva Empresa");
   const [legal_name, setLegalName] = useState("");
   const [cuit, setCuit] = useState("");
+  const [editing, setEditing] = useState<Company | null>(null);
 
   async function load() {
     const rows = await getJSON("/dirac/admin/companies");
@@ -19,6 +22,7 @@ export default function Companies() {
   useEffect(()=>{ load(); }, []);
 
   async function create() {
+    // usa endpoint público /dirac/companies (crea y te agrega como owner)
     await postJSON("/dirac/companies", { name, legal_name, cuit });
     setName("Nueva Empresa"); setLegalName(""); setCuit("");
     await load();
@@ -46,28 +50,37 @@ export default function Companies() {
         </div>
       </Section>
 
-      <Section title="Listado" right={null}>
+      <Section title="Listado (click en la fila para editar)" right={null}>
         <table className="min-w-full text-sm">
           <thead><tr className="text-left">
             <th className="px-2 py-1">ID</th>
             <th className="px-2 py-1">Nombre</th>
             <th className="px-2 py-1">Estado</th>
-            <th className="px-2 py-1">Usuarios</th>
           </tr></thead>
           <tbody>
             {items.map(c => (
-              <tr key={c.id} className="border-t">
+              <tr key={c.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=>setEditing(c)}>
                 <td className="px-2 py-1">{c.id}</td>
                 <td className="px-2 py-1">{c.name}</td>
                 <td className="px-2 py-1">{c.status}</td>
-                <td className="px-2 py-1">
-                  <Link to={`/companies/${c.id}/users`} className="text-blue-600 underline">Administrar</Link>
-                </td>
               </tr>
             ))}
+            {items.length===0 && (
+              <tr><td colSpan={3} className="px-2 py-6 text-center text-slate-500">Sin empresas</td></tr>
+            )}
           </tbody>
         </table>
       </Section>
+
+      <SlideOver open={!!editing} title={editing ? `Editar empresa #${editing.id}` : ""} onClose={()=>setEditing(null)}>
+        {editing && (
+          <CompanyEditor
+            company={editing}
+            onSaved={async ()=>{ setEditing(null); await load(); }}
+            onClose={()=>setEditing(null)}
+          />
+        )}
+      </SlideOver>
     </div>
   );
 }
