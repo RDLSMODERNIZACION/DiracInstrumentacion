@@ -46,11 +46,11 @@ export default function CompanyEditor({
   const [statusEdits, setStatusEdits] = useState<Record<number, "active" | "disabled">>({}); // 'active'|'disabled'
 
   async function loadUsers() {
-    // ▶️ ahora usamos el endpoint admin que ya incluye status del usuario
+    // ▶️ endpoint admin que ya incluye status
     const r: CompanyUserRow[] = await getJSON(`/dirac/admin/companies/${company.id}/users`);
     setRows(r);
 
-    // precargar selects a partir de la misma respuesta (sin N requests)
+    // precargar selects desde la misma respuesta
     const roleMap: Record<number, CompanyUserRow["role"]> = {};
     const statusMap: Record<number, "active" | "disabled"> = {};
     for (const u of r) {
@@ -80,6 +80,17 @@ export default function CompanyEditor({
       setErr(e?.message || String(e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteCompany(force = false) {
+    setErr(null);
+    try {
+      await del(`/dirac/admin/companies/${company.id}?force=${force ? 1 : 0}`);
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
     }
   }
 
@@ -178,7 +189,35 @@ export default function CompanyEditor({
 
             {err && <div className="text-sm text-red-600">{err}</div>}
 
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (confirm("¿Eliminar empresa? Solo se borrará si no tiene usuarios/ubicaciones/activos.")) {
+                      deleteCompany(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded bg-red-50 text-red-700 border border-red-200"
+                >
+                  Eliminar (si está vacía)
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "⚠️ FORZAR eliminación: se eliminarán ubicaciones, activos y membresías asociadas. ¿Continuar?"
+                      )
+                    ) {
+                      deleteCompany(true);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded bg-red-600 text-white"
+                >
+                  Forzar eliminación
+                </button>
+              </div>
+
               <button
                 onClick={saveCompany}
                 disabled={saving}
