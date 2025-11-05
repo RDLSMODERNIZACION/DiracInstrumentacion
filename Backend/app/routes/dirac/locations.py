@@ -1,3 +1,11 @@
+from fastapi import APIRouter, Depends, HTTPException
+from psycopg.rows import dict_row
+from app.db import get_conn
+from app.security import require_user
+from app.schemas_dirac import LocationCreate, GrantAccessIn
+
+router = APIRouter(prefix="/dirac/locations", tags=["locations"])
+
 @router.post(
     "",
     summary="Crear/actualizar localización (idempotente por (company_id, name))",
@@ -17,7 +25,7 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         try:
             if payload.company_id is None:
-                # Sin empresa: insert simple (no hay índice único parcial)
+                # Sin empresa → no aplica índice único parcial: insert simple
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
@@ -28,8 +36,8 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
                 conn.commit()
                 return row
 
-            # Con empresa: idempotente por (company_id, name) SIN usar nombre del constraint
-            # 1) ¿Existe?
+            # Con empresa → idempotente por (company_id, name) sin depender del nombre del constraint
+            # 1) Ver si ya existe (company_id, name)
             cur.execute(
                 "SELECT id FROM locations WHERE company_id=%s AND name=%s",
                 (payload.company_id, payload.name)
@@ -37,7 +45,7 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
             found = cur.fetchone()
 
             if found:
-                # 2) Update COALESCE (solo pisa si mandás dato)
+                # 2) Update COALESCE (sólo pisa si mandás dato)
                 cur.execute(
                     "UPDATE locations SET "
                     " address = COALESCE(%s, address),"
@@ -64,5 +72,28 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         except Exception as e:
             conn.rollback()
-            # 400 con detalle (así ves el motivo real si hubiera otra constraint)
+            # Devolvé el detalle en 400 (no 500)
             raise HTTPException(400, f"Create location error: {e}")
+
+@router.post(
+    "/{location_id}/users/{target_user_id}",
+    summary="Otorgar acceso a localización",
+    description="Asigna view/control/admin a un usuario (requiere admin en la localización)."
+)
+def grant_access(location_id: int, target_user_id: int, payload: GrantAccessIn, user=Depends(require_user)):
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # Debés ser admin en esa localización (efectivo)
+        cur.execute(
+            "SELECT EXISTS(SELECT 1 FROM v_user_locations WHERE user_id=%s AND location_id=%s AND access='admin') AS ok",
+            (user["user_id"], location_id)
+        )
+        allowed = cur.fetchone()["ok"]
+        if not allowed:
+            raise HTTPException(403, "Requiere admin en la localización")
+        cur.execute(
+            "INSERT INTO user_location_access(user_id, location_id, access) VALUES(%s,%s,%s) "
+            "ON CONFLICT(user_id, location_id) DO UPDATE SET access=excluded.access, created_at=now()",
+            (target_user_id, location_id, payload.access)
+        )
+        conn.commit()
+        return {"ok": True}
