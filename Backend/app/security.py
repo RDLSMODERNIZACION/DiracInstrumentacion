@@ -6,11 +6,12 @@ from app.db import get_conn
 
 security = HTTPBasic()
 
+
 def require_user(credentials: HTTPBasicCredentials = Depends(security)):
     """
-    Auth básica (solo pruebas).
+    Autenticación básica (SOLO PRUEBAS).
     Valida contra public.app_users (email + password_plain, status='active')
-    y expone el flag de superadmin.
+    y expone el flag de superadmin para bypass de permisos en los routers.
     """
     email = (credentials.username or "").strip().lower()
     password = credentials.password or ""
@@ -20,7 +21,7 @@ def require_user(credentials: HTTPBasicCredentials = Depends(security)):
             """
             SELECT
                 id AS user_id,
-                email,
+                lower(email) AS email,
                 status,
                 COALESCE(is_superadmin,false) AS is_superadmin
             FROM public.app_users
@@ -35,23 +36,26 @@ def require_user(credentials: HTTPBasicCredentials = Depends(security)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
         )
-    if row["status"] != "active":
+
+    # status suele ser un enum; lo comparamos en minúsculas
+    if str(row["status"]).lower() != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo",
         )
 
     return {
-        "user_id": row["user_id"],
+        "user_id": int(row["user_id"]),
         "email": row["email"],
         "superadmin": bool(row["is_superadmin"]),
     }
 
 
-# (opcional) helper simple para usar en routers admin
+# ===================== Helpers opcionales para routers =====================
+
 def assert_admin_company(cur, user: dict, company_id: int):
     """
-    Requiere owner/admin en la empresa, salvo que sea superadmin.
+    Requiere owner/admin en la empresa, salvo que sea superadmin (bypass).
     Uso:
       with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
           assert_admin_company(cur, user, company_id)
@@ -74,4 +78,22 @@ def assert_admin_company(cur, user: dict, company_id: int):
         raise HTTPException(
             status_code=403,
             detail="Requiere owner/admin en la empresa (o superadmin)",
+        )
+
+
+def assert_any_admin(cur, user: dict):
+    """
+    Requiere owner/admin en AL MENOS una empresa, salvo que sea superadmin (bypass).
+    Útil para endpoints de listado global.
+    """
+    if user.get("superadmin"):
+        return
+    cur.execute(
+        "SELECT EXISTS(SELECT 1 FROM public.company_users WHERE user_id=%s AND role IN ('owner','admin')) AS ok",
+        (user["user_id"],),
+    )
+    if not cur.fetchone()["ok"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Requiere owner/admin (o superadmin)",
         )
