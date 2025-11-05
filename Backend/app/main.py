@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
-from app.db import get_conn
+from app.db import get_conn, close_pool
 
 # ===== Rutas existentes =====
 from app.routes.tanks import router as tanks_router
@@ -92,7 +92,7 @@ def health_db():
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
-# ===== Rutas existentes =====
+# ===== Rutas =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
@@ -114,3 +114,8 @@ app.include_router(admin_locations_router)
 app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
+
+# ===== Cierre ordenado del pool de DB =====
+@app.on_event("shutdown")
+def _shutdown():
+    close_pool()

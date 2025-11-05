@@ -6,6 +6,7 @@ from app.schemas_dirac import LocationCreate, GrantAccessIn
 
 router = APIRouter(prefix="/dirac/locations", tags=["locations"])
 
+
 @router.post(
     "",
     summary="Crear/actualizar localización (idempotente por (company_id, name))",

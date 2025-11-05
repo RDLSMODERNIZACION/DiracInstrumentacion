@@ -1,29 +1,32 @@
-# app/db.py
 import os
 from psycopg_pool import ConnectionPool
 
+# Usar SIEMPRE el pooler de Supabase (puerto 6543) con SSL, ej:
+# postgresql://USER:PASS@aws-1-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require
 DSN = os.environ.get("DATABASE_URL")
 if not DSN:
-    raise RuntimeError("Falta la env DATABASE_URL")
+    raise RuntimeError(
+        "Falta la env DATABASE_URL (ej: postgresql://user:pass@aws-1-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require)"
+    )
 
-# Pool chico y estable. Ajustá max_size si lo necesitás (con 60 conexiones globales, 8 es seguro).
+# Pool simple y estable
 pool = ConnectionPool(
     conninfo=DSN,
     min_size=1,
     max_size=8,
-    max_idle=30,          # segundos
-    max_lifetime=3600,    # recicla conexiones cada hora
-    timeout=5,            # espera por un conn del pool
-    kwargs=dict(
-        connect_timeout=5,
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=3,
-        options="-c statement_timeout=60000"  # 60s por query
-    ),
+    timeout=30,  # segundos para conseguir una conexión del pool
+    kwargs={
+        "sslmode": "require",
+        "connect_timeout": 5,  # segundos para abrir el socket a la DB
+    },
 )
 
 def get_conn():
-    """Usar como: with get_conn() as conn:"""
+    """Uso: with get_conn() as conn: ..."""
     return pool.connection()
+
+def close_pool():
+    try:
+        pool.close()
+    except Exception:
+        pass
