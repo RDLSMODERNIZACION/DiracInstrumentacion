@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from "react";
 import Section from "../components/Section";
 import { useApi } from "../lib/api";
+import LocationPicker from "../components/LocationPicker";
 
 type Pump = { id: number; name: string; location_id?: number|null; require_pin?: boolean };
+type LocValue =
+  | { mode: "existing"; company_id: number; location_id: number }
+  | { mode: "new"; company_id: number; location_name: string };
 
 export default function Pumps() {
   const { getJSON, postJSON, patchJSON, del } = useApi();
   const [items, setItems] = useState<Pump[]>([]);
   const [name, setName] = useState("");
-  const [location_id, setLocationId] = useState<number | "">("");
   const [pin_code, setPin] = useState("0000");
   const [require_pin, setRequirePin] = useState(true);
+  const [loc, setLoc] = useState<LocValue | undefined>(undefined);
 
   async function load() {
     const rows = await getJSON("/dirac/admin/pumps");
@@ -19,19 +23,24 @@ export default function Pumps() {
   useEffect(()=>{ load(); }, []);
 
   async function create() {
-    await postJSON("/dirac/admin/pumps", { name, location_id: location_id===""?null:Number(location_id), pin_code, require_pin });
-    setName(""); setLocationId(""); setPin("0000"); setRequirePin(true);
+    if (!loc) return alert("Seleccioná ubicación");
+    const payload: any = { name, pin_code, require_pin };
+    if (loc.mode === "existing") payload.location_id = loc.location_id;
+    else { payload.company_id = loc.company_id; payload.location_name = loc.location_name; }
+    await postJSON("/dirac/admin/pumps", payload);
+    setName(""); setPin("0000"); setRequirePin(true); setLoc(undefined);
     await load();
   }
+
   async function update(p: Pump) {
     const newName = prompt("Nuevo nombre", p.name); if (!newName) return;
     await patchJSON(`/dirac/admin/pumps/${p.id}`, { name: newName });
     await load();
   }
+
   async function remove(id: number) {
     if (!confirm("¿Eliminar bomba?")) return;
-    await del(`/dirac/admin/pumps/${id}`);
-    await load();
+    await del(`/dirac/admin/pumps/${id}`); await load();
   }
 
   return (
@@ -39,15 +48,21 @@ export default function Pumps() {
       <h1 className="text-xl font-semibold mb-4">Bombas</h1>
 
       <Section title="Crear bomba" right={null}>
-        <div className="flex items-end gap-2 flex-wrap">
-          <div><div className="text-xs text-slate-500">Nombre</div><input className="border rounded px-2 py-1" value={name} onChange={e=>setName(e.target.value)} /></div>
-          <div><div className="text-xs text-slate-500">Location ID</div><input className="border rounded px-2 py-1" value={location_id} onChange={e=>setLocationId(e.target.value as any)} /></div>
-          <div><div className="text-xs text-slate-500">PIN</div><input className="border rounded px-2 py-1" value={pin_code} onChange={e=>setPin(e.target.value)} maxLength={4} /></div>
-          <div className="flex items-center gap-1">
-            <input id="reqpin" type="checkbox" checked={require_pin} onChange={e=>setRequirePin(e.target.checked)} />
-            <label htmlFor="reqpin" className="text-xs text-slate-500">require_pin</label>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-end gap-2 flex-wrap">
+            <div><div className="text-xs text-slate-500">Nombre</div>
+              <input className="border rounded px-2 py-1" value={name} onChange={e=>setName(e.target.value)} /></div>
+            <div><div className="text-xs text-slate-500">PIN</div>
+              <input className="border rounded px-2 py-1" value={pin_code} onChange={e=>setPin(e.target.value)} maxLength={4} /></div>
+            <div className="flex items-center gap-1">
+              <input id="reqpin" type="checkbox" checked={require_pin} onChange={e=>setRequirePin(e.target.checked)} />
+              <label htmlFor="reqpin" className="text-xs text-slate-500">require_pin</label>
+            </div>
           </div>
-          <button onClick={create} className="px-3 py-1.5 rounded bg-blue-600 text-white">Crear</button>
+
+          <LocationPicker value={loc} onChange={setLoc} />
+
+          <div><button onClick={create} className="px-3 py-1.5 rounded bg-blue-600 text-white">Crear</button></div>
         </div>
       </Section>
 
