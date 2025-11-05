@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import Section from "../components/Section";
 import { useApi } from "../lib/api";
 import LocationPicker from "../components/LocationPicker";
+import SlideOver from "../components/SlideOver";
+import AssetEditor from "../components/AssetEditor";
 
 type Pump = { id: number; name: string; location_id?: number|null; require_pin?: boolean };
 type LocValue =
@@ -9,12 +11,14 @@ type LocValue =
   | { mode: "new"; company_id: number; location_name: string };
 
 export default function Pumps() {
-  const { getJSON, postJSON, patchJSON, del } = useApi();
+  const { getJSON, postJSON, del } = useApi();
   const [items, setItems] = useState<Pump[]>([]);
   const [name, setName] = useState("");
   const [pin_code, setPin] = useState("0000");
   const [require_pin, setRequirePin] = useState(true);
   const [loc, setLoc] = useState<LocValue | undefined>(undefined);
+
+  const [editing, setEditing] = useState<Pump | null>(null);
 
   async function load() {
     const rows = await getJSON("/dirac/admin/pumps");
@@ -29,12 +33,6 @@ export default function Pumps() {
     else { payload.company_id = loc.company_id; payload.location_name = loc.location_name; }
     await postJSON("/dirac/admin/pumps", payload);
     setName(""); setPin("0000"); setRequirePin(true); setLoc(undefined);
-    await load();
-  }
-
-  async function update(p: Pump) {
-    const newName = prompt("Nuevo nombre", p.name); if (!newName) return;
-    await patchJSON(`/dirac/admin/pumps/${p.id}`, { name: newName });
     await load();
   }
 
@@ -53,7 +51,7 @@ export default function Pumps() {
             <div><div className="text-xs text-slate-500">Nombre</div>
               <input className="border rounded px-2 py-1" value={name} onChange={e=>setName(e.target.value)} /></div>
             <div><div className="text-xs text-slate-500">PIN</div>
-              <input className="border rounded px-2 py-1" value={pin_code} onChange={e=>setPin(e.target.value)} maxLength={4} /></div>
+              <input className="border rounded px-2 py-1" value={pin_code} onChange={e=>setPin(e.target.value.replace(/\D+/g,"").slice(0,4))} maxLength={4} /></div>
             <div className="flex items-center gap-1">
               <input id="reqpin" type="checkbox" checked={require_pin} onChange={e=>setRequirePin(e.target.checked)} />
               <label htmlFor="reqpin" className="text-xs text-slate-500">require_pin</label>
@@ -66,17 +64,16 @@ export default function Pumps() {
         </div>
       </Section>
 
-      <Section title="Listado" right={null}>
+      <Section title="Listado (click en la fila para editar)" right={null}>
         <table className="min-w-full text-sm">
           <thead><tr className="text-left"><th className="px-2 py-1">ID</th><th className="px-2 py-1">Nombre</th><th className="px-2 py-1">Location</th><th className="px-2 py-1">Acciones</th></tr></thead>
           <tbody>
             {items.map(p => (
-              <tr key={p.id} className="border-t">
+              <tr key={p.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=>setEditing(p)}>
                 <td className="px-2 py-1">{p.id}</td>
                 <td className="px-2 py-1">{p.name}</td>
                 <td className="px-2 py-1">{p.location_id ?? "—"}</td>
-                <td className="px-2 py-1 space-x-2">
-                  <button onClick={()=>update(p)} className="text-blue-600 underline">Editar</button>
+                <td className="px-2 py-1 space-x-2" onClick={(e)=>e.stopPropagation()}>
                   <button onClick={()=>remove(p.id)} className="text-red-600 underline">Borrar</button>
                 </td>
               </tr>
@@ -84,6 +81,17 @@ export default function Pumps() {
           </tbody>
         </table>
       </Section>
+
+      <SlideOver open={!!editing} title={editing ? `Editar bomba #${editing.id}` : ""} onClose={()=>setEditing(null)}>
+        {editing && (
+          <AssetEditor
+            kind="pump"
+            item={editing}
+            onSaved={async ()=>{ setEditing(null); await load(); }}
+            onCancel={()=>setEditing(null)}
+          />
+        )}
+      </SlideOver>
     </div>
   );
 }

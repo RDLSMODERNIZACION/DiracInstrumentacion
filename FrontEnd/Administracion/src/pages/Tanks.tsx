@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import Section from "../components/Section";
 import { useApi } from "../lib/api";
 import LocationPicker from "../components/LocationPicker";
+import SlideOver from "../components/SlideOver";
+import AssetEditor from "../components/AssetEditor";
 
 type Tank = { id: number; name: string; location_id?: number|null };
 type LocValue =
@@ -9,10 +11,12 @@ type LocValue =
   | { mode: "new"; company_id: number; location_name: string };
 
 export default function Tanks() {
-  const { getJSON, postJSON, patchJSON, del } = useApi();
+  const { getJSON, postJSON, del } = useApi();
   const [items, setItems] = useState<Tank[]>([]);
   const [name, setName] = useState("");
   const [loc, setLoc] = useState<LocValue | undefined>(undefined);
+
+  const [editing, setEditing] = useState<Tank | null>(null);
 
   async function load() {
     const rows = await getJSON("/dirac/admin/tanks");
@@ -27,11 +31,6 @@ export default function Tanks() {
     else { payload.company_id = loc.company_id; payload.location_name = loc.location_name; }
     await postJSON("/dirac/admin/tanks", payload);
     setName(""); setLoc(undefined); await load();
-  }
-
-  async function update(t: Tank) {
-    const newName = prompt("Nuevo nombre", t.name); if (!newName) return;
-    await patchJSON(`/dirac/admin/tanks/${t.id}`, { name: newName }); await load();
   }
 
   async function remove(id: number) {
@@ -56,17 +55,16 @@ export default function Tanks() {
         </div>
       </Section>
 
-      <Section title="Listado" right={null}>
+      <Section title="Listado (click en la fila para editar)" right={null}>
         <table className="min-w-full text-sm">
           <thead><tr className="text-left"><th className="px-2 py-1">ID</th><th className="px-2 py-1">Nombre</th><th className="px-2 py-1">Location</th><th className="px-2 py-1">Acciones</th></tr></thead>
           <tbody>
             {items.map(t => (
-              <tr key={t.id} className="border-t">
+              <tr key={t.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=>setEditing(t)}>
                 <td className="px-2 py-1">{t.id}</td>
                 <td className="px-2 py-1">{t.name}</td>
                 <td className="px-2 py-1">{t.location_id ?? "—"}</td>
-                <td className="px-2 py-1 space-x-2">
-                  <button onClick={()=>update(t)} className="text-blue-600 underline">Editar</button>
+                <td className="px-2 py-1 space-x-2" onClick={(e)=>e.stopPropagation()}>
                   <button onClick={()=>remove(t.id)} className="text-red-600 underline">Borrar</button>
                 </td>
               </tr>
@@ -74,6 +72,17 @@ export default function Tanks() {
           </tbody>
         </table>
       </Section>
+
+      <SlideOver open={!!editing} title={editing ? `Editar tanque #${editing.id}` : ""} onClose={()=>setEditing(null)}>
+        {editing && (
+          <AssetEditor
+            kind="tank"
+            item={editing}
+            onSaved={async ()=>{ setEditing(null); await load(); }}
+            onCancel={()=>setEditing(null)}
+          />
+        )}
+      </SlideOver>
     </div>
   );
 }

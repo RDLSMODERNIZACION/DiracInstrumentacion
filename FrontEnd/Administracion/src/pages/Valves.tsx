@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import Section from "../components/Section";
 import { useApi } from "../lib/api";
 import LocationPicker from "../components/LocationPicker";
+import SlideOver from "../components/SlideOver";
+import AssetEditor from "../components/AssetEditor";
 
 type Valve = { id: number; name: string; location_id?: number|null; kind?: string|null };
 type LocValue =
@@ -9,11 +11,13 @@ type LocValue =
   | { mode: "new"; company_id: number; location_name: string };
 
 export default function Valves() {
-  const { getJSON, postJSON, patchJSON, del } = useApi();
+  const { getJSON, postJSON, del } = useApi();
   const [items, setItems] = useState<Valve[]>([]);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("branch");
   const [loc, setLoc] = useState<LocValue | undefined>(undefined);
+
+  const [editing, setEditing] = useState<Valve | null>(null);
 
   async function load() {
     const rows = await getJSON("/dirac/admin/valves");
@@ -22,29 +26,18 @@ export default function Valves() {
   useEffect(()=>{ load(); }, []);
 
   async function create() {
-    if (!loc) return alert("Seleccioná ubicación existente o nueva");
+    if (!loc) return alert("Seleccioná ubicación");
     const payload: any = { name, kind };
-    if (loc.mode === "existing") {
-      payload.location_id = loc.location_id;
-    } else {
-      payload.company_id = loc.company_id;
-      payload.location_name = loc.location_name;
-    }
+    if (loc.mode === "existing") payload.location_id = loc.location_id;
+    else { payload.company_id = loc.company_id; payload.location_name = loc.location_name; }
     await postJSON("/dirac/admin/valves", payload);
     setName(""); setKind("branch"); setLoc(undefined);
     await load();
   }
 
-  async function update(v: Valve) {
-    const newName = prompt("Nuevo nombre", v.name); if (!newName) return;
-    await patchJSON(`/dirac/admin/valves/${v.id}`, { name: newName });
-    await load();
-  }
-
   async function remove(id: number) {
     if (!confirm("¿Eliminar válvula?")) return;
-    await del(`/dirac/admin/valves/${id}`);
-    await load();
+    await del(`/dirac/admin/valves/${id}`); await load();
   }
 
   return (
@@ -78,17 +71,16 @@ export default function Valves() {
         </div>
       </Section>
 
-      <Section title="Listado" right={null}>
+      <Section title="Listado (click en la fila para editar)" right={null}>
         <table className="min-w-full text-sm">
           <thead><tr className="text-left"><th className="px-2 py-1">ID</th><th className="px-2 py-1">Nombre</th><th className="px-2 py-1">Location</th><th className="px-2 py-1">Acciones</th></tr></thead>
           <tbody>
             {items.map(v => (
-              <tr key={v.id} className="border-t">
+              <tr key={v.id} className="border-t hover:bg-slate-50 cursor-pointer" onClick={()=>setEditing(v)}>
                 <td className="px-2 py-1">{v.id}</td>
                 <td className="px-2 py-1">{v.name}</td>
                 <td className="px-2 py-1">{v.location_id ?? "—"}</td>
-                <td className="px-2 py-1 space-x-2">
-                  <button onClick={()=>update(v)} className="text-blue-600 underline">Editar</button>
+                <td className="px-2 py-1 space-x-2" onClick={(e)=>e.stopPropagation()}>
                   <button onClick={()=>remove(v.id)} className="text-red-600 underline">Borrar</button>
                 </td>
               </tr>
@@ -96,6 +88,17 @@ export default function Valves() {
           </tbody>
         </table>
       </Section>
+
+      <SlideOver open={!!editing} title={editing ? `Editar válvula #${editing.id}` : ""} onClose={()=>setEditing(null)}>
+        {editing && (
+          <AssetEditor
+            kind="valve"
+            item={editing}
+            onSaved={async ()=>{ setEditing(null); await load(); }}
+            onCancel={()=>setEditing(null)}
+          />
+        )}
+      </SlideOver>
     </div>
   );
 }
