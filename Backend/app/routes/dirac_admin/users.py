@@ -1,58 +1,71 @@
 # app/routes/dirac_admin/users.py
-from fastapi import APIRouter, HTTPException, Query, Depends
-from psycopg.rows import dict_row
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from psycopg.rows import dict_row
 from app.db import get_conn
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-users"])
 
-# ---------- modelos ----------
+# ========= Modelos =========
+
 class UserCreateIn(BaseModel):
-    email: str = Field(..., description="Email (minúsculas)")
+    email: str = Field(..., description="Email (se guarda en minúsculas)")
     full_name: str | None = None
     phone: str | None = None
     password: str | None = Field(default="1234", min_length=4, max_length=128)
-    status: str | None = Field(default="active")  # user_status_enum
+    status: str | None = Field(default="active")          # user_status_enum: active|disabled
     company_id: int | None = None
-    role: str | None = Field(default="viewer")    # membership_role_enum
+    role: str | None = Field(default="viewer")            # membership_role_enum
     is_primary: bool = False
 
 class UserPatch(BaseModel):
     full_name: str | None = None
-    status: str | None = None  # 'active'|'disabled'
+    status: str | None = None                             # 'active' | 'disabled'
 
-# ---------- crear usuario (+ opcional membresía inmediata) ----------
+class PasswordChangeIn(BaseModel):
+    new_password: str = Field(..., min_length=4, max_length=128)
+
+# ========= Crear usuario (+ membresía opcional) =========
+
 @router.post("/users", summary="Crear usuario (y opcionalmente asignarlo a una empresa)")
 def create_user(payload: UserCreateIn):
     email = (payload.email or "").strip().lower()
     if not email:
         raise HTTPException(400, "email requerido")
 
+    status_in = (payload.status or "active").strip().lower()
+    role_in   = (payload.role   or "viewer").strip().lower()
+    pw        = (payload.password or "1234")
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT id FROM app_users WHERE lower(email)=%s", (email,))
+        # unicidad por email
+        cur.execute("SELECT 1 FROM app_users WHERE lower(email)=%s", (email,))
         if cur.fetchone():
             raise HTTPException(409, "Ya existe un usuario con ese email")
 
+        # crear usuario (CAST explícito al enum para evitar 22P02/DatatypeMismatch)
         cur.execute(
             """
             INSERT INTO app_users (email, full_name, phone, status, password_plain, is_superadmin)
-            VALUES (%s,%s,%s, COALESCE(%s,'active'), %s, false)
-            RETURNING id, email, full_name, phone, status, is_superadmin
+            VALUES (%s, %s, %s, %s::user_status_enum, %s, false)
+            RETURNING id, email, full_name, phone, status
             """,
-            (email, payload.full_name, payload.phone, payload.status, payload.password or "1234"),
+            (email, payload.full_name, payload.phone, status_in, pw),
         )
         u = cur.fetchone()
         new_user_id = u["id"]
 
+        # membresía opcional
         if payload.company_id is not None:
             cur.execute(
                 """
-                INSERT INTO company_users(company_id, user_id, role, is_primary)
+                INSERT INTO company_users (company_id, user_id, role, is_primary)
                 VALUES (%s, %s, %s::membership_role_enum, %s)
                 ON CONFLICT (company_id, user_id)
-                DO UPDATE SET role = EXCLUDED.role, is_primary = EXCLUDED.is_primary
+                DO UPDATE SET role = EXCLUDED.role,
+                              is_primary = EXCLUDED.is_primary
                 """,
-                (payload.company_id, new_user_id, payload.role or "viewer", payload.is_primary),
+                (payload.company_id, new_user_id, role_in, payload.is_primary),
             )
 
         conn.commit()
@@ -63,11 +76,12 @@ def create_user(payload: UserCreateIn):
             "phone": u["phone"],
             "status": u["status"],
             "company_id": payload.company_id,
-            "role": (payload.role or "viewer") if payload.company_id else None,
+            "role": role_in if payload.company_id else None,
             "is_primary": payload.is_primary if payload.company_id else None,
         }
 
-# ---------- listar ----------
+# ========= Listar =========
+
 @router.get("/users", summary="Listar usuarios o filtrar por empresa/localización/email")
 def list_users(
     email: str | None = Query(default=None),
@@ -75,9 +89,13 @@ def list_users(
     location_id: int | None = Query(default=None),
 ):
     email_q = (email or "").strip().lower() if email else None
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         if email_q:
-            cur.execute("SELECT id, email, full_name, status FROM app_users WHERE lower(email)=%s", (email_q,))
+            cur.execute(
+                "SELECT id, email, full_name, status FROM app_users WHERE lower(email)=%s",
+                (email_q,),
+            )
             return cur.fetchone() or {}
 
         if company_id and location_id:
@@ -122,16 +140,18 @@ def list_users(
         cur.execute("SELECT id, email, full_name, status FROM app_users ORDER BY id DESC LIMIT 500")
         return cur.fetchall() or []
 
-# ---------- patch ----------
+# ========= Patch =========
+
 @router.patch("/users/{user_id}", summary="Actualizar datos de un usuario")
 def patch_user(user_id: int, payload: UserPatch):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # Cast explícito al enum para status
         cur.execute(
             """
             UPDATE app_users
-               SET full_name = COALESCE(%s,full_name),
-                   status    = COALESCE(%s,status)
-             WHERE id=%s
+               SET full_name = COALESCE(%s, full_name),
+                   status    = COALESCE(%s::user_status_enum, status)
+             WHERE id = %s
          RETURNING id, email, full_name, status
             """,
             (payload.full_name, payload.status, user_id),
@@ -142,14 +162,42 @@ def patch_user(user_id: int, payload: UserPatch):
             raise HTTPException(404, "Usuario inexistente")
         return row
 
-# ---------- empresas del usuario ----------
+# ========= Cambiar password (alias admin) =========
+
+@router.post("/users/{user_id}/password", summary="Cambiar contraseña (alias admin)")
+def change_password_admin(user_id: int, body: PasswordChangeIn | None = None, new_password: str | None = Query(default=None)):
+    pw = (body.new_password if body else None) or new_password
+    if not pw:
+        raise HTTPException(400, "Falta new_password")
+    if len(pw) < 4 or len(pw) > 128:
+        raise HTTPException(400, "La contraseña debe tener entre 4 y 128 caracteres")
+
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            UPDATE app_users
+               SET password_plain = %s,
+                   password_updated_at = now()
+             WHERE id = %s
+         RETURNING id
+            """,
+            (pw, user_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(404, "Usuario inexistente")
+        conn.commit()
+    return {"ok": True, "user_id": user_id}
+
+# ========= Empresas del usuario =========
+
 @router.get("/users/{user_id}/companies", summary="Empresas del usuario y roles")
 def user_companies(user_id: int):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
             SELECT cu.company_id, c.name, cu.role, cu.is_primary
-            FROM company_users cu JOIN companies c ON c.id = cu.company_id
+            FROM company_users cu
+            JOIN companies c ON c.id = cu.company_id
             WHERE cu.user_id=%s
             ORDER BY cu.role DESC, c.name
             """,
@@ -157,10 +205,12 @@ def user_companies(user_id: int):
         )
         return cur.fetchall() or []
 
-# ---------- accesos a localizaciones ----------
+# ========= Accesos a localizaciones =========
+
 @router.get("/users/{user_id}/locations", summary="Accesos del usuario a localizaciones (efectivo y explícito)")
 def user_locations(user_id: int, company_id: int | None = Query(default=None)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # efectivos (heredados + explícitos)
         if company_id:
             cur.execute(
                 """
@@ -183,6 +233,7 @@ def user_locations(user_id: int, company_id: int | None = Query(default=None)):
             )
         effective = cur.fetchall() or []
 
+        # explícitos
         if company_id:
             cur.execute(
                 """
@@ -206,16 +257,21 @@ def user_locations(user_id: int, company_id: int | None = Query(default=None)):
                 (user_id,),
             )
         explicit = cur.fetchall() or []
+
         return {"effective": effective, "explicit": explicit}
 
 @router.delete("/users/{user_id}/locations/{location_id}", summary="Quitar acceso explícito a una localización")
 def delete_user_location(user_id: int, location_id: int):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("DELETE FROM user_location_access WHERE user_id=%s AND location_id=%s", (user_id, location_id))
+        cur.execute(
+            "DELETE FROM user_location_access WHERE user_id=%s AND location_id=%s",
+            (user_id, location_id),
+        )
         conn.commit()
         return {"ok": True}
 
-# ---------- ELIMINAR USUARIO ----------
+# ========= Eliminar usuario =========
+
 @router.delete("/users/{user_id}", summary="Eliminar usuario (?force=1 borra referencias)")
 def delete_user(user_id: int, force: bool = Query(default=False)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -240,8 +296,10 @@ def delete_user(user_id: int, force: bool = Query(default=False)):
                     409,
                     {
                         "message": "El usuario tiene referencias",
-                        "members": members, "locations": locs,
-                        "events": evs, "commands": cmds
+                        "members": members,
+                        "locations": locs,
+                        "events": evs,
+                        "commands": cmds,
                     },
                 )
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useApi } from "../lib/api";
 import Section from "./Section";
 
@@ -24,30 +24,26 @@ export default function UserEditor({
 
   // Membresías del usuario
   const [companies, setCompanies] = useState<Company[]>([]);
-  // Empresas del sistema para agregar
-  const [allCompanies, setAllCompanies] = useState<Array<{id:number; name:string}>>([]);
+  // Empresas para agregar
+  const [allCompanies, setAllCompanies] = useState<Array<{ id: number; name: string }>>([]);
   const [addCompanyId, setAddCompanyId] = useState<number | "">("");
   const [addRole, setAddRole] = useState("viewer");
 
-  // Gestión de localizaciones por empresa elegida
+  // Gestión de localizaciones
   const [manageCompanyId, setManageCompanyId] = useState<number | "">("");
   const [companyLocations, setCompanyLocations] = useState<LocationRow[]>([]);
   const [explicitLocationIds, setExplicitLocationIds] = useState<number[]>([]);
-  const [effectiveLocationIds, setEffectiveLocationIds] = useState<number[]>([]); // solo visual
+  const [effectiveLocationIds, setEffectiveLocationIds] = useState<number[]>([]);
 
   async function load() {
-    // Empresas del usuario
     const cs: Company[] = await getJSON(`/dirac/admin/users/${user.id}/companies`);
     setCompanies(cs);
     if (!manageCompanyId && cs.length) setManageCompanyId(cs[0].company_id);
 
-    // Empresas disponibles
     const all = await getJSON("/dirac/admin/companies");
     setAllCompanies(all.map((x: any) => ({ id: x.id, name: x.name })));
 
-    if (manageCompanyId) {
-      await loadLocationsForCompany(manageCompanyId as number);
-    }
+    if (manageCompanyId) await loadLocationsForCompany(manageCompanyId as number);
   }
 
   async function loadLocationsForCompany(cid: number) {
@@ -61,7 +57,7 @@ export default function UserEditor({
     setEffectiveLocationIds(effective);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { if (manageCompanyId) loadLocationsForCompany(manageCompanyId as number); }, [manageCompanyId]);
 
   async function saveProfile() {
@@ -69,6 +65,7 @@ export default function UserEditor({
     try {
       await patchJSON(`/dirac/admin/users/${user.id}`, { full_name: fullName || null });
       if (password.trim()) {
+        // endpoint simple para password del propio user; si no lo tenés, usá admin:
         await postJSON(`/dirac/users/${user.id}/password`, { new_password: password.trim() });
         setPassword("");
       }
@@ -82,13 +79,13 @@ export default function UserEditor({
 
   async function addMembership() {
     if (addCompanyId === "") return;
-    await postJSON(`/dirac/companies/${addCompanyId}/users`, { user_id: user.id, role: addRole, is_primary: false });
+    await postJSON(`/dirac/admin/companies/${addCompanyId}/members`, { user_id: user.id, role: addRole, is_primary: false });
     setAddCompanyId(""); setAddRole("viewer");
     await load();
   }
 
   async function removeMembership(cid: number) {
-    if (!confirm("Quitar al usuario de esta empresa?")) return;
+    if (!confirm("¿Quitar al usuario de esta empresa?")) return;
     await del(`/dirac/admin/companies/${cid}/users/${user.id}`);
     if (manageCompanyId === cid) setManageCompanyId("");
     await load();
@@ -100,12 +97,23 @@ export default function UserEditor({
   async function toggleExplicit(locId: number) {
     const checked = !explicitLocationIds.includes(locId);
     if (checked) {
-      // Conceder explícito como 'control' por defecto
-      await postJSON(`/dirac/locations/${locId}/users/${user.id}`, { access: "control" });
+      await postJSON(`/dirac/locations/${locId}/users/${user.id}`, { access: "control" }); // concede explícito
       setExplicitLocationIds(prev => [...new Set([...prev, locId])]);
     } else {
-      await del(`/dirac/admin/users/${user.id}/locations/${locId}`);
+      await del(`/dirac/admin/users/${user.id}/locations/${locId}`); // quita explícito
       setExplicitLocationIds(prev => prev.filter(x => x !== locId));
+    }
+  }
+
+  // 🔴 Eliminar usuario (forzado)
+  async function deleteUser() {
+    if (!confirm(`¿Eliminar definitivamente al usuario ${user.email}? Esto remueve membresías y accesos.`)) return;
+    try {
+      await del(`/dirac/admin/users/${user.id}?force=1`);
+      onSaved();       // refrescá lista de usuarios del padre
+      onClose();       // cerrá el editor
+    } catch (e: any) {
+      setErr(e?.message || String(e));
     }
   }
 
@@ -114,7 +122,9 @@ export default function UserEditor({
   return (
     <div className="space-y-6">
       {/* PERFIL */}
-      <Section title="Perfil" right={null}>
+      <Section title="Perfil" right={
+        <button onClick={deleteUser} className="text-red-600 underline">Eliminar usuario</button>
+      }>
         <div className="space-y-3">
           <div className="text-sm"><b>Email:</b> {user.email}</div>
           <div>
@@ -190,12 +200,12 @@ export default function UserEditor({
         </div>
       </Section>
 
-      {/* LOCALIZACIONES explícitas de la empresa seleccionada */}
+      {/* LOCALIZACIONES explícitas */}
       {manageCompanyId !== "" && (
         <Section title={`Localizaciones (empresa #${manageCompanyId})`} right={null}>
           <div className="text-xs text-slate-500 mb-2">
             Tildás/destildás <b>accesos explícitos</b>. Si el rol de empresa ya otorga acceso,
-            quitar el explícito <i>no</i> oculta la localización (el acceso heredado seguirá vigente).
+            quitar el explícito <i>no</i> oculta la localización (el acceso heredado sigue vigente).
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {companyLocations.map(l => {
