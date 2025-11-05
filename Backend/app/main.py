@@ -1,3 +1,4 @@
+# app/main.py
 import os
 import logging
 from fastapi import FastAPI, Response
@@ -7,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.db import get_conn, close_pool
 
-# ===== Rutas existentes =====
+# ===== Rutas base (operación / visualización) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
@@ -15,17 +16,17 @@ from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
 from app.routes.kpi import router as kpi_router
 
-# ===== Dirac (módulos de operación) =====
+# ===== Dirac (operación) =====
 from app.routes.dirac.me import router as dirac_me_router
-from app.routes.dirac.users import router as dirac_users_router
+# OJO: NO importamos app.routes.dirac.users (queda deshabilitado)
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
 
-# ===== Administración (CRUD completo) =====
-# Asegurate de tener app/routes/dirac_admin/__init__.py (vacío)
+# ===== Administración (CRUD abierto) =====
+# (asegurate de tener app/routes/dirac_admin/__init__.py vacío)
 from app.routes.dirac_admin.companies import router as admin_companies_router
-from app.routes.dirac_admin.users import router as admin_users_router
+from app.routes.dirac_admin.users import router as admin_users_router     # ← /dirac/admin/users
 from app.routes.dirac_admin.locations import router as admin_locations_router
 from app.routes.dirac_admin.tanks import router as admin_tanks_router
 from app.routes.dirac_admin.pumps import router as admin_pumps_router
@@ -92,24 +93,25 @@ def health_db():
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
-# ===== Rutas =====
+# ===== Rutas (operación) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
 app.include_router(infraestructura_router)
-app.include_router(kpi_router)  # /kpi/*
+app.include_router(kpi_router)
 
 # ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
-app.include_router(dirac_users_router)
+# No incluimos /dirac/users (queda deshabilitado para evitar confusiones)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
-# ===== Administración (CRUD) =====
+# ===== Administración (CRUD abierto) =====
+# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations, /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves
 app.include_router(admin_companies_router)
-app.include_router(admin_users_router)
+app.include_router(admin_users_router)       # ← este es el que debe usar el front para crear usuarios
 app.include_router(admin_locations_router)
 app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
