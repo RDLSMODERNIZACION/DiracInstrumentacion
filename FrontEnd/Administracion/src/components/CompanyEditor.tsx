@@ -3,9 +3,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import Section from "./Section";
 import { useApi } from "../lib/api";
 
-type Company = { id: number; name: string; status?: string; legal_name?: string|null; cuit?: string|null };
-type CompanyUserRow = { user_id: number; email: string; full_name?: string; role: string; is_primary: boolean };
-type UserLite = { id: number; email: string; full_name?: string; status: string };
+type Company = { id: number; name: string; status?: string; legal_name?: string | null; cuit?: string | null };
+type CompanyUserRow = {
+  user_id: number;
+  email: string;
+  full_name?: string;
+  role: "owner" | "admin" | "operator" | "technician" | "viewer";
+  is_primary: boolean;
+  status?: "active" | "disabled";
+};
+type UserLite = { id: number; email: string; full_name?: string; status: "active" | "disabled" };
 
 export default function CompanyEditor({
   company,
@@ -32,32 +39,36 @@ export default function CompanyEditor({
   const [newEmail, setNewEmail] = useState("");
   const [newFullName, setNewFullName] = useState("");
   const [newPassword, setNewPassword] = useState("1234");
-  const [newRole, setNewRole] = useState("viewer");
+  const [newRole, setNewRole] = useState<CompanyUserRow["role"]>("viewer");
 
   // Edición en tabla Usuarios
-  const [roleEdits, setRoleEdits] = useState<Record<number,string>>({}); // por user_id
-  const [statusEdits, setStatusEdits] = useState<Record<number,string>>({}); // 'active'|'disabled'
+  const [roleEdits, setRoleEdits] = useState<Record<number, CompanyUserRow["role"]>>({}); // por user_id
+  const [statusEdits, setStatusEdits] = useState<Record<number, "active" | "disabled">>({}); // 'active'|'disabled'
 
   async function loadUsers() {
-    const r: CompanyUserRow[] = await getJSON(`/dirac/companies/${company.id}/users`);
+    // ▶️ ahora usamos el endpoint admin que ya incluye status del usuario
+    const r: CompanyUserRow[] = await getJSON(`/dirac/admin/companies/${company.id}/users`);
     setRows(r);
-    // precargar selects
-    const roleMap: Record<number,string> = {};
-    const statusMap: Record<number,string> = {};
+
+    // precargar selects a partir de la misma respuesta (sin N requests)
+    const roleMap: Record<number, CompanyUserRow["role"]> = {};
+    const statusMap: Record<number, "active" | "disabled"> = {};
     for (const u of r) {
       roleMap[u.user_id] = u.role;
-      // status hay que pedirlo por admin/users?email=...
-      const ui = await getJSON(`/dirac/admin/users?email=${encodeURIComponent(u.email)}`);
-      statusMap[u.user_id] = ui?.status ?? "active";
+      statusMap[u.user_id] = (u.status as any) ?? "active";
     }
     setRoleEdits(roleMap);
     setStatusEdits(statusMap);
   }
 
-  useEffect(()=>{ if (tab === "usuarios") loadUsers(); }, [tab]);
+  useEffect(() => {
+    if (tab === "usuarios") loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   async function saveCompany() {
-    setSaving(true); setErr(null);
+    setSaving(true);
+    setErr(null);
     try {
       await patchJSON(`/dirac/admin/companies/${company.id}`, {
         name: name.trim() || null,
@@ -65,7 +76,7 @@ export default function CompanyEditor({
         cuit: cuit.trim() || null,
       });
       onSaved();
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e?.message || String(e));
     } finally {
       setSaving(false);
@@ -75,79 +86,104 @@ export default function CompanyEditor({
   async function createUser() {
     setErr(null);
     try {
-      // 1) crear usuario
-      await postJSON(`/dirac/users`, {
+      // ✅ Crear y asignar a esta empresa en UN solo paso (endpoint abierto admin)
+      await postJSON(`/dirac/admin/users`, {
         email: newEmail.trim(),
         full_name: newFullName.trim() || null,
         password: newPassword,
-      });
-      // 2) agregar a la empresa con rol
-      await postJSON(`/dirac/companies/${company.id}/users`, {
-        user_id: (await getJSON(`/dirac/admin/users?email=${encodeURIComponent(newEmail.trim())}`))?.id,
-        role: newRole,
+        status: "active",
+        company_id: company.id,
+        role: newRole, // 'viewer' | 'technician' | 'operator' | 'admin' | 'owner'
         is_primary: false,
       });
-      setNewEmail(""); setNewFullName(""); setNewPassword("1234"); setNewRole("viewer");
+
+      setNewEmail("");
+      setNewFullName("");
+      setNewPassword("1234");
+      setNewRole("viewer");
       await loadUsers();
       setTab("usuarios");
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e?.message || String(e));
     }
   }
 
   async function applyRole(user_id: number) {
-    const role = roleEdits[user_id];
-    await postJSON(`/dirac/companies/${company.id}/users`, { user_id, role, is_primary: false });
-    await loadUsers();
+    try {
+      const role = roleEdits[user_id];
+      await postJSON(`/dirac/admin/companies/${company.id}/members`, { user_id, role, is_primary: false });
+      await loadUsers();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
   async function applyStatus(user_id: number) {
-    const status = statusEdits[user_id]; // 'active'|'disabled'
-    await patchJSON(`/dirac/admin/users/${user_id}`, { status });
-    await loadUsers();
+    try {
+      const status = statusEdits[user_id]; // 'active'|'disabled'
+      await patchJSON(`/dirac/admin/users/${user_id}`, { status });
+      await loadUsers();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
   async function removeFromCompany(user_id: number) {
-    if (!confirm("¿Quitar usuario de esta empresa?")) return;
-    await del(`/dirac/admin/companies/${company.id}/users/${user_id}`);
-    await loadUsers();
+    try {
+      if (!confirm("¿Quitar usuario de esta empresa?")) return;
+      await del(`/dirac/admin/companies/${company.id}/users/${user_id}`);
+      await loadUsers();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
   }
 
   return (
     <div className="space-y-6">
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b">
-        {["perfil","crear","usuarios"].map(t => (
+        {["perfil", "crear", "usuarios"].map((t) => (
           <button
             key={t}
-            onClick={()=>setTab(t as any)}
-            className={"px-3 py-2 -mb-px border-b-2 " + (tab===t ? "border-slate-900 font-medium" : "border-transparent text-slate-500")}
+            onClick={() => setTab(t as any)}
+            className={
+              "px-3 py-2 -mb-px border-b-2 " +
+              (tab === t ? "border-slate-900 font-medium" : "border-transparent text-slate-500")
+            }
           >
-            {t==="perfil"?"Perfil":t==="crear"?"Crear usuario":"Usuarios"}
+            {t === "perfil" ? "Perfil" : t === "crear" ? "Crear usuario" : "Usuarios"}
           </button>
         ))}
       </div>
 
-      {tab==="perfil" && (
+      {tab === "perfil" && (
         <Section title={`Empresa #${company.id}`} right={null}>
           <div className="space-y-3">
             <div>
               <div className="text-xs text-slate-500">Nombre</div>
-              <input className="border rounded px-3 py-2 w-full" value={name} onChange={(e)=>setName(e.target.value)} />
+              <input className="border rounded px-3 py-2 w-full" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div>
               <div className="text-xs text-slate-500">Razón social (opcional)</div>
-              <input className="border rounded px-3 py-2 w-full" value={legalName} onChange={(e)=>setLegalName(e.target.value)} />
+              <input
+                className="border rounded px-3 py-2 w-full"
+                value={legalName}
+                onChange={(e) => setLegalName(e.target.value)}
+              />
             </div>
             <div>
               <div className="text-xs text-slate-500">CUIT (opcional)</div>
-              <input className="border rounded px-3 py-2 w-full" value={cuit} onChange={(e)=>setCuit(e.target.value)} />
+              <input className="border rounded px-3 py-2 w-full" value={cuit} onChange={(e) => setCuit(e.target.value)} />
             </div>
 
             {err && <div className="text-sm text-red-600">{err}</div>}
 
             <div className="flex justify-end">
-              <button onClick={saveCompany} disabled={saving} className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-60">
+              <button
+                onClick={saveCompany}
+                disabled={saving}
+                className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-60"
+              >
                 {saving ? "Guardando…" : "Guardar"}
               </button>
             </div>
@@ -155,25 +191,43 @@ export default function CompanyEditor({
         </Section>
       )}
 
-      {tab==="crear" && (
+      {tab === "crear" && (
         <Section title="Crear usuario y agregar a esta empresa" right={null}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <div className="text-xs text-slate-500">Email</div>
-              <input className="border rounded px-3 py-2 w-full" value={newEmail} onChange={(e)=>setNewEmail(e.target.value)} />
+              <input
+                className="border rounded px-3 py-2 w-full"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="usuario@example.com"
+              />
             </div>
             <div>
               <div className="text-xs text-slate-500">Nombre (opcional)</div>
-              <input className="border rounded px-3 py-2 w-full" value={newFullName} onChange={(e)=>setNewFullName(e.target.value)} />
+              <input
+                className="border rounded px-3 py-2 w-full"
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                placeholder="Nombre Apellido"
+              />
             </div>
             <div>
               <div className="text-xs text-slate-500">Contraseña</div>
-              <input className="border rounded px-3 py-2 w-full" value={newPassword}
-                     onChange={(e)=>setNewPassword(e.target.value)} minLength={4} />
+              <input
+                className="border rounded px-3 py-2 w-full"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength={4}
+              />
             </div>
             <div>
               <div className="text-xs text-slate-500">Rol</div>
-              <select className="border rounded px-3 py-2 w-full" value={newRole} onChange={(e)=>setNewRole(e.target.value)}>
+              <select
+                className="border rounded px-3 py-2 w-full"
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as CompanyUserRow["role"])}
+              >
                 <option value="viewer">viewer</option>
                 <option value="technician">technician</option>
                 <option value="operator">operator</option>
@@ -186,12 +240,14 @@ export default function CompanyEditor({
           {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
 
           <div className="flex justify-end mt-3">
-            <button onClick={createUser} className="px-3 py-1.5 rounded bg-slate-900 text-white">Crear y agregar</button>
+            <button onClick={createUser} className="px-3 py-1.5 rounded bg-slate-900 text-white">
+              Crear y agregar
+            </button>
           </div>
         </Section>
       )}
 
-      {tab==="usuarios" && (
+      {tab === "usuarios" && (
         <Section title="Usuarios de esta empresa" right={null}>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
@@ -205,7 +261,7 @@ export default function CompanyEditor({
                 </tr>
               </thead>
               <tbody>
-                {rows.map(u => (
+                {rows.map((u) => (
                   <tr key={u.user_id} className="border-t">
                     <td className="px-2 py-1">{u.email}</td>
                     <td className="px-2 py-1">{u.full_name ?? "—"}</td>
@@ -213,7 +269,7 @@ export default function CompanyEditor({
                       <select
                         className="border rounded px-2 py-1"
                         value={roleEdits[u.user_id] ?? u.role}
-                        onChange={(e)=>setRoleEdits(prev=>({ ...prev, [u.user_id]: e.target.value }))}
+                        onChange={(e) => setRoleEdits((prev) => ({ ...prev, [u.user_id]: e.target.value as any }))}
                       >
                         <option value="viewer">viewer</option>
                         <option value="technician">technician</option>
@@ -221,26 +277,36 @@ export default function CompanyEditor({
                         <option value="admin">admin</option>
                         <option value="owner">owner</option>
                       </select>
-                      <button className="ml-2 text-blue-600 underline" onClick={()=>applyRole(u.user_id)}>Guardar</button>
+                      <button className="ml-2 text-blue-600 underline" onClick={() => applyRole(u.user_id)}>
+                        Guardar
+                      </button>
                     </td>
                     <td className="px-2 py-1">
                       <select
                         className="border rounded px-2 py-1"
-                        value={statusEdits[u.user_id] ?? "active"}
-                        onChange={(e)=>setStatusEdits(prev=>({ ...prev, [u.user_id]: e.target.value }))}
+                        value={statusEdits[u.user_id] ?? u.status ?? "active"}
+                        onChange={(e) => setStatusEdits((prev) => ({ ...prev, [u.user_id]: e.target.value as any }))}
                       >
                         <option value="active">active</option>
                         <option value="disabled">disabled</option>
                       </select>
-                      <button className="ml-2 text-blue-600 underline" onClick={()=>applyStatus(u.user_id)}>Aplicar</button>
+                      <button className="ml-2 text-blue-600 underline" onClick={() => applyStatus(u.user_id)}>
+                        Aplicar
+                      </button>
                     </td>
                     <td className="px-2 py-1">
-                      <button className="text-red-600 underline" onClick={()=>removeFromCompany(u.user_id)}>Quitar de empresa</button>
+                      <button className="text-red-600 underline" onClick={() => removeFromCompany(u.user_id)}>
+                        Quitar de empresa
+                      </button>
                     </td>
                   </tr>
                 ))}
-                {rows.length===0 && (
-                  <tr><td colSpan={5} className="px-2 py-6 text-center text-slate-500">Sin usuarios en esta empresa</td></tr>
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-6 text-center text-slate-500">
+                      Sin usuarios en esta empresa
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -249,7 +315,9 @@ export default function CompanyEditor({
       )}
 
       <div className="flex justify-end">
-        <button onClick={onClose} className="px-3 py-1.5 rounded bg-slate-200">Cerrar</button>
+        <button onClick={onClose} className="px-3 py-1.5 rounded bg-slate-200">
+          Cerrar
+        </button>
       </div>
     </div>
   );
