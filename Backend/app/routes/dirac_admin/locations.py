@@ -1,52 +1,21 @@
 # app/routes/dirac_admin/locations.py
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
 from app.db import get_conn
-from app.security import require_user
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-locations"])
 
 
-def assert_is_admin_in_company(cur, user: dict, company_id: int) -> None:
-    """
-    Requiere owner/admin en la empresa, salvo que el usuario sea superadmin (bypass).
-    """
-    if user.get("superadmin"):
-        return
-    cur.execute(
-        """
-        SELECT EXISTS(
-          SELECT 1
-          FROM company_users
-          WHERE user_id=%s AND company_id=%s
-            AND role IN ('owner','admin')
-        ) AS ok
-        """,
-        (user["user_id"], company_id),
-    )
-    if not cur.fetchone()["ok"]:
-        raise HTTPException(403, "Requiere owner/admin en la empresa (o superadmin)")
-
-
-@router.get("/locations", summary="Listar localizaciones (admin)")
-def list_locations(company_id: int | None = Query(default=None), user=Depends(require_user)):
+@router.get("/locations", summary="Listar localizaciones (abierto)")
+def list_locations(company_id: int | None = Query(default=None)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Si no es superadmin, debe ser owner/admin en alguna empresa
-        if not user.get("superadmin"):
-            cur.execute(
-                "SELECT EXISTS(SELECT 1 FROM company_users WHERE user_id=%s AND role IN ('owner','admin')) AS ok",
-                (user["user_id"],),
-            )
-            if not cur.fetchone()["ok"]:
-                raise HTTPException(403, "Requiere owner/admin")
-
-        if company_id:
+        if company_id is not None:
             cur.execute(
                 """
                 SELECT id, name, company_id, address, lat, lon
-                FROM locations
-                WHERE company_id=%s
-                ORDER BY name
+                  FROM locations
+                 WHERE company_id = %s
+                 ORDER BY name
                 """,
                 (company_id,),
             )
@@ -54,22 +23,23 @@ def list_locations(company_id: int | None = Query(default=None), user=Depends(re
             cur.execute(
                 """
                 SELECT id, name, company_id, address, lat, lon
-                FROM locations
-                ORDER BY company_id, name
+                  FROM locations
+                 ORDER BY company_id, name
                 """
             )
         return cur.fetchall() or []
 
 
-@router.get("/locations/{location_id}/stats", summary="Estadísticas de una localización (conteo de activos)")
-def location_stats(location_id: int, user=Depends(require_user)):
+@router.get(
+    "/locations/{location_id}/stats",
+    summary="Estadísticas de una localización (conteo de activos) (abierto)",
+)
+def location_stats(location_id: int):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute("SELECT id, name, company_id FROM locations WHERE id=%s", (location_id,))
         loc = cur.fetchone()
         if not loc:
             raise HTTPException(404, "Localización inexistente")
-
-        assert_is_admin_in_company(cur, user, loc["company_id"])
 
         cur.execute("SELECT COUNT(*) AS n FROM tanks  WHERE location_id=%s", (location_id,))
         tk = cur.fetchone()["n"]
@@ -86,22 +56,21 @@ def location_stats(location_id: int, user=Depends(require_user)):
         }
 
 
-@router.patch("/locations/{location_id}", summary="Actualizar localización (nombre/dirección/coords)")
+@router.patch(
+    "/locations/{location_id}",
+    summary="Actualizar localización (nombre/dirección/coords) (abierto)",
+)
 def patch_location(
     location_id: int,
     name: str | None = Query(default=None),
     address: str | None = Query(default=None),
     lat: float | None = Query(default=None),
     lon: float | None = Query(default=None),
-    user=Depends(require_user),
 ):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT id, company_id FROM locations WHERE id=%s", (location_id,))
-        loc = cur.fetchone()
-        if not loc:
+        cur.execute("SELECT id FROM locations WHERE id=%s", (location_id,))
+        if not cur.fetchone():
             raise HTTPException(404, "Localización inexistente")
-
-        assert_is_admin_in_company(cur, user, loc["company_id"])
 
         try:
             cur.execute(
@@ -124,16 +93,18 @@ def patch_location(
             raise HTTPException(400, f"Update location error: {e}")
 
 
-@router.delete("/locations/{location_id}", summary="Eliminar localización (opcional mover activos con ?move_to=ID)")
-def delete_location(location_id: int, move_to: int | None = Query(default=None), user=Depends(require_user)):
+@router.delete(
+    "/locations/{location_id}",
+    summary="Eliminar localización (opcional mover activos con ?move_to=ID) (abierto)",
+)
+def delete_location(location_id: int, move_to: int | None = Query(default=None)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute("SELECT id, company_id FROM locations WHERE id=%s", (location_id,))
         loc = cur.fetchone()
         if not loc:
             raise HTTPException(404, "Localización inexistente")
 
-        assert_is_admin_in_company(cur, user, loc["company_id"])
-
+        # Conteos actuales
         cur.execute("SELECT COUNT(*) AS n FROM tanks  WHERE location_id=%s", (location_id,))
         tk = cur.fetchone()["n"]
         cur.execute("SELECT COUNT(*) AS n FROM pumps  WHERE location_id=%s", (location_id,))
@@ -142,6 +113,7 @@ def delete_location(location_id: int, move_to: int | None = Query(default=None),
         va = cur.fetchone()["n"]
         total = (tk or 0) + (pu or 0) + (va or 0)
 
+        # Si se pide mover, validamos destino y movemos antes de borrar
         if move_to is not None:
             if move_to == location_id:
                 raise HTTPException(400, "move_to no puede ser la misma localización")
@@ -150,6 +122,8 @@ def delete_location(location_id: int, move_to: int | None = Query(default=None),
             dst = cur.fetchone()
             if not dst:
                 raise HTTPException(400, f"move_to={move_to} no existe")
+
+            # Mantener integridad: mover dentro de la misma empresa
             if dst["company_id"] != loc["company_id"]:
                 raise HTTPException(400, "move_to debe pertenecer a la misma empresa")
 
@@ -160,6 +134,7 @@ def delete_location(location_id: int, move_to: int | None = Query(default=None),
             conn.commit()
             return {"ok": True, "moved_to": move_to, "deleted": location_id}
 
+        # Si NO se mueve y hay activos, impedimos borrado (para no dejar huérfanos)
         if total > 0:
             raise HTTPException(
                 409,
