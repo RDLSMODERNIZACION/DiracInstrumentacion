@@ -28,7 +28,7 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         try:
             if payload.company_id is None:
-                # Sin empresa no aplica el índice único parcial: insert simple
+                # Sin empresa (no aplica el índice único parcial): insert simple
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
@@ -36,7 +36,7 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
                     (payload.name, payload.address, payload.lat, payload.lon, None)
                 )
             else:
-                # Idempotente: si ya existe, actualiza address/lat/lon y devuelve el mismo id
+                # Idempotente: si ya existe (company_id,name), actualiza address/lat/lon y devuelve el mismo id
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
@@ -45,10 +45,12 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
                     "RETURNING id, name, company_id",
                     (payload.name, payload.address, payload.lat, payload.lon, payload.company_id)
                 )
+
             row = cur.fetchone()
             conn.commit()
             return row
+
         except Exception as e:
             conn.rollback()
-            # Devuelve el detalle en 400 (no 500) si hubiera otra constraint
+            # Mapeamos cualquier otra constraint como 400 (en vez de 500)
             raise HTTPException(400, f"Create location error: {e}")
