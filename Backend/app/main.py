@@ -15,12 +15,21 @@ from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
 from app.routes.kpi import router as kpi_router
 
-# ===== Dirac (nuevo, en carpeta separada) =====
+# ===== Dirac (módulos de operación) =====
 from app.routes.dirac.me import router as dirac_me_router
 from app.routes.dirac.users import router as dirac_users_router
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
+
+# ===== Administración (CRUD completo) =====
+# Asegurate de tener app/routes/dirac_admin/__init__.py (vacío)
+from app.routes.dirac_admin.companies import router as admin_companies_router
+from app.routes.dirac_admin.users import router as admin_users_router
+from app.routes.dirac_admin.locations import router as admin_locations_router
+from app.routes.dirac_admin.tanks import router as admin_tanks_router
+from app.routes.dirac_admin.pumps import router as admin_pumps_router
+from app.routes.dirac_admin.valves import router as admin_valves_router
 
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -28,7 +37,6 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
 )
-# Alinear logs de uvicorn con LOG_LEVEL
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 
@@ -92,9 +100,17 @@ app.include_router(arduino_router)
 app.include_router(infraestructura_router)
 app.include_router(kpi_router)  # /kpi/*
 
-# ===== Dirac routers (nuevos) =====
+# ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_users_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
+
+# ===== Administración (CRUD) =====
+app.include_router(admin_companies_router)
+app.include_router(admin_users_router)
+app.include_router(admin_locations_router)
+app.include_router(admin_tanks_router)
+app.include_router(admin_pumps_router)
+app.include_router(admin_valves_router)

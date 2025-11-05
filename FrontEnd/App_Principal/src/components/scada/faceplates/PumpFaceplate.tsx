@@ -1,6 +1,7 @@
 // src/components/scada/faceplates/PumpFaceplate.tsx
 import React from "react";
 import { Badge, KeyVal } from "../ui";
+import { authHeaders } from "../../../lib/http";
 
 type Tone = "ok" | "warn" | "bad";
 
@@ -14,7 +15,11 @@ async function postJSON(path: string, body: any) {
   const url = new URL(`${API_BASE}${path}`);
   const res = await fetch(url.toString(), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...authHeaders(), // 👈 envía Authorization: Basic ... si hay login
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -47,8 +52,8 @@ export function PumpFaceplate({ pump }: { pump: any }) {
   const [note, setNote] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
-  // “Contraseña” (debe ser exactamente 1234 para habilitar comandos)
-  const [pass, setPass] = React.useState<string>("");
+  // PIN de la bomba (4 dígitos, lo valida el backend)
+  const [pin, setPin] = React.useState<string>("");
 
   // Online: prioridad backend; si no viene, usar age_sec <= 60
   const ageSec = Number.isFinite(pump?.age_sec)
@@ -69,8 +74,8 @@ export function PumpFaceplate({ pump }: { pump: any }) {
 
   const tone: Tone = localState === "run" ? "ok" : "warn";
 
-  const passOk = pass === "1234";
-  const canSend = online && passOk && !busy;
+  const pinValid = /^\d{4}$/.test(pin);
+  const canSend = online && pinValid && !busy;
 
   async function send(kind: "START" | "STOP") {
     setErr(null);
@@ -80,8 +85,8 @@ export function PumpFaceplate({ pump }: { pump: any }) {
       setErr("No se puede operar: la bomba está offline.");
       return;
     }
-    if (!passOk) {
-      setErr("Ingresá la autorización correcta.");
+    if (!pinValid) {
+      setErr("Ingresá el PIN de 4 dígitos.");
       return;
     }
 
@@ -91,10 +96,10 @@ export function PumpFaceplate({ pump }: { pump: any }) {
     setLocalState(kind === "START" ? "run" : "stop");
 
     try {
-      await postJSON("/arduino-controler/command", {
-        pump_id: pumpNumId,
+      // Nuevo endpoint con validación de permisos y PIN en backend
+      await postJSON(`/dirac/pumps/${pumpNumId}/command`, {
         action: kind === "START" ? "start" : "stop",
-        user: "operador",
+        pin,
       });
       setNote("Comando enviado.");
     } catch (e: any) {
@@ -106,15 +111,14 @@ export function PumpFaceplate({ pump }: { pump: any }) {
     }
   }
 
-  // Handler del input: permitir cualquier cantidad de dígitos, filtrando no-numéricos.
-  const onPassChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handler del input (solo dígitos)
+  const onPinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value ?? "";
-    // solo dígitos
     const digitsOnly = raw.replace(/\D+/g, "");
-    setPass(digitsOnly);
+    setPin(digitsOnly.slice(0, 4));
   };
 
-  // Evitar que eventos de teclado/click burbujeen y “saquen” el foco
+  // Evitar que eventos de teclado/click burbujeen
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
   return (
@@ -135,19 +139,19 @@ export function PumpFaceplate({ pump }: { pump: any }) {
         <KeyVal k="Ubicación" v={pump?.location_name ?? pump?.locationName ?? "—"} />
       </div>
 
-      {/* Autorización (input multi-dígito; clave válida: 1234) */}
+      {/* Autorización (PIN) */}
       <div className="p-4 bg-slate-50 rounded-xl">
         <div className="text-slate-500 mb-2">Autorización</div>
         <div className="flex items-center gap-3">
           <input
-            value={pass}
-            onChange={onPassChange}
+            value={pin}
+            onChange={onPinChange}
             onKeyDown={stop}
             onMouseDown={stop}
             autoFocus
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder=""
+            placeholder="PIN (4 dígitos)"
             className="w-28 text-center rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           />
           {!online && <span className="text-xs text-slate-500">La bomba debe estar Online para operar.</span>}
@@ -163,7 +167,7 @@ export function PumpFaceplate({ pump }: { pump: any }) {
             onClick={() => send("START")}
             disabled={!canSend}
             className="px-3 py-1.5 rounded-xl bg-slate-900 text-white disabled:bg-slate-200 disabled:text-slate-400"
-            title={!online ? "Requiere online" : !passOk ? "Autorización inválida" : "Enviar START"}
+            title={!online ? "Requiere online" : !pinValid ? "Ingresá el PIN (4 dígitos)" : "Enviar START"}
           >
             {busy === "START" ? "…" : "START"}
           </button>
@@ -172,7 +176,7 @@ export function PumpFaceplate({ pump }: { pump: any }) {
             onClick={() => send("STOP")}
             disabled={!canSend}
             className="px-3 py-1.5 rounded-xl bg-slate-200 disabled:opacity-50"
-            title={!online ? "Requiere online" : !passOk ? "Autorización inválida" : "Enviar STOP"}
+            title={!online ? "Requiere online" : !pinValid ? "Ingresá el PIN (4 dígitos)" : "Enviar STOP"}
           >
             {busy === "STOP" ? "…" : "STOP"}
           </button>

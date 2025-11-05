@@ -8,6 +8,7 @@ import { usePlant } from "./hooks/usePlant";
 import { TankFaceplate } from "./faceplates/TankFaceplate";
 import { PumpFaceplate } from "./faceplates/PumpFaceplate";
 import EmbeddedAppFrame from "./scada/EmbeddedSidebar";
+import LogoutButton from "../auth/LogoutButton";
 
 const DEFAULT_THRESHOLDS = { lowCritical: 10, lowWarning: 25, highWarning: 80, highCritical: 90 };
 
@@ -27,13 +28,21 @@ const app2Src = import.meta.env.DEV
 
 export default function ScadaApp({ initialUser }: { initialUser?: User }) {
   const [drawer, setDrawer] = React.useState<{ type: "tank" | "pump" | null; id?: string | number | null }>({ type: null });
-  const [user] = React.useState<User>(initialUser || { id: "u1", name: "operador@rdls", role: "operador" });
+  // El usuario viene desde AppRoot (derivado de /dirac/me/locations). Fallback viewer simple.
+  const [user] = React.useState<User>(
+    initialUser ||
+      ({
+        id: "me",
+        name: "usuario",
+        role: "viewer",
+      } as unknown as User)
+  );
   const [view, setView] = React.useState<View>("operaciones"); // 👈 vista actual
 
   // 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
 
-  const { plant, setPlant, loading, err, kpis } = usePlant(pollMs);
+  const { plant, loading, err, kpis } = usePlant(pollMs);
 
   // === statusByKey para tanques y bombas ===
   const statusByKey = React.useMemo(() => {
@@ -147,14 +156,9 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{user.company?.name ?? "—"}</span>
-                <button
-                  onClick={() => { localStorage.removeItem("rdls_user"); window.location.reload(); }}
-                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-sm"
-                >
-                  Cerrar sesión
-                </button>
+                <LogoutButton />
               </div>
             </div>
           </header>

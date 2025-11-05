@@ -1,5 +1,6 @@
 // src/components/scada/hooks/usePlant.ts
 import * as React from "react";
+import { authHeaders } from "../../../lib/http";
 
 type Thresholds = { lowCritical: number; lowWarning: number; highWarning: number; highCritical: number };
 const DEFAULT_THRESHOLDS: Thresholds = { lowCritical: 10, lowWarning: 25, highWarning: 80, highCritical: 90 };
@@ -80,7 +81,11 @@ async function getJSON(path: string) {
   url.searchParams.set("__ts", String(Date.now())); // cache-buster
   const res = await fetch(url.toString(), {
     method: "GET",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    headers: {
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+      ...authHeaders(), // 👈 agrega Authorization: Basic ... si hay login
+    },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status} ${res.statusText}`);
@@ -154,8 +159,7 @@ function mapPumps(rows: any[]): Pump[] {
     const location_name = r.location_name ?? null;
 
     // ← tomar el estado que viene del endpoint /pumps/config
-    const state: "run" | "stop" =
-      r.state === "run" ? "run" : "stop";
+    const state: "run" | "stop" = r.state === "run" ? "run" : "stop";
 
     // también podés guardar age_sec/online si vienen
     const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
@@ -179,7 +183,6 @@ function mapPumps(rows: any[]): Pump[] {
     };
   });
 }
-
 
 // === KPIs ===
 function isCritical(level: number | null | undefined, th: Thresholds | undefined): boolean {
@@ -251,7 +254,10 @@ export function usePlant(pollMs = 1000): UsePlant {
       if (pollMs > 0 && timer == null) timer = window.setInterval(fetchAll, pollMs);
     };
     const stop = () => {
-      if (timer != null) { clearInterval(timer); timer = null; }
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
     };
 
     fetchAll(); // primera carga
