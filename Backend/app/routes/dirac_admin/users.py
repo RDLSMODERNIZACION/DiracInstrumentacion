@@ -25,6 +25,9 @@ class UserPatch(BaseModel):
 class PasswordChangeIn(BaseModel):
     new_password: str = Field(..., min_length=4, max_length=128)
 
+class GrantAccessIn(BaseModel):
+    access: str = Field(default="control", description="access_level_enum: view|control|admin")
+
 # ========= Crear usuario (+ membresía opcional) =========
 
 @router.post("/users", summary="Crear usuario (y opcionalmente asignarlo a una empresa)")
@@ -162,10 +165,14 @@ def patch_user(user_id: int, payload: UserPatch):
             raise HTTPException(404, "Usuario inexistente")
         return row
 
-# ========= Cambiar password (alias admin) =========
+# ========= Cambiar password (admin/alias) =========
 
-@router.post("/users/{user_id}/password", summary="Cambiar contraseña (alias admin)")
-def change_password_admin(user_id: int, body: PasswordChangeIn | None = None, new_password: str | None = Query(default=None)):
+@router.post("/users/{user_id}/password", summary="Cambiar contraseña (admin/alias)")
+def change_password_admin(
+    user_id: int,
+    body: PasswordChangeIn | None = None,
+    new_password: str | None = Query(default=None)
+):
     pw = (body.new_password if body else None) or new_password
     if not pw:
         raise HTTPException(400, "Falta new_password")
@@ -259,6 +266,25 @@ def user_locations(user_id: int, company_id: int | None = Query(default=None)):
         explicit = cur.fetchall() or []
 
         return {"effective": effective, "explicit": explicit}
+
+# 👉 Conceder acceso explícito a una localización
+@router.post("/users/{user_id}/locations/{location_id}", summary="Conceder acceso explícito a una localización")
+def grant_user_location(user_id: int, location_id: int, body: GrantAccessIn | None = None, access: str | None = Query(default=None)):
+    acc = (body.access if body else None) or (access or "control")
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            INSERT INTO user_location_access (user_id, location_id, access)
+            VALUES (%s, %s, %s::access_level_enum)
+            ON CONFLICT (user_id, location_id)
+            DO UPDATE SET access = EXCLUDED.access, created_at = now()
+            RETURNING user_id, location_id, access
+            """,
+            (user_id, location_id, acc),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row
 
 @router.delete("/users/{user_id}/locations/{location_id}", summary="Quitar acceso explícito a una localización")
 def delete_user_location(user_id: int, location_id: int):
