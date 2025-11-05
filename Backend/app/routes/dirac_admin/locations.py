@@ -16,7 +16,6 @@ class LocationCreate(BaseModel):
 @router.post("", summary="Crear/actualizar localización (idempotente por (company_id, name))")
 def create_location(payload: LocationCreate, user=Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Si viene empresa, pedimos ser owner/admin EN ESA empresa
         if payload.company_id:
             cur.execute(
                 "SELECT EXISTS(SELECT 1 FROM company_users "
@@ -28,7 +27,6 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         try:
             if payload.company_id is None:
-                # Sin empresa (no aplica el índice único parcial): insert simple
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
@@ -36,7 +34,6 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
                     (payload.name, payload.address, payload.lat, payload.lon, None)
                 )
             else:
-                # Idempotente: si ya existe (company_id,name), actualiza address/lat/lon y devuelve el mismo id
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
@@ -52,5 +49,4 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         except Exception as e:
             conn.rollback()
-            # Mapeamos cualquier otra constraint como 400 (en vez de 500)
             raise HTTPException(400, f"Create location error: {e}")
