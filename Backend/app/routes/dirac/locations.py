@@ -1,11 +1,3 @@
-from fastapi import APIRouter, Depends, HTTPException
-from psycopg.rows import dict_row
-from app.db import get_conn
-from app.security import require_user
-from app.schemas_dirac import LocationCreate, GrantAccessIn
-
-router = APIRouter(prefix="/dirac/locations", tags=["locations"])
-
 @router.post(
     "",
     summary="Crear/actualizar localización (idempotente por (company_id, name))",
@@ -13,8 +5,8 @@ router = APIRouter(prefix="/dirac/locations", tags=["locations"])
 )
 def create_location(payload: LocationCreate, user=Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # Si viene empresa, el usuario debe ser owner/admin EN ESA empresa
         if payload.company_id:
-            # Debe ser owner/admin en ESA empresa
             cur.execute(
                 "SELECT EXISTS(SELECT 1 FROM company_users "
                 "WHERE company_id=%s AND user_id=%s AND role IN ('owner','admin')) AS ok",
@@ -25,26 +17,52 @@ def create_location(payload: LocationCreate, user=Depends(require_user)):
 
         try:
             if payload.company_id is None:
-                # Sin empresa → no aplica índice único parcial: insert simple
+                # Sin empresa: insert simple (no hay índice único parcial)
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
                     "RETURNING id, name, company_id",
                     (payload.name, payload.address, payload.lat, payload.lon, None)
                 )
+                row = cur.fetchone()
+                conn.commit()
+                return row
+
+            # Con empresa: idempotente por (company_id, name) SIN usar nombre del constraint
+            # 1) ¿Existe?
+            cur.execute(
+                "SELECT id FROM locations WHERE company_id=%s AND name=%s",
+                (payload.company_id, payload.name)
+            )
+            found = cur.fetchone()
+
+            if found:
+                # 2) Update COALESCE (solo pisa si mandás dato)
+                cur.execute(
+                    "UPDATE locations SET "
+                    " address = COALESCE(%s, address),"
+                    " lat     = COALESCE(%s, lat),"
+                    " lon     = COALESCE(%s, lon)"
+                    " WHERE id=%s "
+                    " RETURNING id, name, company_id",
+                    (payload.address, payload.lat, payload.lon, found["id"])
+                )
+                row = cur.fetchone()
+                conn.commit()
+                return row
             else:
-                # Idempotente por (company_id, name)
+                # 3) Insert nuevo
                 cur.execute(
                     "INSERT INTO locations(name, address, lat, lon, company_id) "
                     "VALUES(%s,%s,%s,%s,%s) "
-                    "ON CONFLICT ON CONSTRAINT uniq_location_per_company_name "
-                    "DO UPDATE SET address=EXCLUDED.address, lat=EXCLUDED.lat, lon=EXCLUDED.lon "
                     "RETURNING id, name, company_id",
                     (payload.name, payload.address, payload.lat, payload.lon, payload.company_id)
                 )
-            row = cur.fetchone()
-            conn.commit()
-            return row
+                row = cur.fetchone()
+                conn.commit()
+                return row
+
         except Exception as e:
             conn.rollback()
+            # 400 con detalle (así ves el motivo real si hubiera otra constraint)
             raise HTTPException(400, f"Create location error: {e}")
