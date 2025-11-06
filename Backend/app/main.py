@@ -32,6 +32,9 @@ from app.routes.dirac_admin.tanks import router as admin_tanks_router
 from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
 
+
+from app.routes.dirac.me import router as dirac_me_router  # <- KEEP/ADD
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -116,6 +119,8 @@ app.include_router(admin_locations_router)
 app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
+
+app.include_router(dirac_me_router)  # <- KEEP/ADD
 
 # ===== Cierre ordenado del pool de DB =====
 @app.on_event("shutdown")
