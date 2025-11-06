@@ -1,63 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+# app/routes/dirac/pumps.py
+from typing import Optional, Literal
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, constr
 from psycopg.rows import dict_row
+
 from app.db import get_conn
 from app.security import require_user
-from app.schemas_dirac import PumpCommandIn
 
-router = APIRouter(prefix="/dirac/pumps", tags=["pumps"])
+router = APIRouter(prefix="/dirac", tags=["pumps"])  # ya lo tenías
 
-@router.post(
-    "/{pump_id}/command",
-    summary="Enviar comando start/stop",
-    description="Valida permiso (control/admin) y PIN (si require_pin)."
-)
-def issue_pump_command(pump_id: int, payload: PumpCommandIn, user=Depends(require_user)):
+# ---- entrada del comando (pin opcional) ----
+class PumpCommandIn(BaseModel):
+    action: Literal["start", "stop"]
+    pin: Optional[constr(pattern=r"^\d{4}$")] = None
+
+ALLOWED_ROLES = {"owner", "admin", "operator"}
+
+@router.post("/pumps/{pump_id}/command", status_code=202, summary="Emitir comando a bomba (start/stop)")
+def issue_pump_command(pump_id: int, payload: PumpCommandIn, me = Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT p.id, p.pin_code, p.require_pin "
-            "FROM pumps p "
-            "JOIN locations l ON l.id = p.location_id "
-            "JOIN v_user_locations vul ON vul.location_id = l.id "
-            "WHERE p.id=%s AND vul.user_id=%s AND vul.access IN ('control','admin')",
-            (pump_id, user["user_id"])
-        )
+        # 1) Bomba + empresa + requisitos de PIN
+        cur.execute("""
+            SELECT p.id, p.name, p.location_id, p.pin_code, p.require_pin, l.company_id
+            FROM pumps p
+            LEFT JOIN locations l ON l.id = p.location_id
+            WHERE p.id = %s
+        """, (pump_id,))
+        p = cur.fetchone()
+        if not p:
+            raise HTTPException(404, "Bomba no encontrada")
+        if p["company_id"] is None:
+            raise HTTPException(400, "Bomba sin empresa asociada")
+
+        # 2) Chequeo de rol a nivel empresa (solo owner/admin/operator)
+        cur.execute("""
+            SELECT role
+            FROM company_users
+            WHERE user_id = %s AND company_id = %s
+        """, (me["user_id"], p["company_id"]))
+        r = cur.fetchone()
+        role = r["role"] if r else None
+        if role not in ALLOWED_ROLES and not me.get("superadmin", False):
+            raise HTTPException(403, "No autorizado: tu rol no puede controlar bombas")
+
+        # 3) Chequeo de acceso a la ubicación (control/admin sobre ESA location)
+        cur.execute("""
+            SELECT access
+            FROM v_user_locations
+            WHERE user_id=%s AND location_id=%s
+        """, (me["user_id"], p["location_id"]))
+        v = cur.fetchone()
+        if not v or v["access"] not in ("control", "admin"):
+            raise HTTPException(403, "No autorizado en esta ubicación")
+
+        # 4) Validar PIN si la bomba lo requiere
+        if p["require_pin"]:
+            if not payload.pin or payload.pin != p["pin_code"]:
+                raise HTTPException(403, "PIN inválido")
+
+        # 5) Encolar comando
+        cur.execute("""
+            INSERT INTO pump_commands (pump_id, action, status, requested_by, requested_by_user_id)
+            VALUES (%s, %s, 'pending', %s, %s)
+            RETURNING id, pump_id, action, status, requested_at
+        """, (pump_id, payload.action, me["email"], me["user_id"]))
         row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=403, detail="Sin permisos para esta bomba")
-        if row["require_pin"] and payload.pin != row["pin_code"]:
-            raise HTTPException(status_code=401, detail="PIN incorrecto")
-        cur.execute(
-            "INSERT INTO pump_commands(pump_id, action, status, requested_by, requested_by_user_id, requested_at) "
-            "VALUES(%s,%s,'pending',%s,%s, now())",
-            (pump_id, payload.action, user["email"], user["user_id"])
-        )
         conn.commit()
-        return {"ok": True, "queued": True}
-
-@router.post(
-    "/{pump_id}/change-pin",
-    summary="Cambiar PIN de la bomba",
-    description="Solo usuarios con acceso admin a la localización."
-)
-def change_pump_pin(
-    pump_id: int,
-    new_pin: str = Query(..., min_length=4, max_length=4, regex=r"^\d{4}$"),
-    user=Depends(require_user)
-):
-    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT EXISTS(SELECT 1 FROM pumps p "
-            "JOIN locations l ON l.id=p.location_id "
-            "JOIN v_user_locations vul ON vul.location_id=l.id "
-            "WHERE p.id=%s AND vul.user_id=%s AND vul.access='admin') AS ok",
-            (pump_id, user["user_id"])
-        )
-        allowed = cur.fetchone()["ok"]
-        if not allowed:
-            raise HTTPException(403, "Requiere admin")
-        cur.execute(
-            "UPDATE pumps SET pin_code=%s, pin_updated_at=now() WHERE id=%s",
-            (new_pin, pump_id)
-        )
-        conn.commit()
-        return {"ok": True}
+        return row
