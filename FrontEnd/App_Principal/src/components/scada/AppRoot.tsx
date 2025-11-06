@@ -1,5 +1,5 @@
 // src/components/scada/AppRoot.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { User } from "./types";
 import ScadaApp from "./ScadaApp";
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
@@ -14,78 +14,109 @@ type MeLocation = {
 };
 
 function deriveRoleFromAccess(locs: MeLocation[]): User["role"] {
-  if (locs.some(l => l.access === "admin")) return "admin" as User["role"];
-  if (locs.some(l => l.access === "control")) return "operator" as User["role"];
-  return "viewer" as User["role"];
+  if (locs.some((l) => l.access === "admin")) return "admin";
+  if (locs.some((l) => l.access === "control")) return "operator";
+  return "viewer";
 }
 
+const COMPANY_KEY = "dirac.company_id";
+
 export default function AppRoot() {
-  const { isAuthenticated, email } = useAuth();
+  const { isAuthenticated, email, logout } = useAuth();
   const api = useAuthedFetch();
 
   const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(false);
 
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [allowedLocationIds, setAllowedLocationIds] = useState<Set<number>>(new Set());
+
   const loc = useLocation();
   useEffect(() => {
-    console.log("[AppRoot] route change →", loc.pathname);
+    console.log("[AppRoot] route →", loc.pathname);
   }, [loc.pathname]);
 
-  // Cargar “mi perfil efectivo” después del login (derivado de /dirac/me/locations)
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       if (!isAuthenticated) {
         setUser(null);
+        setCompanyId(null);
+        setAllowedLocationIds(new Set());
         return;
       }
+
       setLoadingUser(true);
       try {
         const res = await api("/dirac/me/locations");
         if (!res.ok) throw new Error(`me/locations -> ${res.status}`);
         const locs: MeLocation[] = await res.json();
 
-        const role = deriveRoleFromAccess(locs);
-        const firstCompanyId = locs[0]?.company_id ?? null;
+        const availableCompanyIds = Array.from(
+          new Set(
+            locs
+              .map((l) => (l.company_id == null ? null : Number(l.company_id)))
+              .filter((x): x is number => x !== null)
+          )
+        );
 
-        // Armamos un User mínimo para inicializar ScadaApp.
-        // Ajustá las props si tu User requiere otras claves.
+        const persisted = sessionStorage.getItem(COMPANY_KEY);
+        let chosenCompanyId: number | null = null;
+        if (persisted && availableCompanyIds.includes(Number(persisted))) {
+          chosenCompanyId = Number(persisted);
+        } else if (availableCompanyIds.length) {
+          chosenCompanyId = availableCompanyIds[0];
+        }
+
+        const visibleLocs =
+          chosenCompanyId === null ? locs : locs.filter((l) => Number(l.company_id) === chosenCompanyId);
+
+        const role = deriveRoleFromAccess(visibleLocs);
+        const allowed = new Set<number>(visibleLocs.map((l) => Number(l.location_id)));
+
         const u: User = {
           id: "me",
           name: email || "usuario",
           role,
-          // @ts-expect-error: company shape puede variar en tu proyecto
-          company: firstCompanyId
-            ? { id: String(firstCompanyId), name: `Empresa #${firstCompanyId}` }
-            : undefined,
+          // @ts-expect-error: shape exacto puede variar en tu proyecto
+          company:
+            chosenCompanyId !== null
+              ? { id: String(chosenCompanyId), name: `Empresa #${chosenCompanyId}` }
+              : undefined,
         } as unknown as User;
 
-        if (!cancelled) setUser(u);
+        if (!cancelled) {
+          setUser(u);
+          setCompanyId(chosenCompanyId);
+          setAllowedLocationIds(allowed);
+          if (chosenCompanyId !== null) sessionStorage.setItem(COMPANY_KEY, String(chosenCompanyId));
+          else sessionStorage.removeItem(COMPANY_KEY);
+        }
       } catch (err) {
-        console.error("Error cargando /dirac/me/locations:", err);
-        // Fallback: al menos dejarte entrar con rol viewer
-        const u: User = {
-          id: "me",
-          name: email || "usuario",
-          role: "viewer" as User["role"],
-        } as unknown as User;
-        if (!cancelled) setUser(u);
+        console.error("Auth inválida:", err);
+        // 🔐 FALLAR-CERRADO: limpiar sesión y volver a Login
+        logout();
+        if (!cancelled) {
+          setUser(null);
+          setCompanyId(null);
+          setAllowedLocationIds(new Set());
+        }
       } finally {
         if (!cancelled) setLoadingUser(false);
       }
     }
+
     load();
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, email, api]);
+  }, [isAuthenticated, email, api, logout]);
 
-  // Si no hay sesión (HTTP Basic), mostramos Login
   if (!isAuthenticated) {
-    return <Login onSuccess={() => { /* el AuthProvider y este efecto cargarán el user */ }} />;
+    return <Login onSuccess={() => { /* tras login, el efecto vuelve a correr y arma el user */ }} />;
   }
 
-  // Loader sencillo mientras construimos el objeto User
   if (loadingUser || !user) {
     return (
       <div className="min-h-screen grid place-items-center text-slate-600">
@@ -94,10 +125,18 @@ export default function AppRoot() {
     );
   }
 
-  // App principal
   return (
     <Routes>
-      <Route path="/*" element={<ScadaApp initialUser={user} />} />
+      <Route
+        path="/*"
+        element={
+          <ScadaApp
+            initialUser={user}
+            allowedLocationIds={allowedLocationIds}
+            selectedCompanyId={companyId}
+          />
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

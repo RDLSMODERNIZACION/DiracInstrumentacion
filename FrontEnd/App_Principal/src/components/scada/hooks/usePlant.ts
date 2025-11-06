@@ -2,14 +2,24 @@
 import * as React from "react";
 import { authHeaders } from "../../../lib/http";
 
-type Thresholds = { lowCritical: number; lowWarning: number; highWarning: number; highCritical: number };
-const DEFAULT_THRESHOLDS: Thresholds = { lowCritical: 10, lowWarning: 25, highWarning: 80, highCritical: 90 };
+type Thresholds = {
+  lowCritical: number;
+  lowWarning: number;
+  highWarning: number;
+  highCritical: number;
+};
+const DEFAULT_THRESHOLDS: Thresholds = {
+  lowCritical: 10,
+  lowWarning: 25,
+  highWarning: 80,
+  highCritical: 90,
+};
 
 type Tank = {
   id: number;
   name: string;
 
-  // snake (backend) + camel (UI) + objeto normalizado
+  // ubicación (snake/camel/objeto)
   location_id?: number | null;
   location_name?: string | null;
   locationId?: number | null;
@@ -21,7 +31,7 @@ type Tank = {
   ageSec?: number | null;
   online?: boolean | null;
 
-  // NUEVO: alarma del backend
+  // alarma textual del backend (si viene)
   alarm?: "normal" | "alerta" | "critico";
 
   volumeL?: number | null;
@@ -48,7 +58,7 @@ type Pump = {
   ageSec?: number | null;
   online?: boolean | null;
 
-  // opcionales útiles para debug (si la vista los expone)
+  // debug opcional
   latest_event_id?: number | null;
   event_ts?: string | null;
   latest_hb_id?: number | null;
@@ -70,7 +80,7 @@ type UsePlant = {
 
 const ONLINE_DEAD_SEC = 60;
 
-// 🔧 Forzamos backend por defecto (evita pegarle al 5173)
+// 🔧 Backend por defecto (evita pegarle al 5173)
 const API_BASE =
   (window as any).__API_BASE__ ||
   (import.meta as any).env?.VITE_API_BASE?.trim?.() ||
@@ -90,6 +100,19 @@ async function getJSON(path: string) {
   });
   if (!res.ok) throw new Error(`GET ${path} -> ${res.status} ${res.statusText}`);
   return res.json();
+}
+
+// Intenta múltiples endpoints en orden y devuelve el primero que funcione
+async function getFirstJSON(paths: string[]) {
+  let lastErr: any = null;
+  for (const p of paths) {
+    try {
+      return await getJSON(p);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 function toNumOr(def: number, x: any): number {
@@ -118,7 +141,8 @@ function mapTanks(rows: any[]): Tank[] {
 
     // toma 'alarma' textual del backend; default "normal"
     const alarm: Tank["alarm"] =
-      typeof r.alarma === "string" && (r.alarma === "normal" || r.alarma === "alerta" || r.alarma === "critico")
+      typeof r.alarma === "string" &&
+      (r.alarma === "normal" || r.alarma === "alerta" || r.alarma === "critico")
         ? r.alarma
         : "normal";
 
@@ -142,9 +166,9 @@ function mapTanks(rows: any[]): Tank[] {
 
       thresholds: {
         lowCritical: toNumOr(DEFAULT_THRESHOLDS.lowCritical, r.low_low_pct),
-        lowWarning:  toNumOr(DEFAULT_THRESHOLDS.lowWarning,  r.low_pct),
+        lowWarning: toNumOr(DEFAULT_THRESHOLDS.lowWarning, r.low_pct),
         highWarning: toNumOr(DEFAULT_THRESHOLDS.highWarning, r.high_pct),
-        highCritical:toNumOr(DEFAULT_THRESHOLDS.highCritical,r.high_high_pct),
+        highCritical: toNumOr(DEFAULT_THRESHOLDS.highCritical, r.high_high_pct),
       },
     };
   });
@@ -158,10 +182,8 @@ function mapPumps(rows: any[]): Pump[] {
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
 
-    // ← tomar el estado que viene del endpoint /pumps/config
     const state: "run" | "stop" = r.state === "run" ? "run" : "stop";
 
-    // también podés guardar age_sec/online si vienen
     const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
     const online = typeof r.online === "boolean" ? r.online : undefined;
 
@@ -205,8 +227,14 @@ function computeKpis(tanks: Tank[]): Kpis {
   return { avg, crit };
 }
 
-// 🔁 poll a 1s por defecto
-export function usePlant(pollMs = 1000): UsePlant {
+// Helper: obtener location_id desde distintas formas
+function getLocId(x: { location_id?: any; locationId?: any; location?: any }) {
+  return x.location_id ?? x.locationId ?? x.location?.id ?? null;
+}
+
+// 🔁 Hook principal
+// allowedLocationIds: si viene, filtra lo que retorna el backend por esas locaciones
+export function usePlant(pollMs = 1000, allowedLocationIds?: Set<number>): UsePlant {
   const [plant, setPlant] = React.useState<Plant>({ tanks: [], pumps: [] });
   const [loading, setLoading] = React.useState<boolean>(true);
   const [err, setErr] = React.useState<unknown>(null);
@@ -216,22 +244,29 @@ export function usePlant(pollMs = 1000): UsePlant {
     try {
       setErr(null);
 
-      // Fuente de verdad: backend
+      // Fuente de verdad: backend (con fallback por si tenés la ruta /dirac/admin/*)
       const [tanksRes, pumpsRes] = await Promise.all([
-        getJSON("/tanks/config").catch(() => []),
-        getJSON("/pumps/config").catch(() => []),
+        getFirstJSON(["/tanks/config", "/dirac/admin/tanks/config"]).catch(() => [] as any[]),
+        getFirstJSON(["/pumps/config", "/dirac/admin/pumps/config"]).catch(() => [] as any[]),
       ]);
 
       const freshTanks = Array.isArray(tanksRes) ? mapTanks(tanksRes) : [];
       const freshPumps = Array.isArray(pumpsRes) ? mapPumps(pumpsRes) : [];
 
+      // Filtro por allowedLocationIds (si existe)
+      const pass = (locId: any) =>
+        !allowedLocationIds || (locId != null && allowedLocationIds.has(Number(locId)));
+
+      const filtTanks = freshTanks.filter((t) => pass(getLocId(t)));
+      const filtPumps = freshPumps.filter((p) => pass(getLocId(p)));
+
       setPlant((prev) => {
-        const mergedTanks = freshTanks.map((t) => {
+        const mergedTanks = filtTanks.map((t) => {
           const old = (prev.tanks || []).find((p) => p.id === t.id);
           return old ? { ...old, ...t, latest: old.latest } : t;
         });
 
-        const mergedPumps = freshPumps.map((p) => {
+        const mergedPumps = filtPumps.map((p) => {
           const old = (prev.pumps || []).find((x) => x.id === p.id);
           return old ? { ...old, ...p, latest: old.latest } : p;
         });
@@ -239,13 +274,13 @@ export function usePlant(pollMs = 1000): UsePlant {
         return { tanks: mergedTanks, pumps: mergedPumps, alarms: prev.alarms };
       });
 
-      setKpis(computeKpis(freshTanks));
+      setKpis(computeKpis(filtTanks));
       setLoading(false);
     } catch (e) {
       setErr(e);
       setLoading(false);
     }
-  }, []);
+  }, [allowedLocationIds]);
 
   React.useEffect(() => {
     let timer: number | null = null;

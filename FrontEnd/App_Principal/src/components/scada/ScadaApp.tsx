@@ -13,21 +13,32 @@ import LogoutButton from "../auth/LogoutButton";
 const DEFAULT_THRESHOLDS = { lowCritical: 10, lowWarning: 25, highWarning: 80, highCritical: 90 };
 
 // === umbrales de conectividad (coincidir con backend) ===
-const ONLINE_DEAD_SEC = 60;   // <= 60s = online
-const ONLINE_WARN_SEC = 120;  // >60 y <=120 = warn
+const ONLINE_DEAD_SEC = 60; // <= 60s = online
+const ONLINE_WARN_SEC = 120; // >60 y <=120 = warn
 
 type View = "operaciones" | "kpi" | "infra";
 
 const app1Src = import.meta.env.DEV
-  ? (import.meta.env.VITE_APP1_DEV ?? "http://localhost:5174/")
+  ? import.meta.env.VITE_APP1_DEV ?? "http://localhost:5174/"
   : "/kpi/";
 
 const app2Src = import.meta.env.DEV
-  ? (import.meta.env.VITE_APP2_DEV ?? "http://localhost:5175/")
+  ? import.meta.env.VITE_APP2_DEV ?? "http://localhost:5175/"
   : "/infraestructura/";
 
-export default function ScadaApp({ initialUser }: { initialUser?: User }) {
-  const [drawer, setDrawer] = React.useState<{ type: "tank" | "pump" | null; id?: string | number | null }>({ type: null });
+type Props = {
+  initialUser?: User;
+  /** Conjunto de location_id que el usuario puede ver (filtrado por empresa) */
+  allowedLocationIds?: Set<number>;
+  /** Empresa seleccionada (opcional, sólo para mostrar) */
+  selectedCompanyId?: number | null;
+};
+
+export default function ScadaApp({ initialUser, allowedLocationIds, selectedCompanyId }: Props) {
+  const [drawer, setDrawer] = React.useState<{ type: "tank" | "pump" | null; id?: string | number | null }>({
+    type: null,
+  });
+
   // El usuario viene desde AppRoot (derivado de /dirac/me/locations). Fallback viewer simple.
   const [user] = React.useState<User>(
     initialUser ||
@@ -37,12 +48,14 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
         role: "viewer",
       } as unknown as User)
   );
+
   const [view, setView] = React.useState<View>("operaciones"); // 👈 vista actual
 
   // 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
 
-  const { plant, loading, err, kpis } = usePlant(pollMs);
+  // 👉 ahora pasamos allowedLocationIds para que el hook filtre lo que trae del backend
+  const { plant, loading, err, kpis } = usePlant(pollMs, allowedLocationIds);
 
   // === statusByKey para tanques y bombas ===
   const statusByKey = React.useMemo(() => {
@@ -54,15 +67,14 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
       if (id == null) continue;
 
       const rawAge =
-        Number.isFinite((t as any).ageSec) ? (t as any).ageSec :
-        Number.isFinite((t as any).age_sec) ? (t as any).age_sec :
-        null;
+        Number.isFinite((t as any).ageSec) ? (t as any).ageSec : Number.isFinite((t as any).age_sec) ? (t as any).age_sec : null;
       const age = rawAge !== null ? Number(rawAge) : null;
-      const online = typeof (t as any).online === "boolean" ? (t as any).online : (age !== null ? age <= ONLINE_DEAD_SEC : false);
-      const tone: "ok" | "warn" | "bad" = online ? "ok" : (age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad");
+      const online =
+        typeof (t as any).online === "boolean" ? (t as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
+      const tone: "ok" | "warn" | "bad" = online ? "ok" : age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad";
 
       s[`tank:${id}`] = { online, ageSec: age ?? 999999, tone };
-      s[`TK-${id}`]   = s[`tank:${id}`]; // compat
+      s[`TK-${id}`] = s[`tank:${id}`]; // compat
     }
 
     // Bombas
@@ -71,15 +83,14 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
       if (id == null) continue;
 
       const rawAge =
-        Number.isFinite((p as any).ageSec) ? (p as any).ageSec :
-        Number.isFinite((p as any).age_sec) ? (p as any).age_sec :
-        null;
+        Number.isFinite((p as any).ageSec) ? (p as any).ageSec : Number.isFinite((p as any).age_sec) ? (p as any).age_sec : null;
       const age = rawAge !== null ? Number(rawAge) : null;
-      const online = typeof (p as any).online === "boolean" ? (p as any).online : (age !== null ? age <= ONLINE_DEAD_SEC : false);
-      const tone: "ok" | "warn" | "bad" = online ? "ok" : (age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad");
+      const online =
+        typeof (p as any).online === "boolean" ? (p as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
+      const tone: "ok" | "warn" | "bad" = online ? "ok" : age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad";
 
       s[`pump:${id}`] = { online, ageSec: age ?? 999999, tone };
-      s[`PU-${id}`]   = s[`pump:${id}`]; // compat
+      s[`PU-${id}`] = s[`pump:${id}`]; // compat
     }
 
     return s;
@@ -100,9 +111,13 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
     if (view === "operaciones") {
       return (
         <div className="max-w-7xl mx-auto p-4 md:p-6">
-          {loading && !plant.tanks.length ? <div className="p-4">Cargando…</div>
-            : err ? <div className="p-4 text-red-600">Error: {String(err)}</div>
-            : operacionesBody}
+          {loading && !plant.tanks.length ? (
+            <div className="p-4">Cargando…</div>
+          ) : err ? (
+            <div className="p-4 text-red-600">Error: {String(err)}</div>
+          ) : (
+            operacionesBody
+          )}
         </div>
       );
     }
@@ -112,6 +127,9 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
     // view === "infra"
     return <EmbeddedAppFrame src={app2Src} title="Infraestructura" />;
   })();
+
+  // Nombre de empresa mostrado en UI (preferí el que trae initialUser, y como backup el id seleccionado)
+  const companyBadge = user.company?.name ?? (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -137,7 +155,7 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
           <div className="text-xs text-slate-500 mt-auto border-t pt-3">
             <div>Usuario: {user.name}</div>
             <div>Rol: {user.role}</div>
-            <div>Empresa: {user.company?.name ?? "—"}</div>
+            <div>Empresa: {companyBadge}</div>
           </div>
         </aside>
 
@@ -151,13 +169,21 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
                 </div>
                 {view === "operaciones" && (
                   <div className="hidden md:flex items-center gap-3 text-xs">
-                    <KpiPill label="Nivel promedio" value={loading && !plant.tanks.length ? "…" : `${kpis.avg}%`} tone="ok" />
-                    <KpiPill label="Críticos" value={loading && !plant.tanks.length ? "…" : `${kpis.crit}`} tone={kpis.crit ? "bad" : "ok"} />
+                    <KpiPill
+                      label="Nivel promedio"
+                      value={loading && !plant.tanks.length ? "…" : `${kpis.avg}%`}
+                      tone="ok"
+                    />
+                    <KpiPill
+                      label="Críticos"
+                      value={loading && !plant.tanks.length ? "…" : `${kpis.crit}`}
+                      tone={kpis.crit ? "bad" : "ok"}
+                    />
                   </div>
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{user.company?.name ?? "—"}</span>
+                <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{companyBadge}</span>
                 <LogoutButton />
               </div>
             </div>
@@ -170,8 +196,13 @@ export default function ScadaApp({ initialUser }: { initialUser?: User }) {
       {/* === DRAWER === */}
       {(() => {
         const isTank = drawer.type === "tank";
-        const t = isTank ? plant.tanks.find((x: any) => String((x as any).id ?? (x as any).tank_id) === String(drawer.id)) : null;
-        const p = drawer.type === "pump" ? plant.pumps.find((x: any) => String((x as any).id ?? (x as any).pump_id) === String(drawer.id)) : null;
+        const t = isTank
+          ? plant.tanks.find((x: any) => String((x as any).id ?? (x as any).tank_id) === String(drawer.id))
+          : null;
+        const p =
+          drawer.type === "pump"
+            ? plant.pumps.find((x: any) => String((x as any).id ?? (x as any).pump_id) === String(drawer.id))
+            : null;
 
         const sev = t ? severityOf((t as any).levelPct, (t as any).thresholds ?? DEFAULT_THRESHOLDS) : null;
         const meta = sev ? sevMeta(sev) : null;
