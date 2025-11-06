@@ -4,13 +4,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from psycopg.rows import dict_row
 from app.db import get_conn
 
-# Si tenés 'passlib' disponible, usamos Argon2:
-try:
-    from passlib.hash import argon2
-    _HAS_ARGON2 = True
-except Exception:
-    _HAS_ARGON2 = False
-
+# No usamos passlib ni hash. Login básico con password_plain.
 security = HTTPBasic(auto_error=False)
 
 def _unauth():
@@ -21,17 +15,17 @@ def _unauth():
     )
 
 def require_user(credentials: HTTPBasicCredentials = Depends(security)):
-    if credentials is None or not (credentials.username and credentials.password):
+    # Si no hay credenciales, 401
+    if credentials is None or not credentials.username or credentials.password is None:
         raise _unauth()
 
     email = credentials.username.strip().lower()
-    pwd = credentials.password or ""
+    pwd = credentials.password
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
-            SELECT id, email, full_name, status, is_superadmin,
-                   password_hash, password_plain
+            SELECT id, email, full_name, status, is_superadmin, password_plain
             FROM app_users
             WHERE lower(email) = %s
             """,
@@ -39,38 +33,11 @@ def require_user(credentials: HTTPBasicCredentials = Depends(security)):
         )
         u = cur.fetchone()
 
-        if not u or u["status"] != "active":
+        # Fallar-cerrado: usuario no existe, inactivo o password_plain no coincide
+        if not u or u["status"] != "active" or u.get("password_plain") is None or pwd != u["password_plain"]:
             raise _unauth()
 
-        ok = False
-
-        # 1) Preferir password_hash (Argon2)
-        if u.get("password_hash"):
-            if _HAS_ARGON2:
-                try:
-                    ok = argon2.verify(pwd, u["password_hash"])
-                except Exception:
-                    ok = False
-            else:
-                ok = False  # si no hay passlib, no podemos verificar hash
-        # 2) Fallback temporal a password_plain (migración)
-        elif u.get("password_plain") is not None:
-            ok = (pwd == u["password_plain"])
-            if ok and _HAS_ARGON2:
-                # migrar a hash en primer login exitoso
-                try:
-                    new_hash = argon2.hash(pwd)
-                    cur.execute(
-                        "UPDATE app_users SET password_hash=%s, password_updated_at=now() WHERE id=%s",
-                        (new_hash, u["id"]),
-                    )
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-
-        if not ok:
-            raise _unauth()
-
+        # OK: devolvemos identidad básica
         return {
             "user_id": int(u["id"]),
             "email": u["email"],
