@@ -88,7 +88,7 @@ def _location_company_id(cur, location_id: int) -> Optional[int]:
     return row["company_id"] if row else None
 
 # -----------------------------
-# Listar (VIEW-Like dentro de /admin)
+# GET: listar con filtros (y sin 403 para viewers)
 # -----------------------------
 
 @router.get("/tanks", summary="Listar tanques (con filtros por empresa/ubicación)")
@@ -98,43 +98,54 @@ def list_tanks(
     user=Depends(require_user),
 ):
     """
-    - Si superadmin: lista todo (con filtros opcionales).
-    - Si no: lista SOLO lo que el usuario puede ver (join a v_user_locations).
-    Evita 403 para usuarios con rol 'viewer' y hace que el front pueda listar.
+    - Superadmin: lista todo (aplica filtros si vienen).
+    - Resto (incluye viewer): lista SOLO lo que puede ver (join a v_user_locations).
+    - Se arma SQL dinámico para evitar 'AmbiguousParameter' con NULLs.
     """
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         if _is_superadmin(user):
-            cur.execute(
-                """
-                SELECT t.id, t.name, t.location_id
-                FROM tanks t
-                LEFT JOIN locations l ON l.id = t.location_id
-                WHERE (%(cid)s IS NULL OR l.company_id = %(cid)s)
-                  AND (%(lid)s IS NULL OR t.location_id = %(lid)s)
-                ORDER BY t.id DESC
-                """,
-                {"cid": company_id, "lid": location_id},
-            )
-            return cur.fetchall() or []
-
-        # Usuario normal: restringir por accesos efectivos (empresa/ubicación)
-        cur.execute(
-            """
+            # Admin global: lista todo
+            q = """
             SELECT t.id, t.name, t.location_id
             FROM tanks t
-            JOIN v_user_locations v
-              ON v.location_id = t.location_id
-             AND v.user_id = %(uid)s
-            WHERE (%(cid)s IS NULL OR v.company_id = %(cid)s)
-              AND (%(lid)s IS NULL OR t.location_id = %(lid)s)
-            ORDER BY t.id DESC
-            """,
-            {"uid": user["user_id"], "cid": company_id, "lid": location_id},
-        )
+            LEFT JOIN locations l ON l.id = t.location_id
+            """
+            conds, params = [], []
+            if company_id is not None:
+                conds.append("l.company_id = %s")
+                params.append(company_id)
+            if location_id is not None:
+                conds.append("t.location_id = %s")
+                params.append(location_id)
+            if conds:
+                q += " WHERE " + " AND ".join(conds)
+            q += " ORDER BY t.id DESC"
+            cur.execute(q, params)
+            return cur.fetchall() or []
+
+        # Usuario normal (viewer/operator/technician/admin de empresa):
+        q = """
+        SELECT t.id, t.name, t.location_id
+        FROM tanks t
+        JOIN v_user_locations v
+          ON v.location_id = t.location_id
+         AND v.user_id = %s
+        """
+        conds, params = [], [user["user_id"]]
+        if company_id is not None:
+            conds.append("v.company_id = %s")
+            params.append(company_id)
+        if location_id is not None:
+            conds.append("t.location_id = %s")
+            params.append(location_id)
+        if conds:
+            q += " WHERE " + " AND ".join(conds)
+        q += " ORDER BY t.id DESC"
+        cur.execute(q, params)
         return cur.fetchall() or []
 
 # -----------------------------
-# Crear
+# POST: crear (owner/admin)
 # -----------------------------
 
 @router.post("/tanks", summary="Crear tanque (owner/admin)", status_code=201)
@@ -148,7 +159,6 @@ def create_tank(payload: TankCreate, user=Depends(require_user)):
             if target_company_id is None:
                 raise HTTPException(404, "Ubicación no encontrada")
         else:
-            # Se espera company_id + location_name para crear la nueva ubicación
             if not payload.company_id or not (payload.location_name or "").strip():
                 raise HTTPException(400, "company_id y location_name son requeridos si no pasás location_id")
             target_company_id = payload.company_id
@@ -177,13 +187,13 @@ def create_tank(payload: TankCreate, user=Depends(require_user)):
             raise HTTPException(400, f"Create tank error: {e}")
 
 # -----------------------------
-# Actualizar
+# PATCH: actualizar (owner/admin)
 # -----------------------------
 
 @router.patch("/tanks/{tank_id}", summary="Actualizar tanque (owner/admin)")
 def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Fetch actual para conocer empresa actual
+        # Estado actual
         cur.execute(
             """
             SELECT t.id, t.name, t.location_id, l.company_id
@@ -197,17 +207,16 @@ def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
         if not current:
             raise HTTPException(404, "Tanque no encontrado")
 
-        # Resolver nueva ubicación (si se pide) y empresa objetivo
+        # Resolver nueva ubicación (si corresponde) y empresa objetivo
         loc_id = None
         target_company_id = current["company_id"]
 
         wants_change_location = (
-            payload.location_id is not None or
-            (payload.company_id is not None and (payload.location_name or "").strip())
+            payload.location_id is not None
+            or (payload.company_id is not None and (payload.location_name or "").strip())
         )
 
         if wants_change_location:
-            # Si pasa location_id -> usamos esa location
             if payload.location_id is not None:
                 loc_company_id = _location_company_id(cur, payload.location_id)
                 if loc_company_id is None:
@@ -215,11 +224,9 @@ def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
                 target_company_id = loc_company_id
                 loc_id = payload.location_id
             else:
-                # crear/asegurar nueva ubicación con company_id + location_name
                 if not payload.company_id or not (payload.location_name or "").strip():
                     raise HTTPException(400, "company_id y location_name requeridos para crear ubicación")
                 target_company_id = payload.company_id
-                # ensure_location_id crea y devuelve id
                 loc_id = ensure_location_id(
                     conn,
                     user["user_id"],
@@ -228,14 +235,12 @@ def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
                     (payload.location_name or "").strip(),
                 )
 
-        # Validar permisos de admin/owner en la empresa objetivo
         _assert_admin_company(cur, user, target_company_id)
 
-        # Construir UPDATE dinámico
         new_name = payload.name.strip() if (payload.name is not None) else None
+
         try:
             if new_name is None and loc_id is None:
-                # Nada para actualizar: devolver estado actual
                 return {
                     "id": current["id"],
                     "name": current["name"],
@@ -260,16 +265,14 @@ def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
             raise HTTPException(400, f"Update tank error: {e}")
 
 # -----------------------------
-# Borrar
+# DELETE: eliminar (owner/admin)
 # -----------------------------
 
 @router.delete("/tanks/{tank_id}", summary="Eliminar tanque (owner/admin)", status_code=204)
 def delete_tank(tank_id: int, user=Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Validar permiso sobre la empresa del tanque
         company_id = _tank_company_id(cur, tank_id)
         if company_id is None:
-            # No existe
             raise HTTPException(404, "Tanque no encontrado")
         _assert_admin_company(cur, user, company_id)
 
@@ -278,7 +281,7 @@ def delete_tank(tank_id: int, user=Depends(require_user)):
             if cur.rowcount == 0:
                 raise HTTPException(404, "Tanque no encontrado")
             conn.commit()
-            return  # 204 No Content
+            return  # 204
         except Exception as e:
             conn.rollback()
             raise HTTPException(400, f"Delete tank error: {e}")
