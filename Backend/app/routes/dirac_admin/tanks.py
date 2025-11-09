@@ -39,7 +39,7 @@ class TankPatch(BaseModel):
         return (v or "").strip() if v is not None else v
 
 # -----------------------------
-# Helpers de permisos
+# Helpers de permisos / utilitarios
 # -----------------------------
 
 def _is_superadmin(user: Dict[str, Any]) -> bool:
@@ -109,9 +109,13 @@ def _count_refs(cur, tank_id: int) -> Dict[str, int]:
     return {"layout": layout, "configs": configs, "ingest": ingest, "edges": edges}
 
 def _seed_layout_tank(cur, tank_id: int):
-    """Crea fila de layout para el tanque si no existe (0,0), para que aparezca en el diagrama."""
+    """Crea fila de layout si no existe (0,0) para que aparezca en el diagrama."""
     cur.execute(
-        "INSERT INTO public.layout_tanks(tank_id, node_id, x, y) VALUES(%s, %s, 0, 0) ON CONFLICT (node_id) DO NOTHING",
+        """
+        INSERT INTO public.layout_tanks (tank_id, node_id, x, y)
+        VALUES (%s, %s, 0, 0)
+        ON CONFLICT (node_id) DO NOTHING
+        """,
         (tank_id, f"tank:{tank_id}"),
     )
 
@@ -149,7 +153,7 @@ def list_tanks(
             cur.execute(q, params)
             return cur.fetchall() or []
 
-        # Usuario normal (viewer/operator/technician/admin de empresa):
+        # Usuario normal:
         q = """
         SELECT t.id, t.name, t.location_id
         FROM tanks t
@@ -171,7 +175,7 @@ def list_tanks(
         return cur.fetchall() or []
 
 # -----------------------------
-# GET: referencias de un tanque (para UI de confirmación)
+# GET: referencias (para UI de confirmación)
 # -----------------------------
 
 @router.get("/tanks/{tank_id}/refs", summary="Contar referencias que bloquean borrado")
@@ -214,7 +218,6 @@ def create_tank(payload: TankCreate, user=Depends(require_user)):
         )
 
         try:
-            # Crear tanque
             cur.execute(
                 "INSERT INTO tanks(name, location_id) VALUES(%s,%s) RETURNING id, name, location_id",
                 (payload.name.strip(), loc_id),
@@ -235,7 +238,6 @@ def create_tank(payload: TankCreate, user=Depends(require_user)):
 @router.patch("/tanks/{tank_id}", summary="Actualizar tanque (owner/admin)")
 def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Estado actual
         cur.execute(
             """
             SELECT t.id, t.name, t.location_id, l.company_id
@@ -307,14 +309,15 @@ def update_tank(tank_id: int, payload: TankPatch, user=Depends(require_user)):
             raise HTTPException(400, f"Update tank error: {e}")
 
 # -----------------------------
-# DELETE: eliminar (owner/admin) con cascada controlada
+# DELETE: eliminar (owner/admin) con auto-cascada si es SOLO layout
 # -----------------------------
 
 @router.delete("/tanks/{tank_id}", summary="Eliminar tanque (owner/admin)", status_code=204)
 def delete_tank(tank_id: int, force: bool = Query(False), user=Depends(require_user)):
     """
-    - Si tiene referencias y no se pasa ?force=true => 409 + detalle de counts.
-    - Con ?force=true => elimina edges, layout, config e ingest antes de borrar el tanque.
+    - Si solo existe layout => se borra sin pedir ?force.
+    - Si hay otras refs (configs/ingest/edges) y no se pasa ?force => 409 + counts.
+    - Con ?force=true => cascada controlada.
     """
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         company_id = _tank_company_id(cur, tank_id)
@@ -323,7 +326,14 @@ def delete_tank(tank_id: int, force: bool = Query(False), user=Depends(require_u
         _assert_admin_company(cur, user, company_id)
 
         counts = _count_refs(cur, tank_id)
-        if not force and any(counts.values()):
+        layout_only = (
+            counts.get("layout", 0) > 0
+            and counts.get("configs", 0) == 0
+            and counts.get("ingest", 0) == 0
+            and counts.get("edges", 0) == 0
+        )
+
+        if not force and not layout_only and any(counts.values()):
             raise HTTPException(
                 409,
                 {"message": "El tanque tiene referencias. Reintenta con ?force=true", "counts": counts},
@@ -331,13 +341,12 @@ def delete_tank(tank_id: int, force: bool = Query(False), user=Depends(require_u
 
         node_id = f"tank:{tank_id}"
         try:
-            # Cascada controlada
+            # Cascada controlada (si layout_only o force)
             cur.execute("DELETE FROM public.layout_edges WHERE src_node_id=%s OR dst_node_id=%s", (node_id, node_id))
             cur.execute("DELETE FROM public.layout_tanks  WHERE tank_id=%s OR node_id=%s", (tank_id, node_id))
             cur.execute("DELETE FROM public.tank_configs  WHERE tank_id=%s", (tank_id,))
             cur.execute("DELETE FROM public.tank_ingest   WHERE tank_id=%s", (tank_id,))
 
-            # Entidad
             cur.execute("DELETE FROM public.tanks WHERE id=%s", (tank_id,))
             if cur.rowcount == 0:
                 raise HTTPException(404, "Tanque no encontrado")
@@ -345,8 +354,6 @@ def delete_tank(tank_id: int, force: bool = Query(False), user=Depends(require_u
             conn.commit()
             return Response(status_code=204)
         except HTTPException:
-            conn.rollback()
-            raise
+            conn.rollback(); raise
         except Exception as e:
-            conn.rollback()
-            raise HTTPException(400, f"Delete tank error: {e}")
+            conn.rollback(); raise HTTPException(400, f"Delete tank error: {e}")
