@@ -1,6 +1,6 @@
 # app/routes/dirac_admin/pumps.py
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from psycopg.rows import dict_row
 from pydantic import BaseModel, constr
 
@@ -34,13 +34,13 @@ class PumpPatch(BaseModel):
 # Helpers permisos/metadata
 # -----------------------------
 
-def _is_superadmin(user) -> bool:
+def _is_superadmin(user: Dict[str, Any]) -> bool:
     try:
         return bool(user.get("superadmin"))
     except Exception:
         return False
 
-def _assert_admin_company(cur, user, company_id: Optional[int]):
+def _assert_admin_company(cur, user: Dict[str, Any], company_id: Optional[int]):
     """Requiere owner/admin en la empresa (o superadmin)."""
     if company_id is None:
         raise HTTPException(400, "La ubicación debe pertenecer a una empresa")
@@ -76,6 +76,35 @@ def _pump_company_id(cur, pump_id: int) -> Optional[int]:
     row = cur.fetchone()
     return row["company_id"] if row else None
 
+def _count_refs_pump(cur, pump_id: int) -> Dict[str, int]:
+    """Cuenta referencias que bloquean borrado de bomba."""
+    node_id = f"pump:{pump_id}"
+    cur.execute("SELECT COUNT(*) AS c FROM public.layout_pumps WHERE pump_id=%s", (pump_id,))
+    layout = int(cur.fetchone()["c"])
+    cur.execute("SELECT COUNT(*) AS c FROM public.pump_commands WHERE pump_id=%s", (pump_id,))
+    cmds = int(cur.fetchone()["c"])
+    cur.execute("SELECT COUNT(*) AS c FROM public.pump_events WHERE pump_id=%s", (pump_id,))
+    evs = int(cur.fetchone()["c"])
+    cur.execute("SELECT COUNT(*) AS c FROM public.pump_heartbeat WHERE pump_id=%s", (pump_id,))
+    hb = int(cur.fetchone()["c"])
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM public.layout_edges WHERE src_node_id=%s OR dst_node_id=%s",
+        (node_id, node_id),
+    )
+    edges = int(cur.fetchone()["c"])
+    return {"layout": layout, "commands": cmds, "events": evs, "heartbeat": hb, "edges": edges}
+
+def _seed_layout_pump(cur, pump_id: int):
+    """Crea fila de layout si no existe (0,0) para que aparezca en el diagrama."""
+    cur.execute(
+        """
+        INSERT INTO public.layout_pumps (pump_id, node_id, x, y)
+        VALUES (%s, %s, 0, 0)
+        ON CONFLICT (node_id) DO NOTHING
+        """,
+        (pump_id, f"pump:{pump_id}"),
+    )
+
 # -----------------------------
 # GET: listar (viewer-safe) con filtros
 # -----------------------------
@@ -89,7 +118,6 @@ def list_pumps(
     """
     - Superadmin: lista todo (con filtros si vienen).
     - Usuario normal: lista SOLO lo que puede ver (JOIN v_user_locations).
-    SQL dinámico (sin 'param IS NULL') → evita AmbiguousParameter.
     """
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         if _is_superadmin(user):
@@ -133,6 +161,19 @@ def list_pumps(
         return cur.fetchall() or []
 
 # -----------------------------
+# GET: referencias (para UI de confirmación)
+# -----------------------------
+
+@router.get("/pumps/{pump_id}/refs", summary="Contar referencias de bomba")
+def pump_refs(pump_id: int, user=Depends(require_user)):
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        company_id = _pump_company_id(cur, pump_id)
+        if company_id is None:
+            raise HTTPException(404, "Bomba no encontrada")
+        _assert_admin_company(cur, user, company_id)
+        return _count_refs_pump(cur, pump_id)
+
+# -----------------------------
 # POST: crear (owner/admin)
 # -----------------------------
 
@@ -168,9 +209,11 @@ def create_pump(payload: PumpCreate, user=Depends(require_user)):
                 VALUES(%s, %s, COALESCE(%s,'0000'), COALESCE(%s,true))
                 RETURNING id, name, location_id
                 """,
-                ( (payload.name or "").strip(), loc_id, payload.pin_code, payload.require_pin ),
+                ((payload.name or "").strip(), loc_id, payload.pin_code, payload.require_pin),
             )
             row = cur.fetchone()
+            # Semilla de layout para que aparezca en el diagrama
+            _seed_layout_pump(cur, row["id"])
             conn.commit()
             return row
         except Exception as e:
@@ -259,23 +302,53 @@ def update_pump(pump_id: int, payload: PumpPatch, user=Depends(require_user)):
             raise HTTPException(400, f"Update pump error: {e}")
 
 # -----------------------------
-# DELETE: eliminar (owner/admin)
+# DELETE: eliminar (owner/admin) con auto-cascada si es SOLO layout
 # -----------------------------
 
 @router.delete("/pumps/{pump_id}", summary="Eliminar bomba (owner/admin)", status_code=204)
-def delete_pump(pump_id: int, user=Depends(require_user)):
+def delete_pump(pump_id: int, force: bool = Query(False), user=Depends(require_user)):
+    """
+    - Si solo existe layout => se borra sin pedir ?force.
+    - Si hay otras refs (commands/events/heartbeat/edges) y no se pasa ?force => 409 + counts.
+    - Con ?force=true => cascada controlada.
+    """
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         company_id = _pump_company_id(cur, pump_id)
         if company_id is None:
             raise HTTPException(404, "Bomba no encontrada")
         _assert_admin_company(cur, user, company_id)
 
+        counts = _count_refs_pump(cur, pump_id)
+        layout_only = (
+            counts.get("layout", 0) > 0
+            and counts.get("edges", 0) == 0
+            and counts.get("commands", 0) == 0
+            and counts.get("events", 0) == 0
+            and counts.get("heartbeat", 0) == 0
+        )
+
+        if not force and not layout_only and any(v > 0 for v in counts.values()):
+            raise HTTPException(
+                409,
+                {"message": "La bomba tiene referencias. Reintenta con ?force=true", "counts": counts},
+            )
+
+        node_id = f"pump:{pump_id}"
         try:
-            cur.execute("DELETE FROM pumps WHERE id=%s", (pump_id,))
+            # Cascada controlada
+            cur.execute("DELETE FROM public.layout_edges WHERE src_node_id=%s OR dst_node_id=%s", (node_id, node_id))
+            cur.execute("DELETE FROM public.layout_pumps WHERE pump_id=%s OR node_id=%s", (pump_id, node_id))
+            cur.execute("DELETE FROM public.pump_commands WHERE pump_id=%s", (pump_id,))
+            cur.execute("DELETE FROM public.pump_events WHERE pump_id=%s", (pump_id,))
+            cur.execute("DELETE FROM public.pump_heartbeat WHERE pump_id=%s", (pump_id,))
+
+            cur.execute("DELETE FROM public.pumps WHERE id=%s", (pump_id,))
             if cur.rowcount == 0:
                 raise HTTPException(404, "Bomba no encontrada")
+
             conn.commit()
-            return  # 204
+            return Response(status_code=204)
+        except HTTPException:
+            conn.rollback(); raise
         except Exception as e:
-            conn.rollback()
-            raise HTTPException(400, f"Delete pump error: {e}")
+            conn.rollback(); raise HTTPException(400, f"Delete pump error: {e}")
