@@ -34,17 +34,27 @@ import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
 import EditableEdge from "./components/edges/EditableEdge";
+import OpsDrawer from "./components/OpsDrawer";
 
 export default function InfraDiagram() {
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdge[]>([]);
   const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
 
-  // Edit mode state
+  // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
-  const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
+
+  // Node-RED ports state (resumen)
+  type PortRef = { nodeId: string; side: "out" | "in"; x: number; y: number };
+  const [connectFrom, setConnectFrom] = useState<PortRef | null>(null);
+  const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Ops drawer
+  const [opsOpen, setOpsOpen] = useState(false);
+  const [opsNode, setOpsNode] = useState<UINode | null>(null);
 
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -61,7 +71,7 @@ export default function InfraDiagram() {
   };
   const hideTip = () => setTip(null);
 
-  // Consulta viva cada 1s (configurada en QueryClient)
+  // Consulta viva
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout"],
     async (signal) => {
@@ -74,7 +84,7 @@ export default function InfraDiagram() {
     (raw) => raw
   );
 
-  // transformar a UI + aplicar layout + merge con localStorage
+  // Transformar a UI
   useEffect(() => {
     if (!data) return;
 
@@ -120,7 +130,6 @@ export default function InfraDiagram() {
       prioridad: e.prioridad,
     }));
 
-    // Merge con layout guardado localmente (si existe)
     const saved = loadLayoutFromStorage();
     const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
     const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
@@ -129,7 +138,7 @@ export default function InfraDiagram() {
     setEdges(uiEdges);
   }, [data]);
 
-  // mapas y viewBox
+  // Mapa y viewBox
   const nodesById = useMemo(() => {
     const m: Record<string, UINode> = {};
     for (const n of nodes) {
@@ -152,7 +161,6 @@ export default function InfraDiagram() {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
   };
 
-  /** Guarda local y POST al backend para el nodo indicado */
   const saveNodePosition = async (id: string) => {
     try {
       const pos = getPos(id);
@@ -164,61 +172,81 @@ export default function InfraDiagram() {
     }
   };
 
-  // ====== Edit mode actions ======
+  // ====== Edit / Connect ======
   const toggleEdit = () => {
-    const value = !editMode;
-    setEditMode(value);
-    if (!value) {
+    const next = !editMode;
+    setEditMode(next);
+    if (!next) {
       setConnectMode(false);
       setConnectFrom(null);
       setSelectedEdgeId(null);
     }
   };
-
   const toggleConnect = () => {
-    const value = !connectMode;
-    setConnectMode(value);
-    if (!value) setConnectFrom(null);
+    const v = !connectMode;
+    setConnectMode(v);
+    if (!v) setConnectFrom(null);
   };
 
-  const handlePickNode = async (nodeId: string) => {
-    if (!editMode || !connectMode) return;
-    if (!connectFrom) {
-      setConnectFrom(nodeId);
-      return;
-    }
-    if (connectFrom === nodeId) {
-      setConnectFrom(null);
-      return;
-    }
-    // evitar duplicados
-    const exists = edges.some((e) => e.a === connectFrom && e.b === nodeId);
-    if (exists) {
-      alert("Esa conexión ya existe.");
-      setConnectFrom(null);
-      return;
-    }
+  // ====== Node-RED helpers (resumen) ======
+  function halfByType(t?: string) {
+    const tt = (t || "").toLowerCase();
+    if (tt === "tank") return 66;
+    if (tt === "pump") return 26;
+    if (tt === "manifold") return 55;
+    if (tt === "valve") return 14;
+    return 20;
+  }
+  function portsOf(n: UINode) {
+    const off = 6;
+    return {
+      in: { x: n.x - halfByType(n.type) - off, y: n.y },
+      out: { x: n.x + halfByType(n.type) + off, y: n.y },
+    };
+  }
+  function clientToSvgPoint(e: React.MouseEvent | React.PointerEvent) {
+    if (!svgRef.current) return null;
+    const pt = svgRef.current.createSVGPoint();
+    pt.x = (e as any).clientX; pt.y = (e as any).clientY;
+    const m = svgRef.current.getScreenCTM(); if (!m) return null;
+    const p = pt.matrixTransform(m.inverse());
+    return { x: p.x, y: p.y };
+  }
+  function edgeExists(src: string, dst: string) {
+    return edges.some((e) => e.a === src && e.b === dst);
+  }
+  async function tryCreateEdge(src: string, dst: string) {
+    if (src === dst || edgeExists(src, dst)) return;
     try {
-      const created = await apiCreateEdge({ src_node_id: connectFrom, dst_node_id: nodeId });
-      // refresco optimista
-      setEdges((prev) => [
-        { id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad },
-        ...prev,
-      ]);
+      const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
+      setEdges((prev) => [{ id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad }, ...prev]);
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
-    } finally {
-      setConnectFrom(null);
     }
-  };
+  }
+
+  // Keyboard: Delete para borrar, Esc cancelar
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setConnectFrom(null);
+        setSelectedEdgeId(null);
+        setOpsOpen(false);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedEdgeId != null && editMode) {
+        e.preventDefault();
+        handleDeleteEdge(selectedEdgeId);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [editMode, selectedEdgeId]);
 
   const handleDeleteEdge = async (edgeId: number) => {
-    if (!editMode) return;
-    if (!confirm("¿Borrar esta conexión?")) return;
     try {
       await apiDeleteEdge(edgeId);
       setEdges((prev) => prev.filter((e) => e.id !== edgeId));
+      setSelectedEdgeId(null);
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo borrar la conexión");
@@ -226,7 +254,6 @@ export default function InfraDiagram() {
   };
 
   const applyAutoLayout = async () => {
-    // recalcular posiciones por tipo y persistir todas
     const pumps = nodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = nodes.filter((n) => n.type === "tank") as TankNode[];
     const manifolds = nodes.filter((n) => n.type === "manifold") as ManifoldNode[];
@@ -239,24 +266,35 @@ export default function InfraDiagram() {
 
     const byId: Record<string, UINode> = {};
     [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach((n) => (byId[n.id] = n));
-
     const next = nodes.map((n) => byId[n.id] ?? n);
     setNodes(next);
 
-    // persistir
-    const items = next.map((n) => ({ node_id: n.id, x: n.x, y: n.y }));
     try {
-      await updateLayoutMany(items);
+      await updateLayoutMany(next.map((n) => ({ node_id: n.id, x: n.x, y: n.y })));
       saveLayoutToStorage(next);
     } catch (err) {
       console.error(err);
-      alert("No se pudo guardar el auto-orden. Ver consola.");
+      alert("No se pudo guardar el auto-orden.");
     }
   };
 
+  // preview path para cable fantasma
+  function previewPath(sx: number, sy: number, ex: number, ey: number) {
+    const mx = (sx + ex) / 2;
+    return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ey} L ${ex} ${ey}`;
+  }
+
+  // abrir operación si no estamos conectando/edición y el nodo está online
+  function maybeOpenOps(n: UINode) {
+    if (editMode || connectMode) return;        // operamos solo fuera de edición/conexión
+    if (n.online !== true) return;              // solo online
+    setOpsNode(n);
+    setOpsOpen(true);
+  }
+
   return (
     <div style={{ padding: 0 }}>
-      {/* barra liviana */}
+      {/* barra superior */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#64748b", padding: "6px 8px" }}>
         {error ? (
           <span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>
@@ -266,36 +304,13 @@ export default function InfraDiagram() {
           "Sincronizado"
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button
-            onClick={toggleEdit}
-            style={{
-              padding: "4px 8px",
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              background: editMode ? "#0ea5e9" : "#ffffff",
-              color: editMode ? "#ffffff" : "#0f172a",
-            }}
-          >
+          <button onClick={toggleEdit} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: editMode ? "#0ea5e9" : "#ffffff", color: editMode ? "#ffffff" : "#0f172a" }}>
             {editMode ? "Salir edición" : "Editar"}
           </button>
-          <button
-            onClick={applyAutoLayout}
-            disabled={!editMode}
-            style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#ffffff" }}
-          >
+          <button onClick={applyAutoLayout} disabled={!editMode} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#ffffff" }}>
             Auto-ordenar
           </button>
-          <button
-            onClick={toggleConnect}
-            disabled={!editMode}
-            style={{
-              padding: "4px 8px",
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              background: connectMode ? "#0ea5e9" : "#ffffff",
-              color: connectMode ? "#ffffff" : "#0f172a",
-            }}
-          >
+          <button onClick={() => setConnectMode((v) => !v)} disabled={!editMode} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: connectMode ? "#0ea5e9" : "#ffffff", color: connectMode ? "#ffffff" : "#0f172a" }}>
             {connectMode ? "Conectar: ON" : "Conectar"}
           </button>
         </div>
@@ -304,76 +319,59 @@ export default function InfraDiagram() {
       {!error && (
         <div
           ref={wrapRef}
-          style={{
-            position: "relative",
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
-            overflow: "hidden",
-            background: "#ffffff",
-          }}
+          style={{ position: "relative", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}
         >
           <TransformWrapper initialScale={1} minScale={0.6} maxScale={2.5} wheel={{ step: 0.1 }}>
             <TransformComponent wrapperStyle={{ width: "100%" }}>
-              <svg width={1000} height={520} viewBox={viewBoxStr} style={{ display: "block", width: "100%" }}>
+              <svg
+                ref={svgRef}
+                width={1000}
+                height={520}
+                viewBox={viewBoxStr}
+                style={{ display: "block", width: "100%" }}
+                onMouseMove={(e) => {
+                  if (!connectFrom) return;
+                  const p = clientToSvgPoint(e);
+                  if (p) setMouseSvg(p);
+                }}
+                onMouseDown={() => {
+                  if (editMode) setSelectedEdgeId(null); // click en fondo limpia selección
+                }}
+              >
                 <defs>
                   <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
                     <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="1" />
                   </pattern>
-                  <marker id="arrow" markerWidth="10" markerHeight="10" refX="10" refY="3" orient="auto" markerUnits="strokeWidth" viewBox="0 0 10 10">
-                    <path d="M 0 0 L 10 3 L 0 6 z" fill="#64748b" />
-                  </marker>
-                  <filter id="dropshadow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.12" />
-                  </filter>
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                    <feMerge>
-                      <feMergeNode in="coloredBlur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                  <linearGradient id="lgTank" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f5f7fa" />
-                    <stop offset="100%" stopColor="#e9edf2" />
-                  </linearGradient>
-                  <linearGradient id="lgSteel" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#f8fafc" />
-                    <stop offset="50%" stopColor="#e2e8f0" />
-                    <stop offset="100%" stopColor="#f8fafc" />
-                  </linearGradient>
-                  <linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
-                    <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-                  </linearGradient>
-                  <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#cfe6ff" />
-                    <stop offset="100%" stopColor="#7bb3f8" />
-                  </linearGradient>
+                  <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="coloredBlur" /><feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+                  <linearGradient id="lgTank" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5f7fa" /><stop offset="100%" stopColor="#e9edf2" /></linearGradient>
+                  <linearGradient id="lgSteel" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#f8fafc" /><stop offset="50%" stopColor="#e2e8f0" /><stop offset="100%" stopColor="#f8fafc" /></linearGradient>
+                  <linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" /><stop offset="100%" stopColor="#ffffff" stopOpacity="0" /></linearGradient>
+                  <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#cfe6ff" /><stop offset="100%" stopColor="#7bb3f8" /></linearGradient>
                 </defs>
 
                 {/* Fondo */}
                 <rect x="0" y="0" width="1000" height="520" fill="#ffffff" />
                 <rect x="0" y="0" width="1000" height="520" fill="url(#grid)" opacity={0.6} />
 
-                {/* Aristas (editable si editMode) */}
-                {edges.map((e, idx) =>
+                {/* Aristas */}
+                {edges.map((e) =>
                   editMode ? (
                     <EditableEdge
-                      key={`edge-${e.id}-${idx}`}
+                      key={`edge-${e.id}`}
                       id={e.id}
                       a={e.a}
                       b={e.b}
                       nodesById={nodesById}
                       editable={editMode}
-                      onDelete={handleDeleteEdge}
                       selected={selectedEdgeId === e.id}
+                      onSelect={(id) => setSelectedEdgeId(id)}
                     />
                   ) : (
-                    <Edge key={`edge-${idx}`} a={e.a} b={e.b} nodesById={nodesById as any} />
+                    <Edge key={`edge-${e.id}`} a={e.a} b={e.b} nodesById={nodesById as any} />
                   )
                 )}
 
-                {/* Nodos */}
+                {/* Nodos: en modo normal, click => abrir drawer si online */}
                 {nodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -385,7 +383,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => handlePickNode(n.id)}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -397,7 +395,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => handlePickNode(n.id)}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "manifold" ? (
                     <ManifoldNodeView
@@ -409,7 +407,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => handlePickNode(n.id)}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "valve" ? (
                     <ValveNodeView
@@ -421,21 +419,65 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => handlePickNode(n.id)}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : null
                 )}
 
-                {/* (Opcional) línea guía de conexión en vivo */}
-                {/* Dejo preparado el espacio por si querés mostrar un cable fantasma hacia el mouse */}
+                {/* Puertos Node-RED (solo en conectar) */}
+                {editMode && connectMode &&
+                  nodes.map((n) => {
+                    const P = portsOf(n);
+                    return (
+                      <g key={`ports-${n.id}`}>
+                        <circle
+                          cx={P.in.x} cy={P.in.y} r={5}
+                          fill="#ffffff" stroke="#64748b" strokeWidth={1.6}
+                          onMouseUp={() => {
+                            if (connectFrom && connectFrom.side === "out") {
+                              tryCreateEdge(connectFrom.nodeId, n.id);
+                              setConnectFrom(null); setMouseSvg(null);
+                            }
+                          }}
+                        />
+                        <circle
+                          cx={P.out.x} cy={P.out.y} r={5}
+                          fill="#ffffff" stroke="#0ea5e9" strokeWidth={1.8}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setSelectedEdgeId(null);
+                            setOpsOpen(false);
+                            setConnectFrom({ nodeId: n.id, side: "out", x: P.out.x, y: P.out.y });
+                            const p = clientToSvgPoint(e); if (p) setMouseSvg(p);
+                          }}
+                        />
+                      </g>
+                    );
+                  })}
+
+                {/* Cable fantasma */}
+                {editMode && connectMode && connectFrom && mouseSvg && (
+                  <path
+                    d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
+                    stroke="#0ea5e9" strokeWidth={2} strokeDasharray="6 6" fill="none" opacity={0.9}
+                  />
+                )}
               </svg>
             </TransformComponent>
 
-            {/* Tooltip overlay */}
+            {/* Tooltip */}
             <Tooltip tip={tip} />
           </TransformWrapper>
         </div>
       )}
+
+      {/* Drawer de operación */}
+      <OpsDrawer
+        open={opsOpen}
+        onClose={() => setOpsOpen(false)}
+        node={opsNode}
+        onCommandSent={() => {/* podrías refrescar algo si querés */}}
+      />
     </div>
   );
 }
