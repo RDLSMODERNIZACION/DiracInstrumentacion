@@ -1,9 +1,87 @@
 # app/routes/dirac_admin/locations.py
 from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
+from pydantic import BaseModel, field_validator, Field
+from typing import Optional
 from app.db import get_conn
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-locations"])
+
+
+# -----------------------------
+# Modelo para creación (abierto)
+# -----------------------------
+
+class LocationCreate(BaseModel):
+    company_id: int
+    name: str
+    address: Optional[str] = None
+    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+
+    @field_validator("name")
+    @classmethod
+    def _trim(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("name requerido")
+        return v
+
+
+@router.post("/locations", summary="Crear/usar localización (abierto)", status_code=201)
+def create_location(payload: LocationCreate):
+    """
+    Abierto: permite crear una localización para cualquier empresa existente.
+    Si ya existe una localización con el mismo (company_id, lower(name)), la actualiza parcialmente (address/lat/lon).
+    """
+    name = payload.name.strip()
+
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # Validar empresa existente (FK)
+        cur.execute("SELECT id FROM companies WHERE id=%s", (payload.company_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, "Empresa inexistente")
+
+        # ¿Existe (company_id, lower(name))?
+        cur.execute(
+            "SELECT id, name, company_id, address, lat, lon FROM locations WHERE company_id=%s AND lower(name)=lower(%s)",
+            (payload.company_id, name),
+        )
+        existing = cur.fetchone()
+
+        try:
+            if existing:
+                # Upsert "suave": solo pisa lo que venga no-nulo
+                cur.execute(
+                    """
+                    UPDATE locations
+                       SET address = COALESCE(%s, address),
+                           lat     = COALESCE(%s, lat),
+                           lon     = COALESCE(%s, lon)
+                     WHERE id = %s
+                 RETURNING id, name, company_id, address, lat, lon
+                    """,
+                    (payload.address, payload.lat, payload.lon, existing["id"]),
+                )
+                row = cur.fetchone()
+                conn.commit()
+                return row or existing
+
+            # Inserción nueva
+            cur.execute(
+                """
+                INSERT INTO locations (company_id, name, address, lat, lon)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, name, company_id, address, lat, lon
+                """,
+                (payload.company_id, name, payload.address, payload.lat, payload.lon),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(400, f"Create location error: {e}")
 
 
 @router.get("/locations", summary="Listar localizaciones (abierto)")
@@ -83,7 +161,7 @@ def patch_location(
                  WHERE id=%s
              RETURNING id, name, company_id, address, lat, lon
                 """,
-                (name, address, lat, lon, location_id),
+                (name.strip() if isinstance(name, str) else name, address, lat, lon, location_id),
             )
             row = cur.fetchone()
             conn.commit()
