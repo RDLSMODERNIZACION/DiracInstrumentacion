@@ -11,6 +11,7 @@ import Locations from "./Locations";
 import Tanks from "./Tanks";
 import Pumps from "./Pumps";
 import Valves from "./Valves";
+import Manifolds from "./Manifolds"; // 👈 nuevo
 
 export default function App() {
   const { isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="tanks" element={<Tanks />} />
         <Route path="pumps" element={<Pumps />} />
         <Route path="valves" element={<Valves />} />
+        <Route path="manifolds" element={<Manifolds />} /> {/* 👈 nuevo */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -3,9 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useApi } from "../lib/api";
 import Section from "./Section";
 
-type Row = { id: number; name: string; location_id?: number|null };
-type Company = { id: number; name: string };
-type Location = { id: number; name: string; company_id?: number|null };
+type Row = { id: number; name: string; location_id?: number | null };
+type Location = { id: number; name: string; company_id?: number | null };
 
 export default function ManifoldEditor({
   row,
@@ -16,100 +15,159 @@ export default function ManifoldEditor({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const { getJSON, patchJSON, del } = useApi();
+  const { getJSON, patchJSON } = useApi();
 
-  const [name, setName] = useState(row.name);
-  const [companyId, setCompanyId] = useState<number | "">("");
+  const [name, setName] = useState(row.name || "");
+  const [locMode, setLocMode] = useState<"keep" | "change">("keep");
   const [locationId, setLocationId] = useState<number | "">(row.location_id ?? "");
-  const [locationName, setLocationName] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const [companies, setCompanies] = useState<Company[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loadingLocs, setLoadingLocs] = useState(false);
 
-  useEffect(() => { (async()=>{
-    setCompanies(await getJSON("/dirac/admin/companies"));
-  })(); }, []);
+  // Cargar ubicaciones existentes (abierto)
+  useEffect(() => {
+    (async () => {
+      setLoadingLocs(true);
+      try {
+        const ls: Location[] = await getJSON("/dirac/admin/locations");
+        setLocations(ls);
+      } catch (e: any) {
+        setErr(e?.message || String(e));
+      } finally {
+        setLoadingLocs(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useEffect(() => { (async()=>{
-    if (companyId !== "") setLocations(await getJSON(`/dirac/admin/locations?company_id=${Number(companyId)}`));
-    else setLocations(await getJSON("/dirac/admin/locations"));
-  })(); }, [companyId]);
+  const locationsById = useMemo(() => {
+    const m = new Map<number, Location>();
+    locations.forEach((l) => m.set(Number(l.id), l));
+    return m;
+  }, [locations]);
+
+  const currentLoc = row.location_id ? locationsById.get(Number(row.location_id)) : undefined;
 
   const canSave = useMemo(() => name.trim().length > 0, [name]);
 
   async function save() {
-    setErr(null); setBusy(true);
+    setErr(null);
+    setSaving(true);
     try {
-      const payload:any = { name: name.trim() };
-      if (locationId !== "") {
+      const payload: any = { name: name.trim() };
+      if (locMode === "change") {
+        if (locationId === "") {
+          setErr("Elegí una ubicación para cambiar.");
+          setSaving(false);
+          return;
+        }
         payload.location_id = Number(locationId);
-      } else if (companyId !== "" && locationName.trim()) {
-        payload.company_id = Number(companyId);
-        payload.location_name = locationName.trim();
       }
       await patchJSON(`/dirac/admin/manifolds/${row.id}`, payload);
       onSaved();
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e?.message || String(e));
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(force=false) {
-    setErr(null); setBusy(true);
-    try {
-      await del(`/dirac/admin/manifolds/${row.id}${force ? "?force=true": ""}`);
-      onSaved();
-    } catch (e:any) {
-      // si es 409 devolvé detalle
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
 
   return (
     <div className="space-y-4">
       <Section title="Datos" right={null}>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
+          {/* Nombre */}
           <label className="text-sm">
             <div className="text-xs text-slate-500">Nombre</div>
-            <input className="border rounded px-2 py-1 w-full" value={name} onChange={(e)=>setName(e.target.value)} />
+            <input
+              className="border rounded px-3 py-2 w-full"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Ej. Colector principal"
+            />
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="text-sm">
-              <div className="text-xs text-slate-500">Ubicación (existente)</div>
-              <select className="border rounded px-2 py-1 w-full" value={locationId} onChange={(e)=>setLocationId(e.target.value===""?"":Number(e.target.value))}>
-                <option value="">(crear nueva…)</option>
-                {locations.map(l=> <option key={l.id} value={l.id}>{l.name} #{l.id}</option>)}
-              </select>
+          {/* Ubicación (mantener / cambiar) */}
+          <div className="text-sm">
+            <div className="text-xs text-slate-500 mb-1">Ubicación</div>
+
+            <label className="flex items-center gap-2 mb-2">
+              <input
+                type="radio"
+                name="locmode"
+                value="keep"
+                checked={locMode === "keep"}
+                onChange={() => setLocMode("keep")}
+              />
+              <span>
+                Mantener ubicación actual (
+                {row.location_id
+                  ? currentLoc
+                    ? `${currentLoc.name} #${currentLoc.id}`
+                    : `#${row.location_id}`
+                  : "—"}
+                )
+              </span>
             </label>
-            <div className="text-slate-400 text-xs flex items-end">o</div>
-            <label className="text-sm">
-              <div className="text-xs text-slate-500">Empresa (para crear ubicación)</div>
-              <select className="border rounded px-2 py-1 w-full" value={companyId} onChange={(e)=>setCompanyId(e.target.value===""?"":Number(e.target.value))}>
-                <option value="">(sin empresa)</option>
-                {companies.map(c=> <option key={c.id} value={c.id}>{c.name} #{c.id}</option>)}
-              </select>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="locmode"
+                value="change"
+                checked={locMode === "change"}
+                onChange={() => setLocMode("change")}
+              />
+              <span>Cambiar ubicación</span>
             </label>
-            <label className="text-sm">
-              <div className="text-xs text-slate-500">Nombre de ubicación (si se crea)</div>
-              <input className="border rounded px-2 py-1 w-full" value={locationName} onChange={(e)=>setLocationName(e.target.value)} placeholder="Ej. Planta Norte" />
-            </label>
+
+            {locMode === "change" && (
+              <div className="mt-3">
+                <select
+                  className="border rounded px-2 py-1 min-w-[16rem]"
+                  value={locationId}
+                  onChange={(e) =>
+                    setLocationId(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  disabled={loadingLocs || locations.length === 0}
+                  title={
+                    locations.length === 0
+                      ? "No hay ubicaciones disponibles"
+                      : undefined
+                  }
+                >
+                  <option value="">(elegí una ubicación)</option>
+                  {locations
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} #{l.id}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
           </div>
 
-          {err && <div className="text-sm text-red-600">{err}</div>}
-          <div className="flex gap-2">
-            <button onClick={save} disabled={!canSave || busy} className="px-3 py-1.5 rounded bg-blue-600 text-white">
-              {busy ? "Guardando…" : "Guardar"}
+          {err && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+              {err}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded bg-slate-200">
+              Cancelar
             </button>
-            <button onClick={()=>remove(false)} disabled={busy} className="px-3 py-1.5 rounded bg-red-600 text-white">Eliminar</button>
-            <button onClick={()=>remove(true)} disabled={busy} className="px-3 py-1.5 rounded bg-rose-700 text-white" title="Forzar (borra layout + edges)">Forzar borrado</button>
-            <button onClick={onClose} className="px-3 py-1.5 rounded bg-slate-200">Cerrar</button>
+            <button
+              onClick={save}
+              disabled={!canSave || saving}
+              className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-60"
+            >
+              {saving ? "Guardando…" : "Guardar cambios"}
+            </button>
           </div>
         </div>
       </Section>

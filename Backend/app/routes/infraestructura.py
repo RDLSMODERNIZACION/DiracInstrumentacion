@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
 from app.db import get_conn
 from psycopg.rows import dict_row
@@ -27,74 +27,202 @@ async def health_db():
 # GET /infraestructura/get_layout_edges
 # -------------------------------------------------------------------
 @router.get("/get_layout_edges", response_model=List[dict])
-async def get_layout_edges():
+async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
-    Devuelve todas las conexiones entre nodos desde public.layout_edges.
-    """
-    sql = """
-    SELECT
-        edge_id,
-        src_node_id,
-        dst_node_id,
-        relacion,
-        prioridad,
-        updated_at
-    FROM public.layout_edges
-    ORDER BY updated_at DESC;
+    Devuelve las conexiones (layout_edges).
+    Con company_id, devuelve sólo aristas cuyos endpoints pertenecen a esa empresa.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql)
+            if company_id is None:
+                sql = """
+                SELECT
+                    edge_id,
+                    src_node_id,
+                    dst_node_id,
+                    relacion,
+                    prioridad,
+                    updated_at
+                FROM public.layout_edges
+                ORDER BY updated_at DESC
+                """
+                cur.execute(sql)
+                rows = cur.fetchall()
+                if not rows:
+                    raise HTTPException(status_code=404, detail="No se encontraron conexiones en public.layout_edges")
+                return rows
+
+            # Con scope por empresa: limitar a node_id de la empresa
+            sql_scoped = """
+            WITH nodes AS (
+              SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id
+              FROM public.tanks t
+              JOIN public.locations l ON l.id = t.location_id
+              LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
+              WHERE l.company_id = %s
+              UNION ALL
+              SELECT COALESCE(lp.node_id,'pump:'||p.id)
+              FROM public.pumps p
+              JOIN public.locations l ON l.id = p.location_id
+              LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
+              WHERE l.company_id = %s
+              UNION ALL
+              SELECT COALESCE(lv.node_id,'valve:'||v.id)
+              FROM public.valves v
+              JOIN public.locations l ON l.id = v.location_id
+              LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
+              WHERE l.company_id = %s
+              UNION ALL
+              SELECT COALESCE(lm.node_id,'manifold:'||m.id)
+              FROM public.manifolds m
+              JOIN public.locations l ON l.id = m.location_id
+              LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
+              WHERE l.company_id = %s
+            )
+            SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at
+            FROM public.layout_edges e
+            JOIN nodes a ON a.node_id = e.src_node_id
+            JOIN nodes b ON b.node_id = e.dst_node_id
+            ORDER BY e.updated_at DESC
+            """
+            cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             rows = cur.fetchall()
             if not rows:
-                raise HTTPException(status_code=404, detail="No se encontraron conexiones en public.layout_edges")
+                raise HTTPException(status_code=404, detail="No se encontraron conexiones para la empresa indicada")
             return rows
+
     except HTTPException:
         raise
     except Exception as e:
-        # Devolver el detalle para ver el motivo real (conexión/SQL)
         raise HTTPException(status_code=500, detail=f"DB error (edges): {e}")
+
 
 # -------------------------------------------------------------------
 # GET /infraestructura/get_layout_combined
 # -------------------------------------------------------------------
 @router.get("/get_layout_combined", response_model=List[dict])
-async def get_layout_combined():
+async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
-    Devuelve todos los nodos (pump/tank/valve/manifold) desde public.v_layout_combined.
-    """
-    sql = """
-    SELECT
-        node_id,
-        id,
-        type,
-        x,
-        y,
-        updated_at,
-        online,
-        state,
-        level_pct,
-        alarma
-    FROM public.v_layout_combined
-    ORDER BY type, id;
+    Devuelve los nodos (tank/pump/valve/manifold).
+    Con company_id, filtra por locations.company_id y arma el node_id aunque falte layout.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql)
+            if company_id is None:
+                sql = """
+                SELECT
+                    node_id,
+                    id,
+                    type,
+                    x,
+                    y,
+                    updated_at,
+                    online,
+                    state,
+                    level_pct,
+                    alarma
+                FROM public.v_layout_combined
+                ORDER BY type, id
+                """
+                cur.execute(sql)
+                nodes = cur.fetchall()
+                if not nodes:
+                    raise HTTPException(status_code=404, detail="No se encontraron nodos en v_layout_combined")
+                return nodes
+
+            # Con scope por empresa
+            sql_scoped = """
+            WITH t AS (
+              SELECT
+                COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
+                t.id::bigint                        AS id,
+                'tank'::text                        AS type,
+                lt.x, lt.y, lt.updated_at,
+                NULL::boolean                       AS online,
+                NULL::text                          AS state,
+                (
+                  SELECT level_pct
+                  FROM public.tank_ingest i
+                  WHERE i.tank_id = t.id
+                  ORDER BY created_at DESC
+                  LIMIT 1
+                )::numeric                          AS level_pct,
+                NULL::text                          AS alarma
+              FROM public.tanks t
+              JOIN public.locations l ON l.id = t.location_id
+              LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
+              WHERE l.company_id = %s
+            ),
+            p AS (
+              SELECT
+                COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
+                p.id::bigint                         AS id,
+                'pump'::text                         AS type,
+                lp.x, lp.y, lp.updated_at,
+                s.online                             AS online,
+                s.state                              AS state,
+                NULL::numeric                        AS level_pct,
+                NULL::text                           AS alarma
+              FROM public.pumps p
+              JOIN public.locations l ON l.id = p.location_id
+              LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
+              LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+              WHERE l.company_id = %s
+            ),
+            v AS (
+              SELECT
+                COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
+                v.id::bigint                          AS id,
+                'valve'::text                         AS type,
+                lv.x, lv.y, lv.updated_at,
+                NULL::boolean                         AS online,
+                NULL::text                            AS state,
+                NULL::numeric                         AS level_pct,
+                NULL::text                            AS alarma
+              FROM public.valves v
+              JOIN public.locations l ON l.id = v.location_id
+              LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
+              WHERE l.company_id = %s
+            ),
+            m AS (
+              SELECT
+                COALESCE(lm.node_id, 'manifold:'||m.id) AS node_id,
+                m.id::bigint                             AS id,
+                'manifold'::text                         AS type,
+                lm.x, lm.y, lm.updated_at,
+                NULL::boolean                            AS online,
+                NULL::text                               AS state,
+                NULL::numeric                            AS level_pct,
+                NULL::text                               AS alarma
+              FROM public.manifolds m
+              JOIN public.locations l ON l.id = m.location_id
+              LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
+              WHERE l.company_id = %s
+            )
+            SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM t
+            UNION ALL
+            SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM p
+            UNION ALL
+            SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM v
+            UNION ALL
+            SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM m
+            ORDER BY type,id
+            """
+            cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             nodes = cur.fetchall()
             if not nodes:
-                raise HTTPException(status_code=404, detail="No se encontraron nodos en v_layout_combined")
+                raise HTTPException(status_code=404, detail="No se encontraron nodos para la empresa indicada")
             return nodes
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (combined): {e}")
 
+
 # -------------------------------------------------------------------
 # POST /infraestructura/update_layout
 # -------------------------------------------------------------------
-
-
 @router.post("/update_layout")
 async def update_layout(request: Request):
     data = await request.json()
@@ -151,20 +279,113 @@ async def update_layout(request: Request):
         raise HTTPException(status_code=500, detail=f"DB error (update): {e}")
 
 
+# -------------------------------------------------------------------
+# GET /infraestructura/bootstrap_layout
+# -------------------------------------------------------------------
 @router.get("/bootstrap_layout")
-async def bootstrap_layout():
+async def bootstrap_layout(company_id: int | None = Query(default=None)):
+    """
+    Devuelve {nodes, edges}; con company_id, lo limita a esa empresa.
+    """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            if company_id is None:
+                cur.execute("""
+                    SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
+                    FROM public.v_layout_combined ORDER BY type,id
+                """)
+                nodes = cur.fetchall()
+
+                cur.execute("""
+                    SELECT edge_id,src_node_id,dst_node_id,relacion,prioridad,updated_at
+                    FROM public.layout_edges ORDER BY updated_at DESC
+                """)
+                edges = cur.fetchall()
+
+                return {"nodes": nodes, "edges": edges}
+
+            # Con scope: nodos
             cur.execute("""
+                WITH t AS (
+                  SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id, t.id::bigint AS id, 'tank'::text AS type,
+                         lt.x, lt.y, lt.updated_at, NULL::boolean AS online, NULL::text AS state,
+                         (SELECT level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY created_at DESC LIMIT 1)::numeric AS level_pct,
+                         NULL::text AS alarma
+                  FROM public.tanks t
+                  JOIN public.locations l ON l.id=t.location_id
+                  LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
+                  WHERE l.company_id=%s
+                ),
+                p AS (
+                  SELECT COALESCE(lp.node_id,'pump:'||p.id), p.id::bigint, 'pump'::text,
+                         lp.x, lp.y, lp.updated_at, s.online, s.state, NULL::numeric, NULL::text
+                  FROM public.pumps p
+                  JOIN public.locations l ON l.id=p.location_id
+                  LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
+                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id=p.id
+                  WHERE l.company_id=%s
+                ),
+                v AS (
+                  SELECT COALESCE(lv.node_id,'valve:'||v.id), v.id::bigint, 'valve'::text,
+                         lv.x, lv.y, lv.updated_at, NULL::boolean, NULL::text, NULL::numeric, NULL::text
+                  FROM public.valves v
+                  JOIN public.locations l ON l.id=v.location_id
+                  LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
+                  WHERE l.company_id=%s
+                ),
+                m AS (
+                  SELECT COALESCE(lm.node_id,'manifold:'||m.id), m.id::bigint, 'manifold'::text,
+                         lm.x, lm.y, lm.updated_at, NULL::boolean, NULL::text, NULL::numeric, NULL::text
+                  FROM public.manifolds m
+                  JOIN public.locations l ON l.id=m.location_id
+                  LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
+                  WHERE l.company_id=%s
+                ),
+                nodes AS (
+                  SELECT * FROM t
+                  UNION ALL SELECT * FROM p
+                  UNION ALL SELECT * FROM v
+                  UNION ALL SELECT * FROM m
+                )
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
-                FROM public.v_layout_combined ORDER BY type,id
-            """)
+                FROM nodes
+                ORDER BY type,id
+            """, (company_id, company_id, company_id, company_id))
             nodes = cur.fetchall()
 
+            # Con scope: edges
             cur.execute("""
-                SELECT edge_id,src_node_id,dst_node_id,relacion,prioridad,updated_at
-                FROM public.layout_edges ORDER BY updated_at DESC
-            """)
+                WITH nodes AS (
+                  SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id
+                  FROM public.tanks t
+                  JOIN public.locations l ON l.id=t.location_id
+                  LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
+                  WHERE l.company_id=%s
+                  UNION ALL
+                  SELECT COALESCE(lp.node_id,'pump:'||p.id)
+                  FROM public.pumps p
+                  JOIN public.locations l ON l.id=p.location_id
+                  LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
+                  WHERE l.company_id=%s
+                  UNION ALL
+                  SELECT COALESCE(lv.node_id,'valve:'||v.id)
+                  FROM public.valves v
+                  JOIN public.locations l ON l.id=v.location_id
+                  LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
+                  WHERE l.company_id=%s
+                  UNION ALL
+                  SELECT COALESCE(lm.node_id,'manifold:'||m.id)
+                  FROM public.manifolds m
+                  JOIN public.locations l ON l.id=m.location_id
+                  LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
+                  WHERE l.company_id=%s
+                )
+                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at
+                FROM public.layout_edges e
+                JOIN nodes a ON a.node_id = e.src_node_id
+                JOIN nodes b ON b.node_id = e.dst_node_id
+                ORDER BY e.updated_at DESC
+            """, (company_id, company_id, company_id, company_id))
             edges = cur.fetchall()
 
             return {"nodes": nodes, "edges": edges}
