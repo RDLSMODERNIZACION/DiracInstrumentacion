@@ -31,7 +31,13 @@ async function postJSON(path: string, body: any) {
 
 const ONLINE_DEAD_SEC = 60;
 
-export function PumpFaceplate({ pump }: { pump: any }) {
+export function PumpFaceplate({
+  pump,
+  canControl = true, // ⬅️ nuevo: control habilitado sólo para owner/admin/operator (lo decide ScadaApp)
+}: {
+  pump: any;
+  canControl?: boolean;
+}) {
   const pumpNumId = pump.pumpId ?? pump.id;
 
   // Tipo de arranque (solo display)
@@ -39,11 +45,7 @@ export function PumpFaceplate({ pump }: { pump: any }) {
     pump.driveType ?? pump.drive_type ?? pump.config?.drive_type ?? null;
 
   const driveLabel =
-    driveType === "vfd"
-      ? "Variador (VFD)"
-      : driveType === "soft"
-      ? "Arranque suave"
-      : "Directo";
+    driveType === "vfd" ? "Variador (VFD)" : driveType === "soft" ? "Arranque suave" : "Directo";
 
   // Estado inicial desde props
   const initialState: "run" | "stop" = pump.state === "run" ? "run" : "stop";
@@ -62,7 +64,11 @@ export function PumpFaceplate({ pump }: { pump: any }) {
     ? Number(pump.ageSec)
     : NaN;
   const online: boolean =
-    typeof pump?.online === "boolean" ? pump.online : (Number.isFinite(ageSec) ? ageSec <= ONLINE_DEAD_SEC : false);
+    typeof pump?.online === "boolean"
+      ? pump.online
+      : Number.isFinite(ageSec)
+      ? ageSec <= ONLINE_DEAD_SEC
+      : false;
 
   // Sincronizar estado visual si cambia desde el backend y no estamos enviando
   React.useEffect(() => {
@@ -75,12 +81,16 @@ export function PumpFaceplate({ pump }: { pump: any }) {
   const tone: Tone = localState === "run" ? "ok" : "warn";
 
   const pinValid = /^\d{4}$/.test(pin);
-  const canSend = online && pinValid && !busy;
+  const canSend = online && pinValid && !busy && canControl;
 
   async function send(kind: "START" | "STOP") {
     setErr(null);
     setNote(null);
 
+    if (!canControl) {
+      setErr("Tu rol no puede operar bombas.");
+      return;
+    }
     if (!online) {
       setErr("No se puede operar: la bomba está offline.");
       return;
@@ -96,7 +106,7 @@ export function PumpFaceplate({ pump }: { pump: any }) {
     setLocalState(kind === "START" ? "run" : "stop");
 
     try {
-      // Nuevo endpoint con validación de permisos y PIN en backend
+      // Endpoint con validación de permisos y PIN en backend
       await postJSON(`/dirac/pumps/${pumpNumId}/command`, {
         action: kind === "START" ? "start" : "stop",
         pin,
@@ -151,10 +161,15 @@ export function PumpFaceplate({ pump }: { pump: any }) {
             autoFocus
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder="PIN (4 dígitos)"
-            className="w-28 text-center rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+            placeholder={canControl ? "PIN (4 dígitos)" : "Sin permisos para operar"}
+            disabled={!canControl}
+            className="w-40 text-center rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-slate-300"
+            title={!canControl ? "Tu rol no puede operar bombas" : ""}
           />
           {!online && <span className="text-xs text-slate-500">La bomba debe estar Online para operar.</span>}
+          {!canControl && (
+            <span className="text-xs text-slate-500">Permisos requeridos: owner / admin / operator.</span>
+          )}
         </div>
       </div>
 
@@ -167,7 +182,15 @@ export function PumpFaceplate({ pump }: { pump: any }) {
             onClick={() => send("START")}
             disabled={!canSend}
             className="px-3 py-1.5 rounded-xl bg-slate-900 text-white disabled:bg-slate-200 disabled:text-slate-400"
-            title={!online ? "Requiere online" : !pinValid ? "Ingresá el PIN (4 dígitos)" : "Enviar START"}
+            title={
+              !canControl
+                ? "Tu rol no puede operar bombas"
+                : !online
+                ? "Requiere online"
+                : !pinValid
+                ? "Ingresá el PIN (4 dígitos)"
+                : "Enviar START"
+            }
           >
             {busy === "START" ? "…" : "START"}
           </button>
@@ -176,7 +199,15 @@ export function PumpFaceplate({ pump }: { pump: any }) {
             onClick={() => send("STOP")}
             disabled={!canSend}
             className="px-3 py-1.5 rounded-xl bg-slate-200 disabled:opacity-50"
-            title={!online ? "Requiere online" : !pinValid ? "Ingresá el PIN (4 dígitos)" : "Enviar STOP"}
+            title={
+              !canControl
+                ? "Tu rol no puede operar bombas"
+                : !online
+                ? "Requiere online"
+                : !pinValid
+                ? "Ingresá el PIN (4 dígitos)"
+                : "Enviar STOP"
+            }
           >
             {busy === "STOP" ? "…" : "STOP"}
           </button>

@@ -35,6 +35,8 @@ from app.routes.dirac_admin.valves import router as admin_valves_router
 
 from app.routes.dirac.me import router as dirac_me_router  # <- KEEP/ADD
 
+from app.routes.infra_edit import router as infra_edit_router
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -126,3 +128,6 @@ app.include_router(dirac_me_router)  # <- KEEP/ADD
 @app.on_event("shutdown")
 def _shutdown():
     close_pool()
+
+
+app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"

@@ -16,7 +16,7 @@ const DEFAULT_THRESHOLDS = { lowCritical: 10, lowWarning: 25, highWarning: 80, h
 const ONLINE_DEAD_SEC = 60; // <= 60s = online
 const ONLINE_WARN_SEC = 120; // >60 y <=120 = warn
 
-type View = "operaciones" | "kpi" | "infra";
+type View = "operaciones" | "kpi" | "infra" | "admin";
 
 const app1Src = import.meta.env.DEV
   ? import.meta.env.VITE_APP1_DEV ?? "http://localhost:5174/"
@@ -25,6 +25,11 @@ const app1Src = import.meta.env.DEV
 const app2Src = import.meta.env.DEV
   ? import.meta.env.VITE_APP2_DEV ?? "http://localhost:5175/"
   : "/infraestructura/";
+
+// App de Administración independiente (igual que KPI/Infra)
+const app3Src = import.meta.env.DEV
+  ? (import.meta.env.VITE_ADMIN_DEV ?? import.meta.env.VITE_APP3_DEV ?? "http://localhost:5176/")
+  : "/admin/";
 
 type Props = {
   initialUser?: User;
@@ -39,7 +44,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     type: null,
   });
 
-  // El usuario viene desde AppRoot (derivado de /dirac/me/locations). Fallback viewer simple.
+  // Usuario derivado de /dirac/me/locations
   const [user] = React.useState<User>(
     initialUser ||
       ({
@@ -49,12 +54,27 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       } as unknown as User)
   );
 
-  const [view, setView] = React.useState<View>("operaciones"); // 👈 vista actual
+  // ✅ sólo owner/admin/operator pueden operar bombas (UI)
+  const canControlPumps = React.useMemo(
+    () => ["owner", "admin", "operator"].includes((user?.role as any) ?? ""),
+    [user?.role]
+  );
+
+  // ✅ sólo owner/admin pueden acceder a KPI/Infra
+  const canSeeAdvanced = React.useMemo(
+    () => ["owner", "admin"].includes((user?.role as any) ?? ""),
+    [user?.role]
+  );
+
+  // ✅ sólo owner pueden acceder a Administración
+  const canSeeAdmin = React.useMemo(() => (user?.role as any) === "owner", [user?.role]);
+
+  const [view, setView] = React.useState<View>("operaciones"); // vista actual
 
   // 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
 
-  // 👉 ahora pasamos allowedLocationIds para que el hook filtre lo que trae del backend
+  // Pasamos allowedLocationIds para que el hook filtre lo que trae del backend
   const { plant, loading, err, kpis } = usePlant(pollMs, allowedLocationIds);
 
   // === statusByKey para tanques y bombas ===
@@ -106,7 +126,23 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     />
   );
 
-  // === Contenido central según vista ===
+  const noPermsBanner = (
+    <div className="max-w-7xl mx-auto p-4 md:p-6">
+      <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-4 py-3 text-sm">
+        No tenés permisos suficientes para acceder a esta sección. Se requiere rol <b>Owner</b> o <b>Admin</b>.
+      </div>
+    </div>
+  );
+
+  const ownerOnlyBanner = (
+    <div className="max-w-7xl mx-auto p-4 md:p-6">
+      <div className="rounded-lg border border-rose-300 bg-rose-50 text-rose-800 px-4 py-3 text-sm">
+        No tenés permisos suficientes para acceder a <b>Administración</b>. Se requiere rol <b>Owner</b>.
+      </div>
+    </div>
+  );
+
+  // === Contenido central según vista (con gating de permisos) ===
   const mainBody = (() => {
     if (view === "operaciones") {
       return (
@@ -122,10 +158,16 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       );
     }
     if (view === "kpi") {
+      if (!canSeeAdvanced) return noPermsBanner;
       return <EmbeddedAppFrame src={app1Src} title="KPIs" />;
     }
-    // view === "infra"
-    return <EmbeddedAppFrame src={app2Src} title="Infraestructura" />;
+    if (view === "infra") {
+      if (!canSeeAdvanced) return noPermsBanner;
+      return <EmbeddedAppFrame src={app2Src} title="Infraestructura" />;
+    }
+    // view === "admin" (solo owner)
+    if (!canSeeAdmin) return ownerOnlyBanner;
+    return <EmbeddedAppFrame src={app3Src} title="Administración" />;
   })();
 
   // Nombre de empresa mostrado en UI (preferí el que trae initialUser, y como backup el id seleccionado)
@@ -149,6 +191,8 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <NavItem label="Operaciones" active={view === "operaciones"} onClick={() => setView("operaciones")} />
               <NavItem label="KPIs" active={view === "kpi"} onClick={() => setView("kpi")} />
               <NavItem label="Infraestructura" active={view === "infra"} onClick={() => setView("infra")} />
+              {/* Nueva pestaña Administración (embed app). Se puede mostrar siempre; el gating se hace en el body */}
+              <NavItem label="Administración" active={view === "admin"} onClick={() => setView("admin")} />
             </nav>
           </div>
 
@@ -165,20 +209,18 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
             <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="text-lg font-semibold tracking-tight">
-                  {view === "operaciones" ? "Operaciones" : view === "kpi" ? "KPIs" : "Infraestructura"}
+                  {view === "operaciones"
+                    ? "Operaciones"
+                    : view === "kpi"
+                    ? "KPIs"
+                    : view === "infra"
+                    ? "Infraestructura"
+                    : "Administración"}
                 </div>
                 {view === "operaciones" && (
                   <div className="hidden md:flex items-center gap-3 text-xs">
-                    <KpiPill
-                      label="Nivel promedio"
-                      value={loading && !plant.tanks.length ? "…" : `${kpis.avg}%`}
-                      tone="ok"
-                    />
-                    <KpiPill
-                      label="Críticos"
-                      value={loading && !plant.tanks.length ? "…" : `${kpis.crit}`}
-                      tone={kpis.crit ? "bad" : "ok"}
-                    />
+                    <KpiPill label="Nivel promedio" value={loading && !plant.tanks.length ? "…" : `${kpis.avg}%`} tone="ok" />
+                    <KpiPill label="Críticos" value={loading && !plant.tanks.length ? "…" : `${kpis.crit}`} tone={kpis.crit ? "bad" : "ok"} />
                   </div>
                 )}
               </div>
@@ -215,7 +257,13 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
             right={isTank && meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
           >
             {isTank && t && <TankFaceplate tank={t} headerless />}
-            {drawer.type === "pump" && p && <PumpFaceplate pump={p} />}
+            {drawer.type === "pump" && p && (
+              <PumpFaceplate
+                pump={p}
+                // UI: solo owner/admin/operator ven habilitados los botones
+                canControl={canControlPumps}
+              />
+            )}
           </Drawer>
         );
       })()}
