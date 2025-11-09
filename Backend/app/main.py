@@ -37,6 +37,8 @@ from app.routes.dirac.me import router as dirac_me_router  # <- KEEP/ADD
 
 from app.routes.infra_edit import router as infra_edit_router
 
+from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -131,3 +133,4 @@ def _shutdown():
 
 
 app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"
+app.include_router(admin_manifolds_router)

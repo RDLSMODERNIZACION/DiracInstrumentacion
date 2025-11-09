@@ -172,7 +172,7 @@ export default function Locations() {
         return;
       }
       if (createCompanyId !== "") payload.company_id = Number(createCompanyId);
-      await postJSON("/dirac/locations", payload);
+      await postJSON("/dirac/admin/locations", payload);
       setName("");
       setCreateCompanyId("");
       await load();
@@ -372,7 +372,7 @@ export default function Locations() {
               <th className="px-2 py-1">Empresa</th>
             </tr>
           </thead>
-          <tbody>
+        <tbody>
             {items.map((l) => (
               <tr
                 key={l.id}
