@@ -3,7 +3,7 @@ from fastapi import APIRouter, Query, HTTPException
 from psycopg.rows import dict_row
 from app.db import get_conn
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, List, Any, Dict
 
 # Un solo router para todo: /kpi/*
 router = APIRouter(prefix="/kpi", tags=["kpi"])
@@ -65,7 +65,6 @@ def _compute_alarm(level_pct, low_low, low, high, high_high) -> str:
 # =========================
 # Ping/diagnóstico
 # =========================
-
 @router.get("/ping", summary="Ping KPI (sin DB)")
 def kpi_ping():
     return {"ok": True, "module": "kpi", "tz": LOCAL_TZ}
@@ -75,25 +74,39 @@ def kpi_ping():
 # =========================
 
 @router.get("/pumps/status", summary="Estado de bombas (vista kpi.v_pumps_with_status)")
-def list_pumps_status():
-    sql = """
-    select
-      pump_id,
-      name,
-      location_id,
-      location_name,
-      state,
-      latest_event_id,
-      age_sec,
-      online,
-      event_ts,
-      latest_hb_id,
-      hb_ts
-    from kpi.v_pumps_with_status
-    order by pump_id
+def list_pumps_status(
+    company_id: Optional[int] = Query(None, description="Filtra por empresa"),
+    location_id: Optional[int] = Query(None, description="Filtra por localidad específica")
+):
     """
+    Devuelve el estado de bombas desde la vista `kpi.v_pumps_with_status`,
+    filtrando por empresa (join a locations) y opcionalmente por location_id.
+    """
+    sql = """
+    SELECT
+      v.pump_id,
+      v.name,
+      v.location_id,
+      v.location_name,
+      v.state,
+      v.latest_event_id,
+      v.age_sec,
+      v.online,
+      v.event_ts,
+      v.latest_hb_id,
+      v.hb_ts
+    FROM kpi.v_pumps_with_status v
+    JOIN public.locations l ON l.id = v.location_id
+    WHERE (%s IS NULL OR l.company_id = %s)
+    """
+    params: List[Any] = [company_id, company_id]
+    if location_id is not None:
+        sql += " AND l.id = %s"
+        params.append(location_id)
+    sql += " ORDER BY v.pump_id"
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
 
     out = []
@@ -115,28 +128,42 @@ def list_pumps_status():
 
 
 @router.get("/tanks/latest", summary="Últimos niveles y config de tanques (kpi.v_tanks_with_config)")
-def list_tanks_latest():
-    sql = """
-    select
-      tank_id,
-      name,
-      location_id,
-      location_name,
-      low_pct,
-      low_low_pct,
-      high_pct,
-      high_high_pct,
-      updated_by,
-      updated_at,
-      level_pct,
-      age_sec,
-      online,
-      alarma
-    from kpi.v_tanks_with_config
-    order by tank_id
+def list_tanks_latest(
+    company_id: Optional[int] = Query(None, description="Filtra por empresa"),
+    location_id: Optional[int] = Query(None, description="Filtra por localidad específica")
+):
     """
+    Devuelve última muestra/estado + thresholds desde `kpi.v_tanks_with_config`,
+    filtrando por empresa (join a locations) y opcionalmente por location_id.
+    """
+    sql = """
+    SELECT
+      v.tank_id,
+      v.name,
+      v.location_id,
+      v.location_name,
+      v.low_pct,
+      v.low_low_pct,
+      v.high_pct,
+      v.high_high_pct,
+      v.updated_by,
+      v.updated_at,
+      v.level_pct,
+      v.age_sec,
+      v.online,
+      v.alarma
+    FROM kpi.v_tanks_with_config v
+    JOIN public.locations l ON l.id = v.location_id
+    WHERE (%s IS NULL OR l.company_id = %s)
+    """
+    params: List[Any] = [company_id, company_id]
+    if location_id is not None:
+        sql += " AND l.id = %s"
+        params.append(location_id)
+    sql += " ORDER BY v.tank_id"
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql)
+        cur.execute(sql, params)
         rows = cur.fetchall()
 
     out = []
@@ -205,12 +232,28 @@ def buckets(
 def pumps_active(
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to:   Optional[datetime] = Query(None, alias="to"),
-    location_id: Optional[int] = None,
+    location_id: Optional[int] = Query(None),
+    company_id: Optional[int] = Query(None),
 ):
+    """
+    Recuento de bombas activas por hora. Fuente: kpi.v_kpi_stream (kind='pump', metric='state').
+    Filtra por company_id (via locations) y opcionalmente por location_id.
+    """
     df, dt = _ft_defaults(date_from, date_to)
+
+    # Armamos SQL con CTE de alcance por empresa para no duplicar filtros
+    loc_filter = "AND s_locs.id = v.location_id"
+    if location_id is not None:
+        loc_filter += " AND s_locs.id = %s"
+
     sql = f"""
     WITH bounds AS (
       SELECT %s::timestamptz AS from_ts, %s::timestamptz AS to_ts
+    ),
+    -- alcance por empresa
+    s_locs AS (
+      SELECT id FROM public.locations
+      WHERE (%s IS NULL OR company_id = %s)
     ),
     hours AS (
       SELECT generate_series(
@@ -219,19 +262,23 @@ def pumps_active(
         interval '1 hour'
       ) AS hour_utc
     ),
-    ev AS (
-      SELECT entity_id AS pump_id, ts, value,
-             lead(ts) OVER (PARTITION BY entity_id ORDER BY ts) AS next_ts,
-             location_id
+    v AS (
+      SELECT entity_id AS pump_id, ts, value, location_id,
+             lead(ts) OVER (PARTITION BY entity_id ORDER BY ts) AS next_ts
       FROM kpi.v_kpi_stream
       WHERE kind='pump' AND metric='state'
         AND ts >= (SELECT from_ts FROM bounds) - interval '6 hours'
         AND ts <  (SELECT to_ts   FROM bounds) + interval '6 hours'
-        { "AND location_id = %s" if location_id is not None else "" }
+    ),
+    ev AS (
+      SELECT pump_id, ts, next_ts
+      FROM v
+      JOIN s_locs ON {loc_filter.replace('v.', '')}  -- s_locs.id = location_id (y opcional location_id fixed)
+      WHERE value = '1' OR value = 1
     ),
     intervals AS (
       SELECT pump_id, ts AS start_ts, COALESCE(next_ts, now()) AS end_ts
-      FROM ev WHERE value = '1' OR value = 1
+      FROM ev
     ),
     counts AS (
       SELECT h.hour_utc, count(DISTINCT i.pump_id) AS pumps_count
@@ -246,7 +293,11 @@ def pumps_active(
     FROM counts
     ORDER BY 1;
     """
-    params = [df, dt] + ([location_id] if location_id is not None else [])
+
+    params: List[Any] = [df, dt, company_id, company_id]
+    if location_id is not None:
+        params.append(location_id)
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(sql, params)
         return cur.fetchall()
@@ -256,13 +307,23 @@ def pumps_active(
 def pumps_starts(
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to:   Optional[datetime] = Query(None, alias="to"),
-    location_id: Optional[int] = None,
-    entity_id:  Optional[int] = None,
+    location_id: Optional[int] = Query(None),
+    entity_id:  Optional[int] = Query(None),
+    company_id: Optional[int] = Query(None),
 ):
+    """
+    Arranques por hora. Fuente: kpi.v_kpi_stream (kind='pump', metric='state', event='start').
+    Filtra por company_id (via locations), por location_id y opcionalmente por entity_id (pump_id).
+    """
     df, dt = _ft_defaults(date_from, date_to)
+
     sql = f"""
     WITH bounds AS (
       SELECT %s::timestamptz AS from_ts, %s::timestamptz AS to_ts
+    ),
+    s_locs AS (
+      SELECT id FROM public.locations
+      WHERE (%s IS NULL OR company_id = %s)
     ),
     hours AS (
       SELECT generate_series(
@@ -272,12 +333,13 @@ def pumps_starts(
       ) AS hour_utc
     ),
     starts AS (
-      SELECT date_trunc('hour', ts) AS hour_utc, 1 AS one
-      FROM kpi.v_kpi_stream
-      WHERE kind='pump' AND metric='state' AND event='start'
-        AND ts >= (SELECT from_ts FROM bounds) AND ts < (SELECT to_ts FROM bounds)
-        { "AND location_id = %s" if location_id is not None else "" }
-        { "AND entity_id   = %s" if entity_id   is not None else "" }
+      SELECT date_trunc('hour', v.ts) AS hour_utc, 1 AS one
+      FROM kpi.v_kpi_stream v
+      JOIN s_locs ON s_locs.id = v.location_id
+      WHERE v.kind='pump' AND v.metric='state' AND v.event='start'
+        AND v.ts >= (SELECT from_ts FROM bounds) AND v.ts < (SELECT to_ts FROM bounds)
+        { "AND v.location_id = %s" if location_id is not None else "" }
+        { "AND v.entity_id   = %s" if entity_id   is not None else "" }
     ),
     agg AS (
       SELECT hour_utc, COALESCE(sum(one),0) AS starts FROM starts GROUP BY hour_utc
@@ -288,9 +350,11 @@ def pumps_starts(
     LEFT JOIN agg a USING (hour_utc)
     ORDER BY 1;
     """
-    params: list = [df, dt]
+
+    params: List[Any] = [df, dt, company_id, company_id]
     if location_id is not None: params.append(location_id)
     if entity_id   is not None: params.append(entity_id)
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(sql, params)
         return cur.fetchall()
@@ -300,13 +364,23 @@ def pumps_starts(
 def tanks_level_avg(
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to:   Optional[datetime] = Query(None, alias="to"),
-    location_id: Optional[int] = None,
-    entity_id:  Optional[int] = None,
+    location_id: Optional[int] = Query(None),
+    entity_id:  Optional[int] = Query(None),
+    company_id: Optional[int] = Query(None),
 ):
+    """
+    Promedio de nivel (%) por hora. Fuente: kpi.v_kpi_stream (kind='tank', metric='level_pct').
+    Filtra por company_id (via locations), por location_id y opcionalmente por entity_id (tank_id).
+    """
     df, dt = _ft_defaults(date_from, date_to)
+
     sql = f"""
     WITH bounds AS (
       SELECT %s::timestamptz AS from_ts, %s::timestamptz AS to_ts
+    ),
+    s_locs AS (
+      SELECT id FROM public.locations
+      WHERE (%s IS NULL OR company_id = %s)
     ),
     hours AS (
       SELECT generate_series(
@@ -316,12 +390,13 @@ def tanks_level_avg(
       ) AS hour_utc
     ),
     levels AS (
-      SELECT date_trunc('hour', ts) AS hour_utc, (value)::float AS val
-      FROM kpi.v_kpi_stream
-      WHERE kind='tank' AND metric='level_pct'
-        AND ts >= (SELECT from_ts FROM bounds) AND ts < (SELECT to_ts FROM bounds)
-        { "AND location_id = %s" if location_id is not None else "" }
-        { "AND entity_id   = %s" if entity_id   is not None else "" }
+      SELECT date_trunc('hour', v.ts) AS hour_utc, (v.value)::float AS val
+      FROM kpi.v_kpi_stream v
+      JOIN s_locs ON s_locs.id = v.location_id
+      WHERE v.kind='tank' AND v.metric='level_pct'
+        AND v.ts >= (SELECT from_ts FROM bounds) AND v.ts < (SELECT to_ts FROM bounds)
+        { "AND v.location_id = %s" if location_id is not None else "" }
+        { "AND v.entity_id   = %s" if entity_id   is not None else "" }
     ),
     agg AS (
       SELECT hour_utc, avg(val)::float AS avg_level_pct
@@ -334,9 +409,11 @@ def tanks_level_avg(
     LEFT JOIN agg a USING (hour_utc)
     ORDER BY 1;
     """
-    params: list = [df, dt]
+
+    params: List[Any] = [df, dt, company_id, company_id]
     if location_id is not None: params.append(location_id)
     if entity_id   is not None: params.append(entity_id)
+
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(sql, params)
         return cur.fetchall()

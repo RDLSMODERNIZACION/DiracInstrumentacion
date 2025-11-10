@@ -18,7 +18,8 @@ const ONLINE_WARN_SEC = 120; // >60 y <=120 = warn
 
 type View = "operaciones" | "kpi" | "infra" | "admin";
 
-const app1Src = import.meta.env.DEV
+/* 🔁 KPI (App 1): ahora lo armamos con company_id cuando esté seleccionado */
+const app1Base = import.meta.env.DEV
   ? import.meta.env.VITE_APP1_DEV ?? "http://localhost:5174/"
   : "/kpi/";
 
@@ -36,7 +37,7 @@ type Props = {
   initialUser?: User;
   /** Conjunto de location_id que el usuario puede ver (filtrado por empresa) */
   allowedLocationIds?: Set<number>;
-  /** Empresa seleccionada (opcional, sólo para mostrar y para pasar al iframe de infra) */
+  /** Empresa seleccionada (opcional, sólo para mostrar y para pasar al iframe de infra/KPI) */
   selectedCompanyId?: number | null;
 };
 
@@ -182,11 +183,28 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     </div>
   );
 
+  // 👉 KPI con scope de empresa: si hay selectedCompanyId, agregamos ?company_id=ID
+  const app1Src = React.useMemo(() => {
+    const base = app1Base;
+    if (selectedCompanyId == null) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}company_id=${selectedCompanyId}`;
+  }, [selectedCompanyId]);
+
   // 👉 Infra con scope de empresa: si hay selectedCompanyId, agregamos ?company_id=ID
   const app2Src = React.useMemo(() => {
     if (selectedCompanyId == null) return app2Base;
     const sep = app2Base.includes("?") ? "&" : "?";
     return `${app2Base}${sep}company_id=${selectedCompanyId}`;
+  }, [selectedCompanyId]);
+
+  // Persistimos el company_id para apps embebidas que leen de storage (fallback)
+  React.useEffect(() => {
+    if (selectedCompanyId != null) {
+      try {
+        sessionStorage.setItem("dirac.company_id", String(selectedCompanyId));
+      } catch {}
+    }
   }, [selectedCompanyId]);
 
   // === Contenido central según vista (con gating de permisos) ===
@@ -206,7 +224,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     }
     if (view === "kpi") {
       if (!canSeeAdvanced) return noPermsBanner;
-      return <EmbeddedAppFrame src={app1Src} title="KPIs" />;
+      return <EmbeddedAppFrame key={app1Src} src={app1Src} title="KPIs" />; // key fuerza remount al cambiar empresa
     }
     if (view === "infra") {
       if (!canSeeAdvanced) return noPermsBanner;
@@ -308,7 +326,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <PumpFaceplate
                 pump={p}
                 // UI: solo owner/admin/operator ven habilitados los botones
-                canControl={canControlPumps}
+                canControlPumps={canControlPumps}
               />
             )}
           </Drawer>
