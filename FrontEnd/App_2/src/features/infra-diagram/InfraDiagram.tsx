@@ -39,7 +39,10 @@ import OpsDrawer from "./components/OpsDrawer";
 export default function InfraDiagram() {
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdge[]>([]);
+
+  // ⬇️ viewBox dinámico (string para el <svg> y objeto para el fondo/grid)
   const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
+  const [vb, setVb] = useState({ minx: 0, miny: 0, w: 1000, h: 520 });
 
   // === DEBUG TOOLS ===
   const DEBUG = useMemo(() => {
@@ -189,9 +192,12 @@ export default function InfraDiagram() {
     return m;
   }, [nodes]);
 
+  // ⬇️ viewBox y fondo dinámicos: usamos el bbox real de los nodos (con padding)
   useEffect(() => {
     if (!nodes.length) return;
-    const bb = computeBBox(nodes, 60);
+    const pad = 90; // margen extra para que no quede todo pegado al borde
+    const bb = computeBBox(nodes, pad);
+    setVb(bb);
     setViewBoxStr(`${bb.minx} ${bb.miny} ${bb.w} ${bb.h}`);
   }, [nodes]);
 
@@ -396,9 +402,9 @@ export default function InfraDiagram() {
                   <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#cfe6ff" /><stop offset="100%" stopColor="#7bb3f8" /></linearGradient>
                 </defs>
 
-                {/* Fondo */}
-                <rect x="0" y="0" width={1000} height={520} fill="#ffffff" />
-                <rect x="0" y="0" width={1000} height={520} fill="url(#grid)" opacity={0.6} />
+                {/* Fondo dinámico = mismo rectángulo que el viewBox */}
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
                 {/* Aristas */}
                 {edges.map((e) =>

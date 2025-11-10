@@ -30,12 +30,11 @@ async def health_db():
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
     Devuelve las conexiones (layout_edges).
-    - Si `company_id` es None: devuelve todas las aristas.
-    - Si `company_id` tiene valor: devuelve sólo aristas cuyos endpoints
+    - Si company_id es None: devuelve todas las aristas.
+    - Si company_id tiene valor: devuelve sólo aristas cuyos endpoints
       pertenecen a nodos (tank/pump/valve/manifold) de esa empresa.
 
-    IMPORTANTE: si no hay filas, devuelve [] (200 OK). NO se responde 404.
-    Esto permite que el front-end muestre los nodos aunque todavía no haya conexiones.
+    NOTA: si no hay filas, devolvemos [] (200 OK) para no romper el front.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -53,10 +52,9 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                 """
                 cur.execute(sql)
                 rows = cur.fetchall()
-                # No levantar 404: lista vacía es un estado válido
-                return rows
+                return rows  # [] si no hay
 
-            # Con scope por empresa: limitar a node_id de la empresa
+            # Con scope por empresa: limitar por node_id de la empresa
             sql_scoped = """
             WITH nodes AS (
               SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id
@@ -91,8 +89,7 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
             """
             cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             rows = cur.fetchall()
-            # No levantar 404: lista vacía es un estado válido
-            return rows
+            return rows  # [] si no hay
 
     except HTTPException:
         raise
@@ -107,12 +104,15 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
 async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve los nodos (tank/pump/valve/manifold).
-    - Si `company_id` es None: lee la vista `v_layout_combined`.
-    - Si `company_id` tiene valor: arma el conjunto por CTEs, usando LEFT JOIN
-      contra tablas de layout para NO perder nodos sin layout explícito.
-      También arma `node_id` por defecto (p. ej. 'tank:ID').
 
-    IMPORTANTE: si no hay filas, devuelve [] (200 OK). NO se responde 404.
+    - Si company_id es None: lee la vista v_layout_combined.
+      (Si tu vista no calcula "online" para tanques, podés migrar al camino scopeado.)
+    - Si company_id tiene valor: arma el conjunto por CTEs, usando LEFT JOIN
+      a tablas de layout (para NO perder nodos sin layout explícito). Además:
+        * tanks.level_pct -> último valor de tank_ingest
+        * tanks.online    -> TRUE si el último tank_ingest es reciente (≤ 60 s)
+
+    NOTA: si no hay filas, devolvemos [] (200 OK).
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -134,10 +134,9 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 """
                 cur.execute(sql)
                 nodes = cur.fetchall()
-                # No levantar 404: lista vacía es un estado válido
-                return nodes
+                return nodes  # [] si no hay
 
-            # Con scope por empresa (LEFT JOIN para no perder nodos sin layout)
+            # Con scope por empresa: NOTA "online" tanques = último ingest en ≤ 60s
             sql_scoped = """
             WITH t AS (
               SELECT
@@ -145,13 +144,21 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 t.id::bigint                        AS id,
                 'tank'::text                        AS type,
                 lt.x, lt.y, lt.updated_at,
-                NULL::boolean                       AS online,
-                NULL::text                          AS state,
-                (
-                  SELECT level_pct
+                /* ONLINE tanque: último tank_ingest con desfase <= 60s */
+                COALESCE((
+                  SELECT (now() - i.created_at) <= interval '60 seconds'
                   FROM public.tank_ingest i
                   WHERE i.tank_id = t.id
-                  ORDER BY created_at DESC
+                  ORDER BY i.created_at DESC
+                  LIMIT 1
+                ), false)                           AS online,
+                NULL::text                          AS state,
+                /* Nivel: último ingest */
+                (
+                  SELECT i.level_pct
+                  FROM public.tank_ingest i
+                  WHERE i.tank_id = t.id
+                  ORDER BY i.created_at DESC
                   LIMIT 1
                 )::numeric                          AS level_pct,
                 NULL::text                          AS alarma
@@ -217,8 +224,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
             """
             cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             nodes = cur.fetchall()
-            # No levantar 404: lista vacía es un estado válido
-            return nodes
+            return nodes  # [] si no hay
 
     except HTTPException:
         raise
@@ -257,7 +263,7 @@ async def update_layout(request: Request):
 
     table, id_col = meta
 
-    # Si el sufijo es numérico, actualizamos por *_id (lo que usa la vista).
+    # Si el sufijo es numérico, actualizamos por *_id
     try:
         id_numeric = int(sufijo)
         where = f"{id_col} = %s"
@@ -298,6 +304,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}; con company_id, lo limita a esa empresa.
     Nunca responde 404 si una lista está vacía: devuelve [] (200 OK).
+
+    NOTA: aquí también aplicamos el cálculo "online tanque" con umbral de 60s.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -316,13 +324,28 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Con scope: nodos
+            # Con scope: nodos (incluye online tanque <= 60s)
             cur.execute("""
                 WITH t AS (
-                  SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id, t.id::bigint AS id, 'tank'::text AS type,
-                         lt.x, lt.y, lt.updated_at, NULL::boolean AS online, NULL::text AS state,
-                         (SELECT level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY created_at DESC LIMIT 1)::numeric AS level_pct,
-                         NULL::text AS alarma
+                  SELECT
+                    COALESCE(lt.node_id,'tank:'||t.id) AS node_id,
+                    t.id::bigint AS id,
+                    'tank'::text AS type,
+                    lt.x, lt.y, lt.updated_at,
+                    COALESCE((
+                      SELECT (now() - i.created_at) <= interval '60 seconds'
+                      FROM public.tank_ingest i
+                      WHERE i.tank_id = t.id
+                      ORDER BY i.created_at DESC
+                      LIMIT 1
+                    ), false) AS online,
+                    NULL::text AS state,
+                    (SELECT i.level_pct
+                     FROM public.tank_ingest i
+                     WHERE i.tank_id=t.id
+                     ORDER BY i.created_at DESC
+                     LIMIT 1)::numeric AS level_pct,
+                    NULL::text AS alarma
                   FROM public.tanks t
                   JOIN public.locations l ON l.id=t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
