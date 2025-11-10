@@ -22,7 +22,8 @@ const app1Src = import.meta.env.DEV
   ? import.meta.env.VITE_APP1_DEV ?? "http://localhost:5174/"
   : "/kpi/";
 
-const app2Src = import.meta.env.DEV
+// Base de Infra (el company_id se agrega dentro del componente)
+const app2Base = import.meta.env.DEV
   ? import.meta.env.VITE_APP2_DEV ?? "http://localhost:5175/"
   : "/infraestructura/";
 
@@ -35,7 +36,7 @@ type Props = {
   initialUser?: User;
   /** Conjunto de location_id que el usuario puede ver (filtrado por empresa) */
   allowedLocationIds?: Set<number>;
-  /** Empresa seleccionada (opcional, sólo para mostrar) */
+  /** Empresa seleccionada (opcional, sólo para mostrar y para pasar al iframe de infra) */
   selectedCompanyId?: number | null;
 };
 
@@ -116,13 +117,52 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     return s;
   }, [plant.tanks, plant.pumps]);
 
+  // === assetLocs para OverviewGrid (evita warning "linkMap vacío")
+  const assetLocs = React.useMemo(() => {
+    const rows: Array<{
+      asset_type: "tank" | "pump";
+      asset_id: number;
+      location_id?: number | null;
+      code?: string | null;
+      name?: string | null;
+      location?: { id?: number | null; code?: string | null; name?: string | null } | null;
+    }> = [];
+
+    for (const t of plant.tanks ?? []) {
+      const id = Number((t as any).id ?? (t as any).tank_id);
+      if (!Number.isFinite(id)) continue;
+      const locId = (t as any).location_id ?? (t as any).location?.id ?? null;
+      const locName = (t as any).location_name ?? (t as any).location?.name ?? null;
+      rows.push({
+        asset_type: "tank",
+        asset_id: id,
+        location_id: locId,
+        location: { id: locId, name: locName },
+      });
+    }
+    for (const p of plant.pumps ?? []) {
+      const id = Number((p as any).id ?? (p as any).pump_id);
+      if (!Number.isFinite(id)) continue;
+      const locId = (p as any).location_id ?? (p as any).location?.id ?? null;
+      const locName = (p as any).location_name ?? (p as any).location?.name ?? null;
+      rows.push({
+        asset_type: "pump",
+        asset_id: id,
+        location_id: locId,
+        location: { id: locId, name: locName },
+      });
+    }
+    return rows;
+  }, [plant.tanks, plant.pumps]);
+
   const operacionesBody = (
     <OverviewGrid
       plant={plant}
       onOpenTank={(id) => setDrawer({ type: "tank", id })}
       onOpenPump={(id) => setDrawer({ type: "pump", id })}
       statusByKey={statusByKey}
-      debug
+      assetLocs={assetLocs}
+      /* debug */  // quitado para silenciar warnings/console
     />
   );
 
@@ -141,6 +181,13 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       </div>
     </div>
   );
+
+  // 👉 Infra con scope de empresa: si hay selectedCompanyId, agregamos ?company_id=ID
+  const app2Src = React.useMemo(() => {
+    if (selectedCompanyId == null) return app2Base;
+    const sep = app2Base.includes("?") ? "&" : "?";
+    return `${app2Base}${sep}company_id=${selectedCompanyId}`;
+  }, [selectedCompanyId]);
 
   // === Contenido central según vista (con gating de permisos) ===
   const mainBody = (() => {
@@ -163,11 +210,11 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     }
     if (view === "infra") {
       if (!canSeeAdvanced) return noPermsBanner;
-      return <EmbeddedAppFrame src={app2Src} title="Infraestructura" />;
+      return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />; // key fuerza remount al cambiar empresa
     }
     // view === "admin" (solo owner)
     if (!canSeeAdmin) return ownerOnlyBanner;
-    return <EmbeddedAppFrame src={app3Src} title="Administración" />;
+    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administración" />; // key por consistencia
   })();
 
   // Nombre de empresa mostrado en UI (preferí el que trae initialUser, y como backup el id seleccionado)

@@ -30,7 +30,12 @@ async def health_db():
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
     Devuelve las conexiones (layout_edges).
-    Con company_id, devuelve sólo aristas cuyos endpoints pertenecen a esa empresa.
+    - Si `company_id` es None: devuelve todas las aristas.
+    - Si `company_id` tiene valor: devuelve sólo aristas cuyos endpoints
+      pertenecen a nodos (tank/pump/valve/manifold) de esa empresa.
+
+    IMPORTANTE: si no hay filas, devuelve [] (200 OK). NO se responde 404.
+    Esto permite que el front-end muestre los nodos aunque todavía no haya conexiones.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -48,8 +53,7 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                 """
                 cur.execute(sql)
                 rows = cur.fetchall()
-                if not rows:
-                    raise HTTPException(status_code=404, detail="No se encontraron conexiones en public.layout_edges")
+                # No levantar 404: lista vacía es un estado válido
                 return rows
 
             # Con scope por empresa: limitar a node_id de la empresa
@@ -87,8 +91,7 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
             """
             cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             rows = cur.fetchall()
-            if not rows:
-                raise HTTPException(status_code=404, detail="No se encontraron conexiones para la empresa indicada")
+            # No levantar 404: lista vacía es un estado válido
             return rows
 
     except HTTPException:
@@ -104,7 +107,12 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
 async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve los nodos (tank/pump/valve/manifold).
-    Con company_id, filtra por locations.company_id y arma el node_id aunque falte layout.
+    - Si `company_id` es None: lee la vista `v_layout_combined`.
+    - Si `company_id` tiene valor: arma el conjunto por CTEs, usando LEFT JOIN
+      contra tablas de layout para NO perder nodos sin layout explícito.
+      También arma `node_id` por defecto (p. ej. 'tank:ID').
+
+    IMPORTANTE: si no hay filas, devuelve [] (200 OK). NO se responde 404.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -126,11 +134,10 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 """
                 cur.execute(sql)
                 nodes = cur.fetchall()
-                if not nodes:
-                    raise HTTPException(status_code=404, detail="No se encontraron nodos en v_layout_combined")
+                # No levantar 404: lista vacía es un estado válido
                 return nodes
 
-            # Con scope por empresa
+            # Con scope por empresa (LEFT JOIN para no perder nodos sin layout)
             sql_scoped = """
             WITH t AS (
               SELECT
@@ -210,8 +217,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
             """
             cur.execute(sql_scoped, (company_id, company_id, company_id, company_id))
             nodes = cur.fetchall()
-            if not nodes:
-                raise HTTPException(status_code=404, detail="No se encontraron nodos para la empresa indicada")
+            # No levantar 404: lista vacía es un estado válido
             return nodes
 
     except HTTPException:
@@ -225,6 +231,11 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
 # -------------------------------------------------------------------
 @router.post("/update_layout")
 async def update_layout(request: Request):
+    """
+    Actualiza la posición (x,y) de un nodo de layout.
+    - Acepta node_id con sufijo numérico (e.g. 'tank:21') o literal (usa node_id).
+    - Devuelve 404 sólo si NO existe la fila a actualizar.
+    """
     data = await request.json()
     node_id = data.get("node_id")
     x = data.get("x")
@@ -286,6 +297,7 @@ async def update_layout(request: Request):
 async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}; con company_id, lo limita a esa empresa.
+    Nunca responde 404 si una lista está vacía: devuelve [] (200 OK).
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:

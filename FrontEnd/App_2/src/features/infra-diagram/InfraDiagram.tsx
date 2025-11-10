@@ -41,6 +41,33 @@ export default function InfraDiagram() {
   const [edges, setEdges] = useState<UIEdge[]>([]);
   const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
 
+  // === DEBUG TOOLS ===
+  const DEBUG = useMemo(() => {
+    const qs = new URLSearchParams(window.location.search);
+    return qs.get("debug") === "1" || import.meta.env.DEV;
+  }, []);
+  const log = (...args: any[]) => {
+    if (DEBUG) console.log("[InfraDiagram]", ...args);
+  };
+
+  // Company scope leído del querystring (?company_id=XX) — SOLO válido si > 0
+  const companyId = useMemo(() => {
+    const qs = new URLSearchParams(window.location.search);
+    const raw = qs.get("company_id");
+    if (raw == null) return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const v = Number(trimmed);
+    if (!Number.isFinite(v) || v <= 0) return null;
+    return v;
+  }, []);
+
+  useEffect(() => {
+    log("href:", window.location.href);
+    log("companyId from query:", companyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
@@ -71,14 +98,22 @@ export default function InfraDiagram() {
   };
   const hideTip = () => setTip(null);
 
-  // Consulta viva
+  // Consulta viva (scope por empresa lo inyecta fetchJSON + withScope)
   const { data, isFetching, error } = useLiveQuery(
-    ["infra", "layout"],
+    ["infra", "layout", companyId],
     async (signal) => {
+      const urlNodes = `/infraestructura/get_layout_combined`;
+      const urlEdges = `/infraestructura/get_layout_edges`;
+      log("FETCH ->", urlNodes, "&&", urlEdges);
       const [nodesRaw, edgesRaw] = await Promise.all([
-        fetchJSON<CombinedNodeDTO[]>("/infraestructura/get_layout_combined", signal),
-        fetchJSON<EdgeDTO[]>("/infraestructura/get_layout_edges", signal),
+        fetchJSON<CombinedNodeDTO[]>(urlNodes, signal),
+        fetchJSON<EdgeDTO[]>(urlEdges, signal),
       ]);
+      log("FETCH DONE", {
+        nodes: nodesRaw?.length ?? 0,
+        edges: edgesRaw?.length ?? 0,
+        types: summarizeTypes(nodesRaw),
+      });
       return { nodesRaw, edgesRaw };
     },
     (raw) => raw
@@ -136,6 +171,13 @@ export default function InfraDiagram() {
 
     setNodes(nodesWithSaved);
     setEdges(uiEdges);
+
+    log("UI NODES", {
+      total: nodesWithSaved.length,
+      byType: summarizeTypes(nodesWithSaved.map((n) => ({ type: n.type }) as any)),
+    });
+    log("UI EDGES", { total: uiEdges.length });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
   // Mapa y viewBox
@@ -167,6 +209,7 @@ export default function InfraDiagram() {
       if (!pos) return;
       saveLayoutToStorage(nodesByIdAsArray(nodesById));
       await updateLayout(id, pos.x, pos.y);
+      log("POSITION SAVED", { id, x: pos.x, y: pos.y });
     } catch (e) {
       console.error("Error al actualizar layout:", e);
     }
@@ -220,6 +263,7 @@ export default function InfraDiagram() {
     try {
       const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
       setEdges((prev) => [{ id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad }, ...prev]);
+      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
@@ -247,6 +291,7 @@ export default function InfraDiagram() {
       await apiDeleteEdge(edgeId);
       setEdges((prev) => prev.filter((e) => e.id !== edgeId));
       setSelectedEdgeId(null);
+      log("EDGE DELETED", { edgeId });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo borrar la conexión");
@@ -272,6 +317,7 @@ export default function InfraDiagram() {
     try {
       await updateLayoutMany(next.map((n) => ({ node_id: n.id, x: n.x, y: n.y })));
       saveLayoutToStorage(next);
+      log("AUTO-LAYOUT SAVED", { count: next.length });
     } catch (err) {
       console.error(err);
       alert("No se pudo guardar el auto-orden.");
@@ -316,6 +362,7 @@ export default function InfraDiagram() {
         </div>
       </div>
 
+      {/* Contenedor principal */}
       {!error && (
         <div
           ref={wrapRef}
@@ -350,8 +397,8 @@ export default function InfraDiagram() {
                 </defs>
 
                 {/* Fondo */}
-                <rect x="0" y="0" width="1000" height="520" fill="#ffffff" />
-                <rect x="0" y="0" width="1000" height="520" fill="url(#grid)" opacity={0.6} />
+                <rect x="0" y="0" width={1000} height={520} fill="#ffffff" />
+                <rect x="0" y="0" width={1000} height={520} fill="url(#grid)" opacity={0.6} />
 
                 {/* Aristas */}
                 {edges.map((e) =>
@@ -371,7 +418,7 @@ export default function InfraDiagram() {
                   )
                 )}
 
-                {/* Nodos: en modo normal, click => abrir drawer si online */}
+                {/* Nodos */}
                 {nodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -476,8 +523,18 @@ export default function InfraDiagram() {
         open={opsOpen}
         onClose={() => setOpsOpen(false)}
         node={opsNode}
-        onCommandSent={() => {/* podrías refrescar algo si querés */}}
+        onCommandSent={() => {/* refrescos si querés */}}
       />
     </div>
   );
+}
+
+// util de debug para contar tipos
+function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
+  const out: Record<string, number> = {};
+  for (const r of rows || []) {
+    const t = String((r as any).type ?? "").toLowerCase() || "unknown";
+    out[t] = (out[t] ?? 0) + 1;
+  }
+  return out;
 }
