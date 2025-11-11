@@ -39,6 +39,8 @@ from app.routes.infra_edit import router as infra_edit_router
 
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
+from app.routes.kpi.bombas_live import router as kpi_bombas_live_router
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -134,3 +136,4 @@ def _shutdown():
 
 app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"
 app.include_router(admin_manifolds_router)
+app.include_router(kpi_bombas_live_router)

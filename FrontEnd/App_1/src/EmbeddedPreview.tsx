@@ -1,11 +1,12 @@
+// src/embedded
 import React, { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
-// Tus componentes:
+// Componentes
 import KPI from "./components/KPI";
 import TankLevelChart from "./components/TankLevelChart";
-import PumpsOnChart from "./components/PumpsOnChart";
+// ⬇️ Usamos el perfil horario “estilo eficiencia” para Operación
+import OpsPumpsProfile from "./components/OpsPumpsProfile";
 import EnergyEfficiencyPage from "./components/EnergyEfficiencyPage";
 import ByLocationTable from "./components/ByLocationTable";
 
@@ -14,8 +15,15 @@ const k = (n: number) => n.toLocaleString("es-AR");
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 // Tipos de las series agregadas que entrega loadDashboard
-type TankAgg = { timestamps?: string[]; level_percent?: Array<number | string | null> } | null | undefined;
-type PumpAgg = { timestamps?: string[]; is_on?: number[] } | null | undefined;
+type TankAgg =
+  | { timestamps?: Array<number | string>; level_percent?: Array<number | string | null> }
+  | null
+  | undefined;
+
+type PumpAgg =
+  | { timestamps?: Array<number | string>; is_on?: Array<number | boolean | string | null> }
+  | null
+  | undefined;
 
 // Si NO usás shadcn Tabs y tenías un Tabs propio con props { value, onChange, tabs }:
 type SimpleTab = { id: string; label: string };
@@ -63,9 +71,6 @@ export default function DashboardView({
   const [tab, setTab] = useState<string>("operacion");
   const [locationId, setLocationId] = useState<string | number>(locations?.[0]?.location_id ?? "");
 
-  // Útil para verificar forma de datos
-  // console.log("[DashboardView] tankTs:", tankTs, "pumpTs:", pumpTs);
-
   return (
     <div className="space-y-6">
       {/* Filtros superiores */}
@@ -82,10 +87,6 @@ export default function DashboardView({
             </option>
           ))}
         </select>
-
-        <Button className="ml-2" onClick={() => console.log("[Preview] DATA", { filtered, tankTs, pumpTs })}>
-          Loggear DATA
-        </Button>
       </div>
 
       {/* Tabs */}
@@ -114,10 +115,10 @@ export default function DashboardView({
           </section>
 
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* tankTs y pumpTs ahora son agregadas (objetos con timestamps + serie) */}
-            <TankLevelChart ts={tankTs} />
-            {/* Si no usás potencia, usá PumpsOnChart para estado ON por hora */}
-            <PumpsOnChart pumpsTs={pumpTs} />
+            {/* Charts sincronizados por valor temporal; eje X en horas */}
+            <TankLevelChart ts={tankTs} syncId="op-sync" title="Nivel del tanque (24h)" />
+            {/* Reemplazamos barras por perfil horario estilo eficiencia */}
+            <OpsPumpsProfile pumpsTs={pumpTs} syncId="op-sync" title="Perfil horario (24h)" />
           </section>
         </>
       )}
@@ -125,9 +126,8 @@ export default function DashboardView({
       {/* Eficiencia */}
       {tab === "eficiencia" && (
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Izquierda: gráfico + tarjetas Valle/Resto/Pico */}
-         <EnergyEfficiencyPage pumpAgg={pumpTs} />
-
+          {/* Izquierda: perfiles/horas por franja + tarjetas */}
+          <EnergyEfficiencyPage pumpAgg={pumpTs} />
 
           {/* Derecha: notas */}
           <Card className="rounded-2xl">
@@ -153,7 +153,7 @@ export default function DashboardView({
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base">Resumen por ubicación</CardTitle>
           </CardHeader>
-        <CardContent>
+          <CardContent>
             <ByLocationTable rows={filtered.byLocation} />
           </CardContent>
         </Card>
@@ -177,8 +177,7 @@ export default function DashboardView({
                   <div className="text-sm">
                     <div className="font-medium">{a.message}</div>
                     <div className="text-gray-500">
-                      {a.asset_type.toUpperCase()} #{a.asset_id} •{" "}
-                      {new Date(a.ts_raised).toLocaleString("es-AR")}
+                      {a.asset_type.toUpperCase()} #{a.asset_id} • {new Date(a.ts_raised).toLocaleString("es-AR")}
                     </div>
                   </div>
                   <div

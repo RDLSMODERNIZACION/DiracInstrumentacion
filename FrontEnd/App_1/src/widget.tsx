@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "./components/ui/card";
 import { KPI } from "./components/KPI";
 import TankLevelChart from "./components/TankLevelChart";
-import PumpsOnChart from "./components/PumpsOnChart";
+import OpsPumpsProfile from "./components/OpsPumpsProfile";
 import ByLocationTable from "./components/ByLocationTable";
 import { Tabs } from "./components/Tabs";
 import { loadDashboard } from "@/data/loadFromApi";
@@ -88,9 +88,43 @@ export default function KpiWidget() {
     [liveSync.pumpsTotal, kpis]
   );
 
+  // ===== Sincronización de ejes y crosshair =====
+  const tz = "America/Argentina/Buenos_Aires";
+  const [hoverX, setHoverX] = useState<number | null>(null);
+
+  const { xDomain, xTicks } = useMemo(() => {
+    // Elegimos el "end" como el último timestamp presente (tanques o bombas).
+    const tankArr = (liveSync.tankTs?.timestamps ?? []) as Array<number | string>;
+    const pumpArr = (liveSync.pumpTs?.timestamps ?? []) as Array<number | string>;
+
+    const maxMs = (arr: Array<number | string>) => {
+      let m = -Infinity;
+      for (const t of arr) {
+        const ms = toMs(t as any);
+        if (Number.isFinite(ms) && ms > m) m = ms;
+      }
+      return Number.isFinite(m) ? (m as number) : undefined;
+    };
+
+    const lastTank = maxMs(tankArr);
+    const lastPump = maxMs(pumpArr);
+    const endRaw = lastTank ?? lastPump ?? Date.now();
+
+    const end = startOfMin(endRaw);
+    const start = end - 24 * 60 * 60 * 1000;
+
+    // Ticks cada hora, alineados a HH:00
+    const H = 60 * 60 * 1000;
+    const firstHour = ceilToHour(start);
+    const ticks: number[] = [];
+    for (let t = firstHour; t <= end; t += H) ticks.push(t);
+
+    return { xDomain: [start, end] as [number, number], xTicks: ticks };
+  }, [liveSync.tankTs?.timestamps, liveSync.pumpTs?.timestamps]);
+
   return (
     <div className="p-6 space-y-6">
-      {/* Filtro: solo Ubicación (rango y botón de log fueron removidos) */}
+      {/* Filtro: solo Ubicación */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Ubicación:</span>
@@ -134,19 +168,28 @@ export default function KpiWidget() {
             <KPI label="Bombas" value={k(kpis.pumps)} />
           </section>
 
-          {/* Gráficos principales (sincronizados por tiempo real; eje X en horas) */}
+          {/* Gráficos principales (sincronizados por tiempo; eje X compartido y crosshair compartido) */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TankLevelChart
               ts={liveSync.tankTs}
               syncId="op-sync"
               title="Nivel del tanque (24h • en vivo)"
+              tz={tz}
+              xDomain={xDomain}
+              xTicks={xTicks}
+              hoverX={hoverX}
+              onHoverX={setHoverX}
             />
-            <PumpsOnChart
+            <OpsPumpsProfile
               pumpsTs={liveSync.pumpTs}
               max={totalPumpsCap}
               syncId="op-sync"
-              title="Bombas encendidas (24h • en vivo)"
-              variant="bar"
+              title="Perfil horario (24h)"
+              tz={tz}
+              xDomain={xDomain}
+              xTicks={xTicks}
+              hoverX={hoverX}
+              onHoverX={setHoverX}
             />
           </section>
         </>
@@ -223,4 +266,21 @@ function uniqueById(arr: LocOpt[]): LocOpt[] {
 }
 function sortByName(arr: LocOpt[]): LocOpt[] {
   return [...arr].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** ===== helpers de tiempo para sincronización ===== */
+function toMs(x: number | string): number {
+  if (typeof x === "number") return x > 10_000 ? x : x * 1000; // si vino en seg, lo paso a ms
+  const n = Number(x);
+  if (Number.isFinite(n) && n > 10_000) return n;
+  return new Date(x).getTime();
+}
+function startOfMin(ms: number) {
+  const d = new Date(ms);
+  d.setSeconds(0, 0);
+  return d.getTime();
+}
+function ceilToHour(ms: number) {
+  const H = 60 * 60 * 1000;
+  return Math.ceil(ms / H) * H;
 }

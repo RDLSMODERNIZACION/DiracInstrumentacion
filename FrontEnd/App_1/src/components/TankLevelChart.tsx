@@ -1,4 +1,3 @@
-// src/components/TankLevelChart.tsx
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -38,17 +37,21 @@ type Props = {
   tz?: string;            // default "America/Argentina/Buenos_Aires"
   height?: number;        // default 260
   showLegend?: boolean;   // default true
-  showBrushIf?: number;   // default 120 (si hay muchos puntos aparece el brush)
-  /** Id para sincronizar con otros charts (Recharts) */
+  showBrushIf?: number;   // default 120
   syncId?: string;        // ej: "op-sync"
+  /** sincronización con Bombas */
+  xDomain?: [number, number];
+  xTicks?: number[];
+  /** crosshair sincronizado */
+  hoverX?: number | null;
+  onHoverX?: (x: number | null) => void;
 };
 
 // "01:30"
 const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s);
 
-// string/number → epoch ms (si no se puede, NaN)
 const toMs = (x: string | number) => {
-  if (typeof x === "number") return x;
+  if (typeof x === "number") return x; // se espera ms si es número
   const n = Number(x);
   if (Number.isFinite(n) && n > 10_000) return n; // ya viene en ms
   return new Date(x).getTime();
@@ -68,32 +71,47 @@ const fmtTime = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   }
 };
 
+/** HH:mm para ejes sincronizados */
+const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
+  try {
+    return new Intl.DateTimeFormat("es-AR", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(ms);
+  } catch {
+    const d = new Date(ms);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+};
+
 export default function TankLevelChart({
   ts,
-  title = "Nivel del tanque (24h)",
+  title = "Nivel del tanque (24h • en vivo)",
   thresholds,
   tz = "America/Argentina/Buenos_Aires",
   height = 260,
   showLegend = true,
   showBrushIf = 120,
   syncId,
+  xDomain,
+  xTicks,
+  hoverX,
+  onHoverX,
 }: Props) {
   const rawT = ts?.timestamps ?? [];
   const rawV = ts?.level_percent ?? [];
 
-  /**
-   * Si todos los labels parecen "HH:MM", usamos eje categórico.
-   * Caso contrario, usamos eje temporal (timestamps ms).
-   */
-  const mode: "category" | "time" =
-    rawT.length && rawT.every((t) => t != null && isHourLabel(String(t))) ? "category" : "time";
+  // si hay xDomain forzado, vamos en modo tiempo
+  const autoMode: "category" | "time" =
+    rawT.length && rawT.every((t) => t != null && isHourLabel(String(t)))
+      ? "category"
+      : "time";
+  const mode: "category" | "time" = xDomain ? "time" : autoMode;
 
-  /**
-   * Normalizamos serie a:
-   *  - x: number (ms) o índice (para modo categórico)
-   *  - label: string mostrado en tooltip/eje
-   *  - nivel: number | null
-   */
   const series = useMemo(() => {
     const N = Math.min(rawT.length, rawV.length);
     const out: Array<{ x: number | string; label: string; nivel: number | null }> = [];
@@ -109,7 +127,7 @@ export default function TankLevelChart({
         out.push({ x: i, label: lbl, nivel });
       } else {
         const ms = toMs(t as any);
-        if (!Number.isFinite(ms)) continue; // timestamp inválido
+        if (!Number.isFinite(ms)) continue;
         out.push({ x: ms, label: String(t ?? ""), nivel });
       }
     }
@@ -119,7 +137,6 @@ export default function TankLevelChart({
 
   const hasData = series.some((d) => d.nivel != null);
 
-  // Dominio Y dinámico (manteniendo 0..100 por defecto)
   const yMin = useMemo(() => {
     const vals = series.map((d) => (d.nivel == null ? Infinity : d.nivel));
     const m = Math.min(...vals);
@@ -137,7 +154,6 @@ export default function TankLevelChart({
   const H  = thresholds?.high_pct ?? null;
   const HH = thresholds?.high_high_pct ?? null;
 
-  // Gradiente único por instancia para evitar colisiones de ids
   const gradId = useMemo(() => `gradTank_${Math.random().toString(36).slice(2)}`, []);
 
   return (
@@ -146,18 +162,20 @@ export default function TankLevelChart({
         <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
       </CardHeader>
 
-      {/* usamos style={{height}} para que el caller controle el alto */}
       <CardContent style={{ height }}>
         {!hasData ? (
           <div className="h-full grid place-items-center text-sm text-gray-500">Sin datos</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            {/* syncId + syncMethod por valor: sincroniza por X real (tiempo) con otros charts */}
             <AreaChart
               data={series}
               syncId={syncId}
               syncMethod="value"
               margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+              onMouseMove={(st: any) => {
+                if (st && typeof st.activeLabel === "number") onHoverX?.(st.activeLabel);
+              }}
+              onMouseLeave={() => onHoverX?.(null)}
             >
               <defs>
                 <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -173,25 +191,22 @@ export default function TankLevelChart({
                   dataKey="x"
                   type="number"
                   scale="time"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(v) => fmtTime(v as number, tz)}
+                  domain={xDomain ?? ["dataMin", "dataMax"]}
+                  ticks={xTicks}
+                  tickFormatter={(v) => fmtHM(v as number, tz)}
                   tickMargin={8}
-                  minTickGap={36}
+                  minTickGap={24}
                   allowDataOverflow
                 />
               ) : (
-                <XAxis
-                  dataKey="label"
-                  type="category"
-                  tickMargin={8}
-                  minTickGap={16}
-                />
+                <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
               )}
 
               <YAxis domain={[yMin, yMax]} tickFormatter={(v) => `${v}%`} width={40} />
 
+              {/* Tooltip sin cursor (usamos ReferenceLine compartida) */}
               <Tooltip
-                cursor={{ strokeDasharray: "3 3" }}
+                cursor={false}
                 content={({ active, payload }) => {
                   if (!active || !payload || !payload.length) return null;
                   const p = payload[0].payload as { x: number | string; label: string; nivel: number | null };
@@ -206,52 +221,32 @@ export default function TankLevelChart({
                 }}
               />
 
-              {/* Bandas y líneas de umbral (si están definidas) */}
-              {typeof LL === "number" && (
-                <ReferenceArea y1={0} y2={LL} fill="var(--destructive)" fillOpacity={0.08} />
-              )}
-              {typeof HH === "number" && (
-                <ReferenceArea y1={HH} y2={Math.max(100, yMax)} fill="var(--destructive)" fillOpacity={0.08} />
-              )}
+              {/* Bandas y líneas de umbral */}
+              {typeof LL === "number" && <ReferenceArea y1={0} y2={LL} fill="var(--destructive)" fillOpacity={0.08} />}
+              {typeof HH === "number" && <ReferenceArea y1={HH} y2={Math.max(100, yMax)} fill="var(--destructive)" fillOpacity={0.08} />}
               {typeof L === "number" && typeof H === "number" && H > L && (
                 <ReferenceArea y1={L} y2={H} fill="var(--primary)" fillOpacity={0.06} />
               )}
-
               {typeof LL === "number" && (
-                <ReferenceLine
-                  y={LL}
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  opacity={0.6}
-                  label={{ value: `LL ${LL}%`, position: "insideTopRight", fontSize: 10 }}
-                />
+                <ReferenceLine y={LL} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
+                  label={{ value: `LL ${LL}%`, position: "insideTopRight", fontSize: 10 }} />
               )}
               {typeof L === "number" && (
-                <ReferenceLine
-                  y={L}
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  opacity={0.5}
-                  label={{ value: `L ${L}%`, position: "insideTopRight", fontSize: 10 }}
-                />
+                <ReferenceLine y={L} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
+                  label={{ value: `L ${L}%`, position: "insideTopRight", fontSize: 10 }} />
               )}
               {typeof H === "number" && (
-                <ReferenceLine
-                  y={H}
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  opacity={0.5}
-                  label={{ value: `H ${H}%`, position: "insideTopRight", fontSize: 10 }}
-                />
+                <ReferenceLine y={H} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
+                  label={{ value: `H ${H}%`, position: "insideTopRight", fontSize: 10 }} />
               )}
               {typeof HH === "number" && (
-                <ReferenceLine
-                  y={HH}
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  opacity={0.6}
-                  label={{ value: `HH ${HH}%`, position: "insideTopRight", fontSize: 10 }}
-                />
+                <ReferenceLine y={HH} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
+                  label={{ value: `HH ${HH}%`, position: "insideTopRight", fontSize: 10 }} />
+              )}
+
+              {/* Línea vertical compartida (crosshair) */}
+              {typeof hoverX === "number" && (
+                <ReferenceLine x={hoverX} stroke="currentColor" strokeDasharray="4 4" opacity={0.6} />
               )}
 
               <Area
@@ -263,7 +258,8 @@ export default function TankLevelChart({
                 fill={`url(#${gradId})`}
                 connectNulls
                 dot={false}
-                isAnimationActive={false} // live: sin animación para respuesta inmediata
+                isAnimationActive={false}
+                activeDot={{ r: 2 }}
               />
 
               {showLegend && <Legend verticalAlign="top" height={24} />}
@@ -274,7 +270,7 @@ export default function TankLevelChart({
                   height={22}
                   stroke="currentColor"
                   travellerWidth={8}
-                  tickFormatter={(v) => (mode === "time" ? fmtTime(v as number, tz) : String(v))}
+                  tickFormatter={(v) => (mode === "time" ? fmtHM(v as number, tz) : String(v))}
                 />
               )}
             </AreaChart>
