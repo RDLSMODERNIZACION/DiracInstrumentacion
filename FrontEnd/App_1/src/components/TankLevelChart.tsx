@@ -15,7 +15,14 @@ import {
   Brush,
 } from "recharts";
 
-type TankTs = { timestamps?: string[]; level_percent?: Array<number | string | null> };
+/**
+ * Aceptamos timestamps como string ISO o como número (ms)
+ * y valores de nivel como number | string | null.
+ */
+type TankTs = {
+  timestamps?: Array<number | string>;
+  level_percent?: Array<number | string | null>;
+};
 
 type Thresholds = {
   low_pct?: number | null;       // L
@@ -28,14 +35,24 @@ type Props = {
   ts: TankTs | null;
   title?: string;
   thresholds?: Thresholds;
-  tz?: string;          // default "America/Argentina/Buenos_Aires"
-  height?: number;      // default 260
-  showLegend?: boolean; // default true
-  showBrushIf?: number; // default 120 (si hay muchos puntos aparece el brush)
+  tz?: string;            // default "America/Argentina/Buenos_Aires"
+  height?: number;        // default 260
+  showLegend?: boolean;   // default true
+  showBrushIf?: number;   // default 120 (si hay muchos puntos aparece el brush)
+  /** Id para sincronizar con otros charts (Recharts) */
+  syncId?: string;        // ej: "op-sync"
 };
 
-const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s); // "HH:MM"
-const toMs = (x: string) => new Date(x).getTime();
+// "01:30"
+const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s);
+
+// string/number → epoch ms (si no se puede, NaN)
+const toMs = (x: string | number) => {
+  if (typeof x === "number") return x;
+  const n = Number(x);
+  if (Number.isFinite(n) && n > 10_000) return n; // ya viene en ms
+  return new Date(x).getTime();
+};
 
 const fmtTime = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   try {
@@ -59,40 +76,50 @@ export default function TankLevelChart({
   height = 260,
   showLegend = true,
   showBrushIf = 120,
+  syncId,
 }: Props) {
   const rawT = ts?.timestamps ?? [];
   const rawV = ts?.level_percent ?? [];
 
-  // Detecta si el eje X es categórico ("HH:MM") o temporal (timestamps reales)
+  /**
+   * Si todos los labels parecen "HH:MM", usamos eje categórico.
+   * Caso contrario, usamos eje temporal (timestamps ms).
+   */
   const mode: "category" | "time" =
-    rawT.length && rawT.every((t) => t && isHourLabel(String(t))) ? "category" : "time";
+    rawT.length && rawT.every((t) => t != null && isHourLabel(String(t))) ? "category" : "time";
 
-  // Serie normalizada
+  /**
+   * Normalizamos serie a:
+   *  - x: number (ms) o índice (para modo categórico)
+   *  - label: string mostrado en tooltip/eje
+   *  - nivel: number | null
+   */
   const series = useMemo(() => {
     const N = Math.min(rawT.length, rawV.length);
     const out: Array<{ x: number | string; label: string; nivel: number | null }> = [];
     for (let i = 0; i < N; i++) {
-      const t = String(rawT[i] ?? "");
+      const t = rawT[i];
       const raw = rawV[i];
+
       const n = raw == null ? NaN : Number(raw);
       const nivel = Number.isFinite(n) ? n : null;
 
       if (mode === "category") {
-        // Para "HH:MM" usamos eje categórico
-        out.push({ x: i, label: t, nivel });
+        const lbl = String(t ?? "");
+        out.push({ x: i, label: lbl, nivel });
       } else {
-        const ms = toMs(t);
+        const ms = toMs(t as any);
         if (!Number.isFinite(ms)) continue; // timestamp inválido
-        out.push({ x: ms, label: t, nivel });
+        out.push({ x: ms, label: String(t ?? ""), nivel });
       }
     }
     if (mode === "time") out.sort((a, b) => (Number(a.x) as number) - (Number(b.x) as number));
     return out;
   }, [rawT, rawV, mode]);
 
-  const hasData = series.length > 0 && series.some((d) => d.nivel != null);
+  const hasData = series.some((d) => d.nivel != null);
 
-  // Dominio Y dinámico (mantiene 0..100 por defecto)
+  // Dominio Y dinámico (manteniendo 0..100 por defecto)
   const yMin = useMemo(() => {
     const vals = series.map((d) => (d.nivel == null ? Infinity : d.nivel));
     const m = Math.min(...vals);
@@ -110,6 +137,7 @@ export default function TankLevelChart({
   const H  = thresholds?.high_pct ?? null;
   const HH = thresholds?.high_high_pct ?? null;
 
+  // Gradiente único por instancia para evitar colisiones de ids
   const gradId = useMemo(() => `gradTank_${Math.random().toString(36).slice(2)}`, []);
 
   return (
@@ -118,12 +146,19 @@ export default function TankLevelChart({
         <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
       </CardHeader>
 
-      <CardContent className="h-64" style={{ height }}>
+      {/* usamos style={{height}} para que el caller controle el alto */}
+      <CardContent style={{ height }}>
         {!hasData ? (
           <div className="h-full grid place-items-center text-sm text-gray-500">Sin datos</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+            {/* syncId + syncMethod por valor: sincroniza por X real (tiempo) con otros charts */}
+            <AreaChart
+              data={series}
+              syncId={syncId}
+              syncMethod="value"
+              margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="currentColor" stopOpacity={0.35} />
@@ -137,10 +172,12 @@ export default function TankLevelChart({
                 <XAxis
                   dataKey="x"
                   type="number"
+                  scale="time"
                   domain={["dataMin", "dataMax"]}
                   tickFormatter={(v) => fmtTime(v as number, tz)}
                   tickMargin={8}
                   minTickGap={36}
+                  allowDataOverflow
                 />
               ) : (
                 <XAxis
@@ -159,7 +196,7 @@ export default function TankLevelChart({
                   if (!active || !payload || !payload.length) return null;
                   const p = payload[0].payload as { x: number | string; label: string; nivel: number | null };
                   const nivel = p.nivel == null ? "--" : `${p.nivel.toFixed(1)}%`;
-                  const when = mode === "time" ? fmtTime(Number(p.x)) : String(p.label);
+                  const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
                   return (
                     <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
                       <div className="text-xs text-muted-foreground">{when}</div>
@@ -220,12 +257,13 @@ export default function TankLevelChart({
               <Area
                 type="monotone"
                 dataKey="nivel"
+                name="nivel"
                 stroke="currentColor"
                 strokeWidth={2}
                 fill={`url(#${gradId})`}
                 connectNulls
                 dot={false}
-                isAnimationActive={false}
+                isAnimationActive={false} // live: sin animación para respuesta inmediata
               />
 
               {showLegend && <Legend verticalAlign="top" height={24} />}

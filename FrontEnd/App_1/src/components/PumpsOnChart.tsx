@@ -1,296 +1,162 @@
 // src/components/PumpsOnChart.tsx
 import React, { useMemo } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   ResponsiveContainer,
   BarChart,
-  LineChart,
-  CartesianGrid,
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   Bar,
-  Line,
-  ReferenceLine,
-  ReferenceArea,
-  Brush,
 } from "recharts";
 
-type PumpSeries = { timestamps?: string[]; is_on?: Array<boolean | number | string | null> };
-type PerPump = Record<string, PumpSeries>;
-type Agg = { timestamps?: string[]; is_on?: number[] };
-const isAgg = (x: any): x is Agg => x && Array.isArray(x.timestamps) && Array.isArray(x.is_on);
-
-type PumpEvent = { ts: string | number | Date; type: "start" | "stop"; label?: string };
+/** Serie del hook: timestamps (ms/ISO) + cantidad ON */
+type Agg = { timestamps?: Array<number | string>; is_on?: Array<number | boolean | string | null> };
 
 type Props = {
-  pumpsTs: PerPump | Agg | null | undefined;
+  pumpsTs: Agg | null | undefined;
   title?: string;
-  tz?: string;              // default "America/Argentina/Buenos_Aires"
-  height?: number;          // default 224
-  max?: number;             // capacidad total de bombas; si falta y es per-pump, se deduce
-  showLegend?: boolean;     // default true
-  showBrushIf?: number;     // default 120 (si hay más de N puntos se muestra brush)
-  events?: PumpEvent[];     // opcional: marcas verticales
-  variant?: "bar" | "line"; // default "bar"
+  tz?: string;           // default "America/Argentina/Buenos_Aires"
+  height?: number;       // default 260 (igual que TankLevelChart)
+  max?: number;          // escala Y superior opcional
+  syncId?: string;       // ej: "op-sync"
+  barWidthPx?: number;   // default 14 (más ancho)
 };
 
-const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s); // "HH:MM"
-const toMs = (x: string | number | Date) => (x instanceof Date ? x.getTime() : new Date(x).getTime());
-const fmtTime = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
+// ================== helpers ==================
+const toMs = (x: number | string) => {
+  if (typeof x === "number") return x > 10_000 ? x : x * 1000;
+  const n = Number(x);
+  if (Number.isFinite(n) && n > 10_000) return n;
+  return new Date(x).getTime();
+};
+const startOfHour = (ms: number) => { const d = new Date(ms); d.setMinutes(0,0,0); return d.getTime(); };
+const addHours    = (ms: number, h: number) => ms + h * 3_600_000;
+
+const fmtHour = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   try {
-    return new Intl.DateTimeFormat("es-AR", {
-      timeZone: tz,
-      hour: "2-digit",
-      minute: "2-digit",
-      day: "2-digit",
-      month: "2-digit",
-    }).format(ms);
+    return new Intl.DateTimeFormat("es-AR", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(ms);
   } catch {
-    return new Date(ms).toLocaleString();
+    const d = new Date(ms); const hh = String(d.getHours()).padStart(2,"0"); const mm = String(d.getMinutes()).padStart(2,"0");
+    return `${hh}:${mm}`;
   }
 };
 
-const truthyOn = (v: any) =>
-  v === true || v === 1 || v === "1" || (typeof v === "string" && v.toLowerCase() === "true");
+function buildFromLive(pumps: Agg) {
+  const ts = pumps?.timestamps ?? [];
+  const vs = pumps?.is_on ?? [];
+  const N = Math.min(ts.length, vs.length);
 
+  let series: Array<{ x: number; on: number | null }> = [];
+  for (let i = 0; i < N; i++) {
+    const ms = toMs(ts[i] as any);
+    if (!Number.isFinite(ms)) continue;
+    let on = vs[i];
+    on = typeof on === "boolean" ? (on ? 1 : 0) : (on == null ? 0 : Number(on));
+    series.push({ x: ms, on: (on as number) > 0 ? (on as number) : null }); // null = NO dibuja
+  }
+  series.sort((a, b) => a.x - b.x);
+
+  const yDataMax = Math.max(0, ...series.map(d => d.on ?? 0));
+  if (!series.length) return { series, ticks: [] as number[], yDataMax };
+
+  // ticks de X a cada hora entre min y max (estilo eficiencia)
+  const min = series[0].x, max = series[series.length - 1].x;
+  const t0 = startOfHour(min);
+  const ticks: number[] = [];
+  for (let t = t0; t <= max; t = addHours(t, 1)) ticks.push(t);
+
+  return { series, ticks, yDataMax };
+}
+
+// ================== component ==================
 export default function PumpsOnChart({
   pumpsTs,
-  title = "Bombas encendidas (24h)",
+  title = "Bombas encendidas (24h • en vivo)",
   tz = "America/Argentina/Buenos_Aires",
-  height = 224,
+  height = 260,            // ⬅️ igual que TankLevelChart para alinear ejes
   max,
-  showLegend = true,
-  showBrushIf = 120,
-  events = [],
-  variant = "bar",
+  syncId,
+  barWidthPx = 14,          // ⬅️ barras más anchas
 }: Props) {
-  // -----------------------------
-  // 1) Agregación y detección de modo de eje X
-  // -----------------------------
-  const { series, mode, capacity } = useMemo(() => {
-    let labels: string[] = [];
-    let counts = new Map<string, number>();
-    let candidateCapacity = max ?? 0;
+  const { series, ticks, yDataMax } = useMemo(() => buildFromLive(pumpsTs ?? {}), [pumpsTs]);
+  const hasAnyBar = series.some(d => d.on != null);
+  const yMax = Math.max(1, yDataMax, max ?? 0);
 
-    if (isAgg(pumpsTs)) {
-      const ts = pumpsTs.timestamps ?? [];
-      const on = pumpsTs.is_on ?? [];
-      labels = ts.map((t) => String(t ?? ""));
-      labels.forEach((t, i) => counts.set(t, Number(on[i] ?? 0)));
-      // en modo agregado no sabemos capacidad si no la pasan
-    } else {
-      // per-pump: unimos todas las marcas de tiempo presentes
-      const entries = Object.entries((pumpsTs as PerPump) || {});
-      candidateCapacity = max ?? Math.max(candidateCapacity, entries.length);
+  const AXIS_COLOR = "rgba(0,0,0,.20)";
+  const TICK_COLOR = "#475569"; // slate-600
 
-      // recolectamos todas las marcas
-      const set = new Set<string>();
-      for (const [, p] of entries) {
-        const ts = p?.timestamps ?? [];
-        ts.forEach((t) => set.add(String(t ?? "")));
-      }
-      labels = Array.from(set);
-
-      // sumamos ON por timestamp
-      counts = new Map(labels.map((t) => [t, 0]));
-      for (const [, p] of entries) {
-        const ts = p?.timestamps ?? [];
-        const on = p?.is_on ?? [];
-        const N = Math.min(ts.length, on.length);
-        for (let i = 0; i < N; i++) {
-          const t = String(ts[i] ?? "");
-          const v = on[i];
-          if (!t) continue;
-          counts.set(t, (counts.get(t) ?? 0) + (truthyOn(v) ? 1 : 0));
-        }
-      }
-    }
-
-    const mode: "category" | "time" = labels.length && labels.every((t) => isHourLabel(t)) ? "category" : "time";
-
-    // Construimos serie final
-    let series: Array<{ x: number | string; label: string; on: number }> = labels.map((t) => {
-      const n = Number(counts.get(t) ?? 0);
-      return mode === "time"
-        ? { x: toMs(t), label: t, on: n }
-        : { x: labels.indexOf(t), label: t, on: n }; // índice como x para brush, label para el eje
-    });
-
-    // Orden cronológico
-    series =
-      mode === "time"
-        ? series
-            .filter((d) => Number.isFinite(d.x as number))
-            .sort((a, b) => (a.x as number) - (b.x as number))
-        : [...series].sort((a, b) => String(a.label).localeCompare(String(b.label))); // "00:00".."23:00"
-
-    return { series, mode, capacity: candidateCapacity || undefined };
-  }, [pumpsTs, max]);
-
-  const hasData = series.length > 0;
-  const yMaxData = Math.max(0, ...series.map((d) => d.on));
-  const yMax = Math.max(1, yMaxData, capacity ?? 0);
-
-  // Normalizamos eventos para ReferenceLine
-  const marks = useMemo(
-    () =>
-      (events || []).map((e) => ({
-        x: toMs(e.ts),
-        label: e.label || (e.type === "start" ? "start" : "stop"),
-        color: e.type === "start" ? "#22c55e" : "#ef4444", // verde / rojo
-      })),
-    [events]
-  );
-
-  // -----------------------------
-  // 2) Render
-  // -----------------------------
   return (
     <Card className="rounded-2xl">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
       </CardHeader>
 
-      <CardContent className="h-56" style={{ height }}>
-        {!hasData ? (
+      <CardContent style={{ height }}>
+        {!hasAnyBar ? (
           <div className="h-full grid place-items-center text-sm text-gray-500">
-            Sin datos de estado para bombas.
+            Sin eventos ON en las últimas 24 h.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            {variant === "line" ? (
-              <LineChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                {mode === "time" ? (
-                  <XAxis
-                    dataKey="x"
-                    type="number"
-                    domain={["dataMin", "dataMax"]}
-                    tickFormatter={(v) => fmtTime(v as number, tz)}
-                    tickMargin={8}
-                    minTickGap={36}
-                  />
-                ) : (
-                  <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
-                )}
-                <YAxis allowDecimals={false} domain={[0, yMax]} width={28} />
+            <BarChart
+              data={series}
+              syncId={syncId}
+              syncMethod="value"
+              margin={{ top: 8, right: 16, left: 8, bottom: 0 }}  // ⬅️ mismo margin que Tank
+              barCategoryGap={0}
+              barGap={0}
+            >
+              {/* Eje X temporal simple, ticks cada hora, mismo estilo que eficiencia */}
+              <XAxis
+                dataKey="x"
+                type="number"
+                scale="time"
+                domain={["dataMin", "dataMax"]}
+                ticks={ticks}
+                tickFormatter={(v) => fmtHour(v as number, tz)}
+                axisLine={{ stroke: AXIS_COLOR }}
+                tickLine={false}
+                tick={{ fontSize: 11, fill: TICK_COLOR }}
+                minTickGap={24}
+              />
 
-                <Tooltip
-                  cursor={{ strokeDasharray: "3 3" }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload || !payload.length) return null;
-                    const p = payload[0].payload as { x: number | string; label: string; on: number };
-                    const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
-                    return (
-                      <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
-                        <div className="text-xs text-muted-foreground">{when}</div>
-                        <div className="text-sm font-medium">Bombas ON: {p.on}</div>
-                      </div>
-                    );
-                  }}
-                />
+              {/* Eje Y minimal para que combinen bases y alturas */}
+              <YAxis
+                domain={[0, yMax]}
+                allowDecimals={false}
+                width={40}                       // ⬅️ igual que TankLevelChart
+                axisLine={{ stroke: AXIS_COLOR }}
+                tickLine={false}
+                tick={{ fontSize: 11, fill: TICK_COLOR }}
+              />
 
-                {/* Línea escalonada */}
-                <Line type="stepAfter" dataKey="on" stroke="currentColor" strokeWidth={2} dot={false} isAnimationActive={false} />
+              {/* Tooltip liviano */}
+              <Tooltip
+                cursor={{ fillOpacity: 0 }}
+                content={({ active, payload }) => {
+                  if (!active || !payload || !payload.length) return null;
+                  const p = payload[0].payload as { x: number; on: number | null };
+                  return (
+                    <div className="rounded-md border bg-white/95 px-2 py-1 text-xs shadow">
+                      <div>{fmtHour(p.x, tz)} h</div>
+                      <div><strong>{p.on ?? 0}</strong> ON</div>
+                    </div>
+                  );
+                }}
+              />
 
-                {/* Capacidad (si la conocemos) */}
-                {capacity != null && capacity > 0 && (
-                  <ReferenceLine
-                    y={capacity}
-                    stroke="currentColor"
-                    strokeDasharray="4 4"
-                    opacity={0.5}
-                    label={{ value: `cap ${capacity}`, position: "top", fontSize: 10 }}
-                  />
-                )}
-
-                {/* Eventos verticales */}
-                {mode === "time" &&
-                  marks.map((m, i) => (
-                    <ReferenceLine
-                      key={i}
-                      x={m.x}
-                      stroke={m.color}
-                      strokeDasharray="4 4"
-                      label={{ value: m.label, position: "top", fontSize: 10 }}
-                    />
-                  ))}
-
-                {showLegend && <Legend verticalAlign="top" height={24} />}
-
-                {series.length > showBrushIf && (
-                  <Brush
-                    dataKey={mode === "time" ? "x" : "label"}
-                    height={22}
-                    stroke="currentColor"
-                    travellerWidth={8}
-                    tickFormatter={(v) => (mode === "time" ? fmtTime(v as number, tz) : String(v))}
-                  />
-                )}
-              </LineChart>
-            ) : (
-              <BarChart data={series} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                {mode === "time" ? (
-                  <XAxis
-                    dataKey="x"
-                    type="number"
-                    domain={["dataMin", "dataMax"]}
-                    tickFormatter={(v) => fmtTime(v as number, tz)}
-                    tickMargin={8}
-                    minTickGap={36}
-                  />
-                ) : (
-                  <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
-                )}
-                <YAxis allowDecimals={false} domain={[0, yMax]} width={28} />
-
-                <Tooltip
-                  cursor={{ fillOpacity: 0.05 }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload || !payload.length) return null;
-                    const p = payload[0].payload as { x: number | string; label: string; on: number };
-                    const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
-                    return (
-                      <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
-                        <div className="text-xs text-muted-foreground">{when}</div>
-                        <div className="text-sm font-medium">Bombas ON: {p.on}</div>
-                      </div>
-                    );
-                  }}
-                />
-
-                {/* Banda ligera para capacidad */}
-                {capacity != null && capacity > 0 && (
-                  <ReferenceArea y1={capacity} y2={Math.max(capacity, yMax)} fill="currentColor" fillOpacity={0.05} />
-                )}
-                {capacity != null && capacity > 0 && (
-                  <ReferenceLine
-                    y={capacity}
-                    stroke="currentColor"
-                    strokeDasharray="4 4"
-                    opacity={0.5}
-                    label={{ value: `cap ${capacity}`, position: "top", fontSize: 10 }}
-                  />
-                )}
-
-                <Bar dataKey="on" name="Bombas ON" isAnimationActive={false} fill="currentColor" />
-
-                {showLegend && <Legend verticalAlign="top" height={24} />}
-
-                {series.length > showBrushIf && (
-                  <Brush
-                    dataKey={mode === "time" ? "x" : "label"}
-                    height={22}
-                    stroke="currentColor"
-                    travellerWidth={8}
-                    tickFormatter={(v) => (mode === "time" ? fmtTime(v as number, tz) : String(v))}
-                  />
-                )}
-              </BarChart>
-            )}
+              {/* Barras negras, anchas y redondeadas arriba */}
+              <Bar
+                dataKey="on"
+                isAnimationActive={false}
+                fill="#000"
+                stroke="#000"
+                barSize={barWidthPx}
+                maxBarSize={barWidthPx}
+                radius={[6, 6, 6, 6]}
+              />
+            </BarChart>
           </ResponsiveContainer>
         )}
       </CardContent>

@@ -1,6 +1,5 @@
 // src/api/kpi.ts
-// Backend base
-const BASE = import.meta.env?.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
+import { scopedUrl, getApiHeaders } from "@/lib/config";
 
 /* =====================
  * Tipos base del backend
@@ -90,7 +89,9 @@ export type Alarm = {
  * Helpers
  * ===================== */
 async function http<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { headers: { Accept: "application/json" } });
+  // Usa scopedUrl → agrega ?company_id=XX si no estaba (según lib/scope)
+  const url = scopedUrl(path);
+  const res = await fetch(url, { headers: getApiHeaders() });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.error(`[API ${res.status}] ${res.statusText} ::`, body || "(sin cuerpo)");
