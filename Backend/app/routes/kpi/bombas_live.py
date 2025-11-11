@@ -8,8 +8,10 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/kpi/bombas", tags=["kpi-bombas"])
 
-PUMPS_TABLE = os.getenv("PUMPS_TABLE", "").strip()
-LOCATIONS_TABLE = os.getenv("LOCATIONS_TABLE", "").strip()
+# Por defecto usamos tus tablas reales en public.*; si algún día cambian, podés
+# sobreescribir con env vars PUMPS_TABLE / LOCATIONS_TABLE sin tocar código.
+PUMPS_TABLE = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
+LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 
 # ---------------- helpers de tiempo ----------------
 def _bounds_24h(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
@@ -44,16 +46,16 @@ def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
 # ---------------- endpoint ----------------
 @router.get("/live")
 def pumps_live_24h(
-    company_id: Optional[int] = Query(None, description="Scope por empresa (requiere PUMPS_TABLE/LOCATIONS_TABLE)"),
-    location_id: Optional[int] = Query(None, description="Filtra por ubicación (requiere PUMPS_TABLE/LOCATIONS_TABLE)"),
+    company_id: Optional[int] = Query(None, description="Scope por empresa"),
+    location_id: Optional[int] = Query(None, description="Filtra por ubicación"),
     pump_ids: Optional[str] = Query(None, description="CSV opcional de pump_id(s)"),
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to:   Optional[datetime] = Query(None, alias="to"),
 ):
     """
     Devuelve serie por minuto con la CANTIDAD de bombas encendidas (carry-forward).
-    * Si pasás pump_ids => NO toca public.pumps/public.locations (evita 500).
-    * Castea hb_ts/relay desde la vista kpi.pump_heartbeat_parsed.
+    * Si pasás pump_ids => NO toca public.pumps/public.locations (más robusto).
+    * hb_ts/relay de la vista kpi.pump_heartbeat_parsed se castean explícitamente.
     """
     df, dt = _bounds_24h(date_from, date_to)
     ids = _parse_ids(pump_ids)
@@ -66,14 +68,8 @@ def pumps_live_24h(
                 # scope directo por lista de ids
                 scope_ids = ids
             else:
-                # Si pedís filtros por company/location, exigimos tablas configuradas
-                if (company_id or location_id) and (not PUMPS_TABLE or not LOCATIONS_TABLE):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Para company_id/location_id configurá PUMPS_TABLE y LOCATIONS_TABLE (ej. public.pumps/public.locations) o pasá pump_ids."
-                    )
-                if PUMPS_TABLE and LOCATIONS_TABLE and (company_id or location_id):
-                    # scope por tablas reales
+                if company_id or location_id:
+                    # scope por tablas reales (defaults a public.pumps/public.locations)
                     cur.execute(
                         f"""
                         SELECT p.id AS pump_id
@@ -142,7 +138,7 @@ def pumps_live_24h(
             )
             rows = cur.fetchall()
 
-        # ---- 4) Carry-forward en Python → armo intervalos ON [start,end) por bomba ----
+        # ---- 4) Carry-forward en Python → intervalos ON [start,end) por bomba ----
         from collections import defaultdict, OrderedDict
 
         by_pump: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
@@ -190,7 +186,6 @@ def pumps_live_24h(
             minutes.append(cur)
             cur += timedelta(minutes=1)
 
-        # ordeno eventos y recorro
         run = 0
         evmap = OrderedDict(sorted(events.items()))
         out = []
