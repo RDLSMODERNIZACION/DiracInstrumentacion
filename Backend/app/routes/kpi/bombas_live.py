@@ -8,8 +8,7 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/kpi/bombas", tags=["kpi-bombas"])
 
-# Por defecto usamos tus tablas reales en public.*; si algún día cambian, podés
-# sobreescribir con env vars PUMPS_TABLE / LOCATIONS_TABLE sin tocar código.
+# Defaults a tus tablas reales en public.*; si cambian, sobreescribí por ENV.
 PUMPS_TABLE = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 
@@ -29,7 +28,7 @@ def _bounds_24h(date_from: Optional[datetime], date_to: Optional[datetime]) -> T
     return date_from, date_to
 
 def _ceil_minute(ts: datetime) -> datetime:
-    if ts.second == 0 and ts.microsecond == 0:  # exacto al minuto
+    if ts.second == 0 and ts.microsecond == 0:
         return ts
     return (ts.replace(second=0, microsecond=0) + timedelta(minutes=1))
 
@@ -53,9 +52,9 @@ def pumps_live_24h(
     date_to:   Optional[datetime] = Query(None, alias="to"),
 ):
     """
-    Devuelve serie por minuto con la CANTIDAD de bombas encendidas (carry-forward).
-    * Si pasás pump_ids => NO toca public.pumps/public.locations (más robusto).
-    * hb_ts/relay de la vista kpi.pump_heartbeat_parsed se castean explícitamente.
+    Serie por minuto con la CANTIDAD de bombas encendidas (carry-forward).
+    * Si pasás pump_ids => NO toca public.pumps/public.locations (robusto).
+    * hb_ts/relay de kpi.pump_heartbeat_parsed se castean explícitamente.
     """
     df, dt = _bounds_24h(date_from, date_to)
     ids = _parse_ids(pump_ids)
@@ -65,24 +64,29 @@ def pumps_live_24h(
 
             # ---- 1) Scope de bombas ----
             if ids:
-                # scope directo por lista de ids
                 scope_ids = ids
             else:
-                if company_id or location_id:
-                    # scope por tablas reales (defaults a public.pumps/public.locations)
+                if company_id is not None or location_id is not None:
+                    # ⚠️ Tipamos parámetros con un CTE 'params' para evitar "could not determine data type"
                     cur.execute(
                         f"""
+                        WITH params AS (
+                          SELECT
+                            %(company_id)s::bigint AS company_id,
+                            %(location_id)s::bigint AS location_id
+                        )
                         SELECT p.id AS pump_id
                         FROM {PUMPS_TABLE} p
                         JOIN {LOCATIONS_TABLE} l ON l.id = p.location_id
-                        WHERE (%(company_id)s IS NULL OR l.company_id = %(company_id)s)
-                          AND (%(location_id)s IS NULL OR l.id = %(location_id)s)
+                        CROSS JOIN params
+                        WHERE (params.company_id IS NULL OR l.company_id = params.company_id)
+                          AND (params.location_id IS NULL OR l.id = params.location_id)
                         """,
                         {"company_id": company_id, "location_id": location_id},
                     )
                     scope_ids = [int(r["pump_id"]) for r in cur.fetchall()]
                 else:
-                    # sin filtros: tomar las bombas con actividad en ±48h
+                    # sin filtros: tomar bombas con actividad en ±48h
                     cur.execute(
                         """
                         WITH bounds AS (
@@ -157,11 +161,10 @@ def pumps_live_24h(
                 v: bool = r["relay"]
                 if v == state:
                     continue
-                # transición
                 if state is True:
                     # cerrar intervalo ON [cur_start, t)
-                    inc = _ceil_minute(cur_start)      # suma desde el próximo minuto
-                    dec = _ceil_minute(t)              # deja de sumar al minuto de t
+                    inc = _ceil_minute(cur_start)
+                    dec = _ceil_minute(t)
                     if inc < _ceil_minute(dt):
                         events[inc] += 1
                         events[dec] -= 1
@@ -171,7 +174,6 @@ def pumps_live_24h(
                     cur_start = t
                 state = v
 
-            # si quedó ON al final, cierro en dt
             if state is True and cur_start is not None:
                 inc = _ceil_minute(cur_start)
                 dec = _ceil_minute(dt)
@@ -179,7 +181,7 @@ def pumps_live_24h(
                     events[inc] += 1
                     events[dec] -= 1
 
-        # ---- 5) Construyo grilla por minuto y aplico prefix sum de eventos ----
+        # ---- 5) Grilla por minuto + prefix sum ----
         minutes = []
         cur = df
         while cur <= dt:
@@ -204,9 +206,8 @@ def pumps_live_24h(
                     next_ev_time, next_ev_val = None, 0
             out.append(run)
 
-        # ---- 6) pumps_total / pumps_connected ----
         pumps_total = len(scope_ids)
-        pumps_connected = len({int(r["pump_id"]) for r in rows})  # heartbeat en la ventana
+        pumps_connected = len({int(r["pump_id"]) for r in rows})
 
         return {
             "timestamps": [int(m.timestamp() * 1000) for m in minutes],
@@ -219,5 +220,4 @@ def pumps_live_24h(
     except HTTPException:
         raise
     except Exception as e:
-        # devolvemos el detalle para ver el motivo real del 500
         raise HTTPException(status_code=500, detail=f"backend error: {e}")
