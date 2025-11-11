@@ -14,6 +14,9 @@ from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
 from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
+
+# ===== KPI (agregador) =====
+#   /kpi/* (dashboard + tanques)  y  /kpi/bombas/*  (bombas_live)
 from app.routes.kpi import router as kpi_router
 
 # ===== Dirac (operación) =====
@@ -26,20 +29,14 @@ from app.routes.dirac.pumps import router as dirac_pumps_router
 # ===== Administración (CRUD abierto) =====
 # (asegurate de tener app/routes/dirac_admin/__init__.py vacío)
 from app.routes.dirac_admin.companies import router as admin_companies_router
-from app.routes.dirac_admin.users import router as admin_users_router     # ← /dirac/admin/users
+from app.routes.dirac_admin.users import router as admin_users_router
 from app.routes.dirac_admin.locations import router as admin_locations_router
 from app.routes.dirac_admin.tanks import router as admin_tanks_router
 from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
-
-
-from app.routes.dirac.me import router as dirac_me_router  # <- KEEP/ADD
-
-from app.routes.infra_edit import router as infra_edit_router
-
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
-from app.routes.kpi.bombas_live import router as kpi_bombas_live_router
+from app.routes.infra_edit import router as infra_edit_router
 
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -108,6 +105,8 @@ app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
 app.include_router(infraestructura_router)
+
+# ===== KPI (agregador: dashboard + tanques + bombas_live) =====
 app.include_router(kpi_router)
 
 # ===== Dirac (operación) =====
@@ -118,22 +117,19 @@ app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
 # ===== Administración (CRUD abierto) =====
-# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations, /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves
+# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations, /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves, /dirac/admin/manifolds
 app.include_router(admin_companies_router)
-app.include_router(admin_users_router)       # ← este es el que debe usar el front para crear usuarios
+app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
 app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
+app.include_router(admin_manifolds_router)
 
-app.include_router(dirac_me_router)  # <- KEEP/ADD
+# ===== Otros =====
+app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"
 
 # ===== Cierre ordenado del pool de DB =====
 @app.on_event("shutdown")
 def _shutdown():
     close_pool()
-
-
-app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"
-app.include_router(admin_manifolds_router)
-app.include_router(kpi_bombas_live_router)
