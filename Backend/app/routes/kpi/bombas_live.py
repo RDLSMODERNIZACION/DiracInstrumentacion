@@ -1,4 +1,15 @@
 # app/routes/kpi/bombas_live.py
+#
+# Bombas LIVE (perfil continuo):
+# - Devuelve serie por minuto (o bucketizada) de CANTIDAD DE BOMBAS ON en [from,to)
+# - Soporta filtros por empresa/ubicación o lista explícita de bombas
+# - Carry-forward del estado (step hold) a nivel minuto
+# - Opcional: bucket de salida (1min|5min|15min|1h) con agregación avg|max
+# - "connected_only": si True (default), sólo cuenta bombas con heartbeats en la ventana
+#
+# Origen de datos: kpi.pump_heartbeat_parsed (pump_id, hb_ts, relay)
+# Tablas de scope (por defecto): public.pumps / public.locations (override por ENV)
+
 import os
 from fastapi import APIRouter, Query, HTTPException
 from psycopg.rows import dict_row
@@ -13,7 +24,8 @@ PUMPS_TABLE = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 
 # ---------------- helpers de tiempo ----------------
-def _bounds_24h(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
+def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
+    """Normaliza [from,to] a UTC y los alinea al minuto (sin seg/microseg)."""
     if date_to is None:
         date_to = datetime.now(timezone.utc)
     if date_from is None:
@@ -25,6 +37,8 @@ def _bounds_24h(date_from: Optional[datetime], date_to: Optional[datetime]) -> T
     # redondeo a minuto
     date_to   = date_to.replace(second=0, microsecond=0)
     date_from = date_from.replace(second=0, microsecond=0)
+    if date_from >= date_to:
+        raise HTTPException(status_code=400, detail="'from' debe ser menor que 'to'")
     return date_from, date_to
 
 def _ceil_minute(ts: datetime) -> datetime:
@@ -32,42 +46,90 @@ def _ceil_minute(ts: datetime) -> datetime:
         return ts
     return (ts.replace(second=0, microsecond=0) + timedelta(minutes=1))
 
-def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
-    if not csv: return None
-    out: List[int] = []
-    for tok in csv.split(","):
-        tok = tok.strip()
-        if not tok: continue
-        try: out.append(int(tok))
-        except: pass
-    return out or None
+# ---------------- helpers de bucket ----------------
+def _bucket_to_minutes(b: str) -> int:
+    return {"1min": 1, "5min": 5, "15min": 15, "1h": 60}[b]
+
+def _resample_minutes(
+    minutes: List[datetime],
+    vals: List[int],
+    bucket_min: int,
+    mode: str = "avg",      # "avg" | "max"
+    round_counts: bool = False,
+):
+    """Agrupa la serie de minutos en buckets de 'bucket_min' minutos.
+    - mode=avg|max para el conteo dentro del bucket.
+    - round_counts=True redondea el promedio a entero (útil para conteos).
+    Retorna (timestamps_ms_al_inicio_de_bucket, valores)."""
+    if bucket_min <= 1:
+        return [int(m.timestamp() * 1000) for m in minutes], vals
+
+    out_ts: List[int] = []
+    out_vals: List[Optional[float]] = []
+
+    acc: List[int] = []
+    bucket_start_idx = 0
+    for i, v in enumerate(vals):
+        acc.append(int(v))
+        if ((i + 1) % bucket_min == 0) or (i == len(vals) - 1):
+            if acc:
+                if mode == "max":
+                    vv: float = float(max(acc))
+                else:
+                    vv = float(sum(acc) / len(acc))
+                if round_counts:
+                    vv = float(round(vv))
+            else:
+                vv = 0.0
+            out_ts.append(int(minutes[bucket_start_idx].timestamp() * 1000))
+            out_vals.append(vv)
+            acc = []
+            bucket_start_idx = i + 1
+
+    # casteo final a ints si redondeamos; si no, dejamos float (pero serializa ok)
+    if mode == "avg" and not round_counts:
+        # mantener float para permitir valores fraccionales
+        return out_ts, out_vals  # type: ignore[return-value]
+    else:
+        return out_ts, [int(v) for v in out_vals if v is not None]  # type: ignore[return-value]
 
 # ---------------- endpoint ----------------
 @router.get("/live")
-def pumps_live_24h(
+def pumps_live(
     company_id: Optional[int] = Query(None, description="Scope por empresa"),
     location_id: Optional[int] = Query(None, description="Filtra por ubicación"),
     pump_ids: Optional[str] = Query(None, description="CSV opcional de pump_id(s)"),
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to:   Optional[datetime] = Query(None, alias="to"),
+    # Ampliaciones para ventanas largas:
+    bucket: str = Query("1min", pattern="^(1min|5min|15min|1h)$", description="Resolución de salida"),
+    agg_mode: str = Query("avg", pattern="^(avg|max)$", description="Agregación por bucket (avg|max)"),
+    round_counts: bool = Query(False, description="Redondear conteo por bucket"),
+    connected_only: bool = Query(True, description="Sólo contar bombas con heartbeats en la ventana"),
 ):
     """
-    Serie por minuto con la CANTIDAD de bombas encendidas (carry-forward).
-    * Si pasás pump_ids => NO toca public.pumps/public.locations (robusto).
-    * hb_ts/relay de kpi.pump_heartbeat_parsed se castean explícitamente.
+    Serie de CANTIDAD DE BOMBAS ON por minuto (o bucketizada) en [from,to).
+    - Si pasás pump_ids => NO se referencia public.pumps/public.locations (más robusto).
+    - Si usás company_id/location_id => usa {PUMPS_TABLE}/{LOCATIONS_TABLE}.
+    - Carry-forward (step hold) a minuto.
+    - 'connected_only': si True, sólo bombas con heartbeats en la ventana.
     """
-    df, dt = _bounds_24h(date_from, date_to)
-    ids = _parse_ids(pump_ids)
+    df, dt = _bounds_utc_minute(date_from, date_to)
+    ids = None
+    if pump_ids:
+        try:
+            ids = [int(x.strip()) for x in pump_ids.split(",") if x.strip()]
+        except Exception:
+            raise HTTPException(status_code=400, detail="pump_ids inválido")
 
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-
-            # ---- 1) Scope de bombas ----
+            # ---- 1) Scope de bombas (lista total del scope) ----
             if ids:
-                scope_ids = ids
+                scope_ids_all = ids
             else:
-                if company_id is not None or location_id is not None:
-                    # ⚠️ Tipamos parámetros con un CTE 'params' para evitar "could not determine data type"
+                if (company_id is not None) or (location_id is not None):
+                    # Tipamos params para evitar "could not determine data type"
                     cur.execute(
                         f"""
                         WITH params AS (
@@ -84,9 +146,9 @@ def pumps_live_24h(
                         """,
                         {"company_id": company_id, "location_id": location_id},
                     )
-                    scope_ids = [int(r["pump_id"]) for r in cur.fetchall()]
+                    scope_ids_all = [int(r["pump_id"]) for r in cur.fetchall()]
                 else:
-                    # sin filtros: tomar bombas con actividad en ±48h
+                    # sin filtros: bombas con actividad ±48h alrededor de la ventana
                     cur.execute(
                         """
                         WITH bounds AS (
@@ -99,9 +161,10 @@ def pumps_live_24h(
                         """,
                         {"df": df, "dt": dt},
                     )
-                    scope_ids = [int(r["pump_id"]) for r in cur.fetchall()]
+                    scope_ids_all = [int(r["pump_id"]) for r in cur.fetchall()]
 
-            if not scope_ids:
+            pumps_total_all = len(scope_ids_all)
+            if not pumps_total_all:
                 return {
                     "timestamps": [],
                     "is_on": [],
@@ -110,7 +173,30 @@ def pumps_live_24h(
                     "window": {"from": df.isoformat(), "to": dt.isoformat()},
                 }
 
-            # ---- 2) Baseline por bomba (último estado antes de df) ----
+            # ---- 2) Bombas conectadas en ventana (para connected_only y métrica) ----
+            cur.execute(
+                """
+                SELECT DISTINCT h.pump_id
+                FROM kpi.pump_heartbeat_parsed h
+                JOIN (SELECT unnest(%(ids)s::int[]) AS pump_id) s ON s.pump_id = h.pump_id
+                WHERE (h.hb_ts)::timestamptz >= %(df)s
+                  AND (h.hb_ts)::timestamptz <= %(dt)s
+                """,
+                {"ids": scope_ids_all, "df": df, "dt": dt},
+            )
+            connected_set = {int(r["pump_id"]) for r in cur.fetchall()}
+            scope_ids = scope_ids_all if not connected_only else [pid for pid in scope_ids_all if pid in connected_set]
+
+            if not scope_ids:
+                return {
+                    "timestamps": [],
+                    "is_on": [],
+                    "pumps_total": pumps_total_all,
+                    "pumps_connected": 0,
+                    "window": {"from": df.isoformat(), "to": dt.isoformat()},
+                }
+
+            # ---- 3) Baseline por bomba (último estado antes de df) ----
             cur.execute(
                 """
                 SELECT DISTINCT ON (h.pump_id)
@@ -126,7 +212,7 @@ def pumps_live_24h(
             baseline_rows = cur.fetchall()
             baseline = {int(r["pump_id"]): bool(r["relay"]) for r in baseline_rows}
 
-            # ---- 3) Heartbeats en [df, dt] con CAST explícito ----
+            # ---- 4) Heartbeats en [df, dt] (ordenados) ----
             cur.execute(
                 """
                 SELECT h.pump_id,
@@ -142,18 +228,18 @@ def pumps_live_24h(
             )
             rows = cur.fetchall()
 
-        # ---- 4) Carry-forward en Python → intervalos ON [start,end) por bomba ----
+        # ---- 5) Carry-forward en Python → intervalos ON [start,end) por bomba ----
         from collections import defaultdict, OrderedDict
 
         by_pump: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
         for r in rows:
             by_pump[int(r["pump_id"])].append({"ts": r["ts"], "relay": bool(r["relay"])})
 
-        # eventos de +1/-1 por minuto
+        # eventos +1/-1 por minuto
         events: Dict[datetime, int] = defaultdict(int)
 
         for pid in scope_ids:
-            state = bool(baseline.get(pid, False))  # baseline en df
+            state = bool(baseline.get(pid, False))      # estado vigente al inicio
             cur_start: Optional[datetime] = df if state else None
 
             for r in by_pump.get(pid, []):
@@ -181,16 +267,16 @@ def pumps_live_24h(
                     events[inc] += 1
                     events[dec] -= 1
 
-        # ---- 5) Grilla por minuto + prefix sum ----
-        minutes = []
-        cur = df
-        while cur <= dt:
-            minutes.append(cur)
-            cur += timedelta(minutes=1)
+        # ---- 6) Grilla por minuto + prefix sum ----
+        minutes: List[datetime] = []
+        cur_m = df
+        while cur_m <= dt:
+            minutes.append(cur_m)
+            cur_m += timedelta(minutes=1)
 
         run = 0
         evmap = OrderedDict(sorted(events.items()))
-        out = []
+        out: List[int] = []
         ev_iter = iter(evmap.items())
         try:
             next_ev_time, next_ev_val = next(ev_iter)
@@ -204,14 +290,18 @@ def pumps_live_24h(
                     next_ev_time, next_ev_val = next(ev_iter)
                 except StopIteration:
                     next_ev_time, next_ev_val = None, 0
-            out.append(run)
+            out.append(int(run))
 
-        pumps_total = len(scope_ids)
-        pumps_connected = len({int(r["pump_id"]) for r in rows})
+        pumps_total = pumps_total_all
+        pumps_connected = len(connected_set)
+
+        # ---- 7) Bucketización de salida (1min|5min|15min|1h) ----
+        bucket_min = _bucket_to_minutes(bucket)
+        ts_ms, vals = _resample_minutes(minutes, out, bucket_min, mode=agg_mode, round_counts=round_counts)
 
         return {
-            "timestamps": [int(m.timestamp() * 1000) for m in minutes],
-            "is_on": out,
+            "timestamps": ts_ms,
+            "is_on": vals,
             "pumps_total": pumps_total,
             "pumps_connected": pumps_connected,
             "window": {"from": df.isoformat(), "to": dt.isoformat()},
