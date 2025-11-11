@@ -1,225 +1,141 @@
 // src/hooks/useLiveOps.ts
+//
+// Hook LIVE para Operación (24h): devuelve series sincronizadas para
+//  - Bombas: cantidad de bombas ON por minuto (perfil continuo)
+//  - Tanques: placeholder (hasta que tengamos endpoint live de niveles)
+//
+// Principales mejoras:
+// 1) Usa el endpoint nuevo /kpi/bombas/live (carry-forward en backend).
+// 2) Ventana fija de 24h (configurable) alineada al minuto.
+// 3) Polling simple con abort/cleanup y tolerante a errores.
+// 4) API clara: locationId | companyId | pumpIds | connectedOnly.
+//
+
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getPumps, getTanks } from "@/api/kpi";
-import { fetchBuckets, fetchPumpsActive, fetchTankLevelAvg } from "@/api/graphs";
+import { fetchPumpsLive, PumpsLiveResp } from "@/api/graphs";
 
-const WINDOW_MS  = 24 * 60 * 60 * 1000;  // 24h
-const SAMPLE_MS  = 5_000;                // sampleo en vivo cada 5s
-const FIRST_PAD  = SAMPLE_MS;            // separación artificial del primer punto (evita barra 0px)
-
-type Series = {
-  timestamps: number[];
-  pumps_on: number[];              // cantidad de bombas ENCENDIDAS (no “online”)
-  level_percent: (number | null)[];
-  pumps_total: number;
+// ===== Tipos de salida que consumen los charts =====
+export type TankTs = {
+  timestamps?: Array<number | string>;
+  level_percent?: Array<number | string | null>;
+};
+export type PumpTs = {
+  timestamps?: number[];
+  is_on?: number[];
 };
 
-type Opts = { locationId?: number | "all"; entityId?: number };
+type Args = {
+  /** Filtro por ubicación (undefined/"all" = todas) */
+  locationId?: number | "all";
+  /** Scope por empresa (opcional) */
+  companyId?: number;
+  /** Para filtrar bombas explícitas (omite company/location) */
+  pumpIds?: number[];
+  /** Horas a mostrar (default 24) */
+  periodHours?: number;
+  /** Polling ms (default 15000) */
+  pollMs?: number;
+  /** Sólo contar bombas con heartbeats en ventana (default true) */
+  connectedOnly?: boolean;
+};
 
-/** Normaliza “encendida” de forma robusta (no es lo mismo que online). */
-function pumpIsOn(p: any): boolean {
-  if (typeof p?.is_on === "boolean") return p.is_on;
-  if (typeof p?.isOn === "boolean") return p.isOn;
+type LiveOps = {
+  tankTs: TankTs | null;
+  pumpTs: PumpTs | null;
+  pumpsTotal?: number;       // total de bombas del scope (empresa/loc o pumpIds)
+  pumpsConnected?: number;   // cuántas reportaron en [from,to)
+  window?: { start: number; end: number }; // epoch ms, alineado a minuto
+};
 
-  const s = String(p?.state ?? "").toLowerCase();
-  if (["on", "encendida", "running", "activo", "active", "start"].includes(s)) return true;
-  if (["off", "apagada", "stopped", "idle"].includes(s)) return false;
-
-  // último recurso: si solo tenemos online y no hay state, tomamos online
-  if (typeof p?.online === "boolean" && !p?.state) return p.online;
-
-  return false;
+// ===== utilitarios de tiempo =====
+function floorToMinute(ms: number) {
+  const d = new Date(ms);
+  d.setSeconds(0, 0);
+  return d.getTime();
+}
+function endNowAligned() {
+  return floorToMinute(Date.now());
+}
+function startFrom(endMs: number, hours: number) {
+  return endMs - hours * 3600_000;
 }
 
-/** Suavizado anti-parpadeo ante micro-cortes de HB. */
-function makePumpSmoother() {
-  const SMOOTH_MS = Math.max(SAMPLE_MS * 2, 8_000); // al menos 8s
-  const lastOnAt = new Map<string | number, number>();
+export function useLiveOps({
+  locationId,
+  companyId,
+  pumpIds,
+  periodHours = 24,
+  pollMs = 15_000,
+  connectedOnly = true,
+}: Args = {}): LiveOps {
+  const [pump, setPump] = useState<PumpsLiveResp | null>(null);
+
+  // Guardamos última ventana pedida para exponerla al caller (widget)
+  const [win, setWin] = useState<{ start: number; end: number } | undefined>(undefined);
+
+  // Abort simple entre renders/polls
+  const abortSeq = useRef(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const seq = ++abortSeq.current;
+
+    async function load() {
+      try {
+        // Ventana [from, to) alineada al minuto
+        const end = endNowAligned();
+        const start = startFrom(end, periodHours);
+        setWin({ start, end });
+
+        const locId = typeof locationId === "number" ? locationId : undefined;
+
+        const resp = await fetchPumpsLive({
+          from: new Date(start).toISOString(),
+          to: new Date(end).toISOString(),
+          locationId: locId,
+          companyId,
+          pumpIds,
+          connectedOnly,
+        });
+
+        if (!mounted || seq !== abortSeq.current) return;
+        setPump(resp);
+      } catch (err) {
+        // Toleramos errores transitorios sin romper la UI
+        console.error("[useLiveOps] live fetch error:", err);
+      }
+    }
+
+    // Primera carga inmediata y polling
+    load();
+    const t = window.setInterval(load, pollMs);
+    return () => {
+      mounted = false;
+      window.clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId, companyId, pumpIds?.join(","), periodHours, pollMs, connectedOnly]);
+
+  // ===== Adaptadores a la forma que consumen los charts =====
+
+  // Bombas: serie continua por minuto (ya alineada desde backend)
+  const pumpTs = useMemo<PumpTs | null>(() => {
+    if (!pump) return null;
+    return { timestamps: pump.timestamps, is_on: pump.is_on };
+  }, [pump]);
+
+  // Tanques (placeholder): dejamos timestamps vacíos hasta tener endpoint live de niveles.
+  // Si querés que grafique “línea base”, podés replicar timestamps de bombas con nulls:
+  const tankTs = useMemo<TankTs | null>(() => {
+    if (!pump) return null;
+    return { timestamps: pump.timestamps, level_percent: pump.timestamps.map(() => null) };
+  }, [pump]);
+
   return {
-    update(now: number, pumps: any[]) {
-      for (const p of pumps) {
-        const id = p?.pump_id ?? p?.id ?? p?.name;
-        if (id != null && pumpIsOn(p)) lastOnAt.set(id, now);
-      }
-    },
-    isOn(now: number, p: any) {
-      const id = p?.pump_id ?? p?.id ?? p?.name;
-      if (id == null) return pumpIsOn(p);
-      const last = lastOnAt.get(id) ?? 0;
-      const smooth = now - last <= SMOOTH_MS;
-      return pumpIsOn(p) || smooth;
-    },
+    tankTs,
+    pumpTs,
+    pumpsTotal: pump?.pumps_total,
+    pumpsConnected: pump?.pumps_connected,
+    window: win,
   };
-}
-
-export function useLiveOps(opts: Opts = {}) {
-  const [data, setData] = useState<Series>({
-    timestamps: [],
-    pumps_on: [],
-    level_percent: [],
-    pumps_total: 0,
-  });
-
-  const smootherRef = useRef(makePumpSmoother());
-
-  // Limpiar al cambiar ubicación/entidad (seguimos en 24h fijo)
-  useEffect(() => {
-    setData({ timestamps: [], pumps_on: [], level_percent: [], pumps_total: 0 });
-  }, [opts.locationId, opts.entityId]);
-
-  // Seed histórico horario (para llenar la ventana inicial de 24h)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const now = new Date();
-        const from = new Date(now.getTime() - WINDOW_MS);
-        const locId = typeof opts.locationId === "number" ? opts.locationId : undefined;
-
-        const [buckets, pumpsHourly, tankHourly] = await Promise.all([
-          fetchBuckets(from.toISOString(), now.toISOString()),
-          fetchPumpsActive(from.toISOString(), now.toISOString(), locId),
-          fetchTankLevelAvg(from.toISOString(), now.toISOString(), locId, opts.entityId),
-        ]);
-
-        const N = Math.max(buckets.length, pumpsHourly.length, tankHourly.length);
-        const ts: number[] = new Array(N);
-        for (let i = 0; i < N; i++) ts[i] = from.getTime() + i * 3600_000; // 1h steps
-
-        const pumps_on = new Array(N).fill(0);
-        for (let i = 0; i < Math.min(N, pumpsHourly.length); i++) {
-          const v = (pumpsHourly[i] as any)?.pumps_count;
-          pumps_on[i] = typeof v === "number" ? v : 0;
-        }
-
-        const level_percent = new Array(N).fill(null);
-        for (let i = 0; i < Math.min(N, tankHourly.length); i++) {
-          const v = (tankHourly[i] as any)?.avg_level_pct;
-          level_percent[i] = v == null || Number.isNaN(Number(v)) ? null : Number(v);
-        }
-
-        if (!alive) return;
-        setData({ timestamps: ts, pumps_on, level_percent, pumps_total: 0 });
-      } catch {
-        // si falla seed, seguimos con live
-      }
-    })();
-    return () => { alive = false; };
-  }, [opts.locationId, opts.entityId]);
-
-  // Live sampling cada 5s (24h fijo)
-  useEffect(() => {
-    let alive = true;
-    const smoother = smootherRef.current;
-
-    async function sample() {
-      try {
-        const now = Date.now();
-        const [pumps, tanks] = await Promise.all([getPumps(), getTanks()]);
-        const locId = opts.locationId;
-
-        const pumpsFiltered = Array.isArray(pumps)
-          ? pumps.filter((p) =>
-              locId == null || locId === "all" ? true : (p.location_id ?? p.location_name) === locId
-            )
-          : [];
-
-        const tanksFiltered = Array.isArray(tanks)
-          ? tanks.filter((t) =>
-              locId == null || locId === "all" ? true : (t.location_id ?? t.location_name) === locId
-            )
-          : [];
-
-        // suavizado anti-parpadeo
-        smoother.update(now, pumpsFiltered);
-        const onCount = pumpsFiltered.reduce((acc, p) => acc + (smoother.isOn(now, p) ? 1 : 0), 0);
-
-        const avgLevel =
-          tanksFiltered.length > 0
-            ? tanksFiltered.reduce((a, t) => a + (t.level_pct ?? 0), 0) / tanksFiltered.length
-            : null;
-
-        if (!alive) return;
-        setData((prev) => {
-          // ⚠️ Primer sample: duplicamos el punto (ahora-FIRST_PAD, ahora) para asegurar ancho visible
-          let timestamps = prev.timestamps;
-          let pumps_on = prev.pumps_on;
-          let level_percent = prev.level_percent;
-
-          if (timestamps.length === 0) {
-            timestamps = [now - FIRST_PAD, now];
-            pumps_on = [onCount, onCount];
-            level_percent = [avgLevel, avgLevel];
-          } else {
-            timestamps = timestamps.concat(now);
-            pumps_on = pumps_on.concat(onCount);
-            level_percent = level_percent.concat(avgLevel);
-          }
-
-          // recortar ventana a 24h
-          const cutoff = now - WINDOW_MS;
-          let s = 0;
-          const L = timestamps.length;
-          while (s < L && timestamps[s] < cutoff) s++;
-
-          return {
-            timestamps: s ? timestamps.slice(s) : timestamps,
-            pumps_on: s ? pumps_on.slice(s) : pumps_on,
-            level_percent: s ? level_percent.slice(s) : level_percent,
-            pumps_total: Math.max(prev.pumps_total, pumpsFiltered.length),
-          };
-        });
-      } catch {
-        // ignoramos errores de muestreo
-      }
-    }
-
-    sample();
-    const t = window.setInterval(sample, SAMPLE_MS);
-    return () => { alive = false; clearInterval(t); };
-  }, [opts.locationId, opts.entityId]);
-
-  // (Opcional) actualizaciones instantáneas vía postMessage
-  useEffect(() => {
-    function onMsg(ev: MessageEvent) {
-      const d: any = ev?.data;
-      if (!d || !d.type) return;
-      const now = Date.now();
-      if (d.type === "dirac:pump-toggled") {
-        setData((prev) => {
-          const lastOn = prev.pumps_on.at(-1) ?? 0;
-          const nextOn = d.is_on ? lastOn + 1 : Math.max(0, lastOn - 1);
-          const lastLvl = prev.level_percent.at(-1) ?? null;
-          const timestamps = prev.timestamps.length === 0 ? [now - FIRST_PAD, now] : prev.timestamps.concat(now);
-          const pumps_on = prev.timestamps.length === 0 ? [nextOn, nextOn] : prev.pumps_on.concat(nextOn);
-          const level_percent = prev.timestamps.length === 0 ? [lastLvl, lastLvl] : prev.level_percent.concat(lastLvl);
-          return { ...prev, timestamps, pumps_on, level_percent };
-        });
-      }
-      if (d.type === "dirac:tank-level") {
-        const lvl = typeof d.level === "number" ? d.level : null;
-        setData((prev) => {
-          const lastOn = prev.pumps_on.at(-1) ?? 0;
-          const timestamps = prev.timestamps.length === 0 ? [now - FIRST_PAD, now] : prev.timestamps.concat(now);
-          const pumps_on = prev.timestamps.length === 0 ? [lastOn, lastOn] : prev.pumps_on.concat(lastOn);
-          const level_percent = prev.timestamps.length === 0 ? [lvl, lvl] : prev.level_percent.concat(lvl);
-          return { ...prev, timestamps, pumps_on, level_percent };
-        });
-      }
-    }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, []);
-
-  // Salidas sincronizadas (mismo eje X)
-  const tankTs = useMemo(
-    () => ({ timestamps: data.timestamps, level_percent: data.level_percent }),
-    [data.timestamps, data.level_percent]
-  );
-  const pumpTs = useMemo(
-    () => ({ timestamps: data.timestamps, is_on: data.pumps_on }),
-    [data.timestamps, data.pumps_on]
-  );
-
-  return { tankTs, pumpTs, pumpsTotal: data.pumps_total };
 }
