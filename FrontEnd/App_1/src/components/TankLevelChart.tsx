@@ -11,39 +11,31 @@ import {
   ReferenceLine,
   ReferenceArea,
   Legend,
-  // Brush ← eliminado
 } from "recharts";
 
-/**
- * Aceptamos timestamps como string ISO o como número (ms)
- * y valores de nivel como number | string | null.
- */
 type TankTs = {
   timestamps?: Array<number | string>;
   level_percent?: Array<number | string | null>;
 };
 
 type Thresholds = {
-  low_pct?: number | null;       // L
-  low_low_pct?: number | null;   // LL
-  high_pct?: number | null;      // H
-  high_high_pct?: number | null; // HH
+  low_pct?: number | null;
+  low_low_pct?: number | null;
+  high_pct?: number | null;
+  high_high_pct?: number | null;
 };
 
 type Props = {
   ts: TankTs | null;
   title?: string;
   thresholds?: Thresholds;
-  tz?: string;            // default "America/Argentina/Buenos_Aires"
-  height?: number;        // default 260
-  showLegend?: boolean;   // default true
-  /** @deprecated sin uso: se eliminó el Brush inferior */
-  showBrushIf?: number;   // mantenido por compatibilidad, ya no se renderiza
-  syncId?: string;        // ej: "op-sync"
-  /** sincronización con Bombas */
+  tz?: string;
+  height?: number;
+  showLegend?: boolean;
+  /** compat anterior (no se usa) */ showBrushIf?: number;
+  syncId?: string;
   xDomain?: [number, number];
   xTicks?: number[];
-  /** crosshair sincronizado */
   hoverX?: number | null;
   onHoverX?: (x: number | null) => void;
 };
@@ -52,9 +44,9 @@ type Props = {
 const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s);
 
 const toMs = (x: string | number) => {
-  if (typeof x === "number") return x; // se espera ms si es número
+  if (typeof x === "number") return x;
   const n = Number(x);
-  if (Number.isFinite(n) && n > 10_000) return n; // ya viene en ms
+  if (Number.isFinite(n) && n > 10_000) return n;
   return new Date(x).getTime();
 };
 
@@ -72,7 +64,6 @@ const fmtTime = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   }
 };
 
-/** HH:mm para ejes sincronizados */
 const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   try {
     return new Intl.DateTimeFormat("es-AR", {
@@ -96,7 +87,6 @@ export default function TankLevelChart({
   tz = "America/Argentina/Buenos_Aires",
   height = 260,
   showLegend = true,
-  // showBrushIf ← ignorado (se quitó el Brush)
   syncId,
   xDomain,
   xTicks,
@@ -113,7 +103,7 @@ export default function TankLevelChart({
       : "time";
   const mode: "category" | "time" = xDomain ? "time" : autoMode;
 
-  const series = useMemo(() => {
+  const seriesRaw = useMemo(() => {
     const N = Math.min(rawT.length, rawV.length);
     const out: Array<{ x: number | string; label: string; nivel: number | null }> = [];
     for (let i = 0; i < N; i++) {
@@ -136,19 +126,39 @@ export default function TankLevelChart({
     return out;
   }, [rawT, rawV, mode]);
 
-  const hasData = series.some((d) => d.nivel != null);
+  const hasData = seriesRaw.some((d) => d.nivel != null);
 
+  // Si NO hay datos, igual renderizamos el chart vacío usando el dominio recibido
+  // (o, si no vino, una ventana dummy de 24h relativa a "ahora")
+  const fallbackDomain: [number, number] = useMemo(() => {
+    if (xDomain) return xDomain;
+    const end = Date.now();
+    return [end - 24 * 60 * 60 * 1000, end];
+  }, [xDomain]);
+
+  const series = useMemo(() => {
+    if (hasData) return seriesRaw;
+    // dos puntos con nivel=null para que no pinte área pero sí ejes/grilla
+    return [
+      { x: fallbackDomain[0], label: fmtHM(fallbackDomain[0], tz), nivel: null },
+      { x: fallbackDomain[1], label: fmtHM(fallbackDomain[1], tz), nivel: null },
+    ];
+  }, [hasData, seriesRaw, fallbackDomain, tz]);
+
+  // Y-axis siempre visible (0..100) si no hay datos
   const yMin = useMemo(() => {
-    const vals = series.map((d) => (d.nivel == null ? Infinity : d.nivel));
+    if (!hasData) return 0;
+    const vals = seriesRaw.map((d) => (d.nivel == null ? Infinity : d.nivel));
     const m = Math.min(...vals);
     return Number.isFinite(m) ? Math.floor(Math.min(0, m)) : 0;
-  }, [series]);
+  }, [hasData, seriesRaw]);
 
   const yMax = useMemo(() => {
-    const vals = series.map((d) => (d.nivel == null ? -Infinity : d.nivel));
+    if (!hasData) return 100;
+    const vals = seriesRaw.map((d) => (d.nivel == null ? -Infinity : d.nivel));
     const m = Math.max(...vals);
     return Number.isFinite(m) ? Math.ceil(Math.max(100, m)) : 100;
-  }, [series]);
+  }, [hasData, seriesRaw]);
 
   const L  = thresholds?.low_pct ?? null;
   const LL = thresholds?.low_low_pct ?? null;
@@ -164,111 +174,105 @@ export default function TankLevelChart({
       </CardHeader>
 
       <CardContent style={{ height }}>
-        {!hasData ? (
-          <div className="h-full grid place-items-center text-sm text-gray-500">Sin datos</div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart
-              data={series}
-              syncId={syncId}
-              syncMethod="value"
-              margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
-              onMouseMove={(st: any) => {
-                if (st && typeof st.activeLabel === "number") onHoverX?.(st.activeLabel);
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart
+            data={series}
+            syncId={syncId}
+            syncMethod="value"
+            margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+            onMouseMove={(st: any) => {
+              if (st && typeof st.activeLabel === "number") onHoverX?.(st.activeLabel);
+            }}
+            onMouseLeave={() => onHoverX?.(null)}
+          >
+            <defs>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="currentColor" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="currentColor" stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
+
+            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+
+            {mode === "time" ? (
+              <XAxis
+                dataKey="x"
+                type="number"
+                scale="time"
+                domain={xDomain ?? fallbackDomain}
+                ticks={xTicks}
+                tickFormatter={(v) => fmtHM(v as number, tz)}
+                tickMargin={8}
+                minTickGap={24}
+                allowDataOverflow
+              />
+            ) : (
+              <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
+            )}
+
+            <YAxis domain={[yMin, yMax]} tickFormatter={(v) => `${v}%`} width={40} />
+
+            <Tooltip
+              cursor={false}
+              content={({ active, payload }) => {
+                if (!active || !payload || !payload.length) return null;
+                const p = payload[0].payload as { x: number | string; label: string; nivel: number | null };
+                const nivel = p.nivel == null ? "--" : `${p.nivel.toFixed(1)}%`;
+                const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
+                return (
+                  <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
+                    <div className="text-xs text-muted-foreground">{when}</div>
+                    <div className="text-sm font-medium">Nivel: {nivel}</div>
+                  </div>
+                );
               }}
-              onMouseLeave={() => onHoverX?.(null)}
-            >
-              <defs>
-                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="currentColor" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="currentColor" stopOpacity={0.05} />
-                </linearGradient>
-              </defs>
+            />
 
-              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            {/* Bandas y líneas de umbral */}
+            {typeof LL === "number" && <ReferenceArea y1={0} y2={LL} fill="var(--destructive)" fillOpacity={0.08} />}
+            {typeof HH === "number" && <ReferenceArea y1={HH} y2={Math.max(100, yMax)} fill="var(--destructive)" fillOpacity={0.08} />}
+            {typeof L === "number" && typeof H === "number" && H > L && (
+              <ReferenceArea y1={L} y2={H} fill="var(--primary)" fillOpacity={0.06} />
+            )}
+            {typeof LL === "number" && (
+              <ReferenceLine y={LL} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
+                label={{ value: `LL ${LL}%`, position: "insideTopRight", fontSize: 10 }} />
+            )}
+            {typeof L === "number" && (
+              <ReferenceLine y={L} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
+                label={{ value: `L ${L}%`, position: "insideTopRight", fontSize: 10 }} />
+            )}
+            {typeof H === "number" && (
+              <ReferenceLine y={H} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
+                label={{ value: `H ${H}%`, position: "insideTopRight", fontSize: 10 }} />
+            )}
+            {typeof HH === "number" && (
+              <ReferenceLine y={HH} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
+                label={{ value: `HH ${HH}%`, position: "insideTopRight", fontSize: 10 }} />
+            )}
 
-              {mode === "time" ? (
-                <XAxis
-                  dataKey="x"
-                  type="number"
-                  scale="time"
-                  domain={xDomain ?? ["dataMin", "dataMax"]}
-                  ticks={xTicks}
-                  tickFormatter={(v) => fmtHM(v as number, tz)}
-                  tickMargin={8}
-                  minTickGap={24}
-                  allowDataOverflow
-                />
-              ) : (
-                <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
-              )}
+            {/* crosshair sincronizado */}
+            {typeof hoverX === "number" && (
+              <ReferenceLine x={hoverX} stroke="currentColor" strokeDasharray="4 4" opacity={0.6} />
+            )}
 
-              <YAxis domain={[yMin, yMax]} tickFormatter={(v) => `${v}%`} width={40} />
+            <Area
+              type="monotone"
+              dataKey="nivel"
+              name="nivel"
+              stroke="currentColor"
+              strokeWidth={2}
+              fill={`url(#${gradId})`}
+              // si no hay datos, NO conectar nulls para que no pinte nada
+              connectNulls={hasData}
+              dot={false}
+              isAnimationActive={false}
+              activeDot={{ r: 2 }}
+            />
 
-              {/* Tooltip sin cursor (usamos ReferenceLine compartida) */}
-              <Tooltip
-                cursor={false}
-                content={({ active, payload }) => {
-                  if (!active || !payload || !payload.length) return null;
-                  const p = payload[0].payload as { x: number | string; label: string; nivel: number | null };
-                  const nivel = p.nivel == null ? "--" : `${p.nivel.toFixed(1)}%`;
-                  const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
-                  return (
-                    <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
-                      <div className="text-xs text-muted-foreground">{when}</div>
-                      <div className="text-sm font-medium">Nivel: {nivel}</div>
-                    </div>
-                  );
-                }}
-              />
-
-              {/* Bandas y líneas de umbral */}
-              {typeof LL === "number" && <ReferenceArea y1={0} y2={LL} fill="var(--destructive)" fillOpacity={0.08} />}
-              {typeof HH === "number" && <ReferenceArea y1={HH} y2={Math.max(100, yMax)} fill="var(--destructive)" fillOpacity={0.08} />}
-              {typeof L === "number" && typeof H === "number" && H > L && (
-                <ReferenceArea y1={L} y2={H} fill="var(--primary)" fillOpacity={0.06} />
-              )}
-              {typeof LL === "number" && (
-                <ReferenceLine y={LL} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
-                  label={{ value: `LL ${LL}%`, position: "insideTopRight", fontSize: 10 }} />
-              )}
-              {typeof L === "number" && (
-                <ReferenceLine y={L} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
-                  label={{ value: `L ${L}%`, position: "insideTopRight", fontSize: 10 }} />
-              )}
-              {typeof H === "number" && (
-                <ReferenceLine y={H} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
-                  label={{ value: `H ${H}%`, position: "insideTopRight", fontSize: 10 }} />
-              )}
-              {typeof HH === "number" && (
-                <ReferenceLine y={HH} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
-                  label={{ value: `HH ${HH}%`, position: "insideTopRight", fontSize: 10 }} />
-              )}
-
-              {/* Línea vertical compartida (crosshair) */}
-              {typeof hoverX === "number" && (
-                <ReferenceLine x={hoverX} stroke="currentColor" strokeDasharray="4 4" opacity={0.6} />
-              )}
-
-              <Area
-                type="monotone"
-                dataKey="nivel"
-                name="nivel"
-                stroke="currentColor"
-                strokeWidth={2}
-                fill={`url(#${gradId})`}
-                connectNulls
-                dot={false}
-                isAnimationActive={false}
-                activeDot={{ r: 2 }}
-              />
-
-              {showLegend && <Legend verticalAlign="top" height={24} />}
-
-              {/* Brush eliminado */}
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
+            {showLegend && <Legend verticalAlign="top" height={24} />}
+          </AreaChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );

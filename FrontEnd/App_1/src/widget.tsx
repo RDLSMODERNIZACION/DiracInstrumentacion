@@ -1,14 +1,11 @@
 // src/widget.tsx
 //
-// 24 h fija + Playback hasta 7 días atrás (fluido):
-// - Mientras arrastrás el slider NO hace fetch; solo mueve el dominio (ejes/ticks correctos).
+// 24 h fija + Playback hasta 7 días atrás (orientación “natural”):
+// - La barra va de IZQUIERDA (hace 7 días) a DERECHA (ahora).
+// - La ventana visible SIEMPRE es de 24 h.
+// - Al presionar Play avanza hacia ADELANTE (de 7d → ahora).
+// - Mientras arrastrás NO hace fetch (solo mueve el dominio y recalcula ticks).
 // - Al soltar, o tras 600 ms sin mover, pide los datos de esa ventana 24 h.
-// - Muestra “Inicio” y “Fin” (día+hora) de la ventana actual en TZ local.
-// - Playback solo con una localidad (no “Todas”).
-//
-// Perf:
-// - Poll 15s en vivo; si activás playback se pausa el poll y se consulta por ventana.
-// - rAF-throttle para hover; sin períodos largos.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "./components/ui/card";
@@ -31,7 +28,7 @@ type TankInfo = { tank_id: number; name: string; location_id: number; location_n
 const TZ = "America/Argentina/Buenos_Aires";
 const H = 60 * 60 * 1000;
 
-// ===== helpers de tiempo/hover =====
+// ===== helpers de tiempo / UI =====
 function toMs(x: number | string): number {
   if (typeof x === "number") return x > 10_000 ? x : x * 1000;
   const n = Number(x);
@@ -40,7 +37,6 @@ function toMs(x: number | string): number {
 }
 function startOfMin(ms: number) { const d = new Date(ms); d.setSeconds(0, 0); return d.getTime(); }
 function floorToHour(ms: number) { const d = new Date(ms); d.setMinutes(0,0,0); return d.getTime(); }
-function ceilToHour(ms: number)  { const d = new Date(ms); d.setMinutes(d.getMinutes() ? 60 : 0,0,0); return d.getTime(); }
 function floorToMinuteISO(d: Date) { const dd = new Date(d); dd.setSeconds(0, 0); return dd.toISOString(); }
 function fmtDayTime(ms: number, tz = TZ) {
   try {
@@ -53,7 +49,7 @@ function fmtDayTime(ms: number, tz = TZ) {
 function buildHourTicks(domain: [number, number]) {
   const [s, e] = domain;
   const start = floorToHour(s);
-  const end   = ceilToHour(e);
+  const end   = floorToHour(e);
   const ticks: number[] = [];
   for (let t = start; t <= end; t += H) ticks.push(t);
   return ticks;
@@ -141,18 +137,25 @@ export default function KpiWidget() {
     tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
   });
 
-  // ===== Playback 7 días (ventana FIJA 24h) =====
-  const MAX_OFFSET_MIN = 7 * 24 * 60;       // 7 días hacia atrás
-  const [playOffsetMin, setPlayOffsetMin] = useState(0);  // fin de ventana
+  // ===== Playback 7 días (24h fija, de izquierda=7d atrás a derecha=ahora) =====
+  const MAX_OFFSET_MIN = 7 * 24 * 60;       // 10080 min = 7 días
+  const MIN_OFFSET_MIN = 24 * 60;           // el fin debe ser al menos +24h desde el inicio base
+  // El slider ahora indica **minutos desde el inicio base (hace 7 días)** hasta el **fin** de la ventana.
+  // Por defecto lo ponemos en “ahora” (derecha): MAX_OFFSET_MIN.
+  const [playFinMin, setPlayFinMin] = useState(MAX_OFFSET_MIN);
   const [dragging, setDragging] = useState(false);
-  const [offsetDebounced, setOffsetDebounced] = useState(0);
+  const [finDebounced, setFinDebounced] = useState(MAX_OFFSET_MIN);
   const [playing, setPlaying] = useState(false);
+
   const [playTankTs, setPlayTankTs] = useState<{timestamps:number[]; level_percent:(number|null)[]} | null>(null);
   const [playPumpTs, setPlayPumpTs] = useState<{timestamps:number[]; is_on:(number|null)[]} | null>(null);
   const [playWindow, setPlayWindow] = useState<{fromMs:number; toMs:number} | null>(null);
   const [loadingPlay, setLoadingPlay] = useState(false);
 
-  // Dominio “en vivo” (24h actual) — fallback si no hay window en liveSync aún
+  // Inicio base de la escala: hace 7 días (alineado a minuto)
+  const baseStartMs = useMemo(() => startOfMin(Date.now() - 7 * 24 * H), []);
+
+  // Dominio “en vivo” como fallback
   const { xDomainLive } = useMemo(() => {
     const win = liveSync.window;
     if (win?.start && win?.end) return { xDomainLive: [win.start, win.end] as [number, number] };
@@ -161,35 +164,36 @@ export default function KpiWidget() {
     return { xDomainLive: [start, end] as [number, number] };
   }, [liveSync.window]);
 
-  // Dominio del slider (se actualiza en tiempo real mientras arrastrás)
+  // Dominio del slider (en tiempo real mientras arrastrás)
   const sliderDomain: [number, number] = useMemo(() => {
-    const to = startOfMin(Date.now() - playOffsetMin * 60_000);
+    const to = baseStartMs + playFinMin * 60_000;
     const from = to - 24 * H;
     return [from, to];
-  }, [playOffsetMin]);
+  }, [baseStartMs, playFinMin]);
 
-  // Dominio efectivo que enviamos a los charts (en playback usa sliderDomain, si no, live)
+  // Dominio efectivo enviado a los charts
   const useXDomain = playEnabled ? sliderDomain : xDomainLive;
 
-  // Ticks SIEMPRE para el dominio actual (soluciona “eje X vacío”)
+  // Ticks SIEMPRE para el dominio actual (corrige ejes vacíos)
   const xTicksDisplay = useMemo(() => buildHourTicks(useXDomain), [useXDomain[0], useXDomain[1]]);
 
-  // Debounce: solo cuando NO estás arrastrando se programa el fetch (600 ms)
+  // Debounce: cuando NO estás arrastrando, programa fetch (600 ms)
   useEffect(() => {
     if (!playEnabled || !locId) return;
     if (dragging) return;
-    const id = window.setTimeout(() => setOffsetDebounced(playOffsetMin), 600);
+    const id = window.setTimeout(() => setFinDebounced(playFinMin), 600);
     return () => window.clearTimeout(id);
-  }, [playEnabled, dragging, playOffsetMin, locId]);
+  }, [playEnabled, dragging, playFinMin, locId]);
 
-  // Fetch de la ventana 24h cuando cambia offsetDebounced
+  // Fetch de la ventana 24h cuando cambia finDebounced
   useEffect(() => {
     if (!playEnabled || !locId) { setPlayTankTs(null); setPlayPumpTs(null); setPlayWindow(null); return; }
     let cancelled = false;
-    const toDate = new Date(Date.now() - offsetDebounced * 60_000);
-    const fromDate = new Date(toDate.getTime() - 24 * H);
-    const fromISO = floorToMinuteISO(fromDate);
-    const toISO   = floorToMinuteISO(toDate);
+    // “to” = baseStart + finDebounced
+    const toMs = startOfMin(baseStartMs + finDebounced * 60_000);
+    const fromMs = toMs - 24 * H;
+    const fromISO = floorToMinuteISO(new Date(fromMs));
+    const toISO   = floorToMinuteISO(new Date(toMs));
     setLoadingPlay(true);
     (async () => {
       try {
@@ -208,7 +212,7 @@ export default function KpiWidget() {
         if (cancelled) return;
         setPlayPumpTs({ timestamps: pumps.timestamps, is_on: pumps.is_on });
         setPlayTankTs({ timestamps: tanks.timestamps, level_percent: tanks.level_percent });
-        setPlayWindow({ fromMs: new Date(fromISO).getTime(), toMs: new Date(toISO).getTime() });
+        setPlayWindow({ fromMs, toMs });
       } catch (e) {
         if (!cancelled) { setPlayPumpTs(null); setPlayTankTs(null); setPlayWindow(null); }
         console.error("[playback] fetch error:", e);
@@ -217,13 +221,13 @@ export default function KpiWidget() {
       }
     })();
     return () => { cancelled = true; };
-  }, [playEnabled, offsetDebounced, locId, selectedPumpIds, selectedTankIds]);
+  }, [playEnabled, finDebounced, locId, selectedPumpIds, selectedTankIds, baseStartMs]);
 
-  // Auto-play: avanza 10 min / s
+  // Auto-play: avanza 10 min / s hacia ADELANTE hasta “ahora”
   useEffect(() => {
     if (!playEnabled || !playing) return;
     const id = window.setInterval(() => {
-      setPlayOffsetMin(prev => Math.min(MAX_OFFSET_MIN, prev + 10));
+      setPlayFinMin(prev => Math.min(MAX_OFFSET_MIN, prev + 10));
     }, 1000);
     return () => window.clearInterval(id);
   }, [playEnabled, playing]);
@@ -236,7 +240,7 @@ export default function KpiWidget() {
   const startLabel = useMemo(() => fmtDayTime(useXDomain[0], TZ), [useXDomain]);
   const endLabel   = useMemo(() => fmtDayTime(useXDomain[1], TZ), [useXDomain]);
 
-  // Hover rAF (stable)
+  // Hover rAF (estable)
   const [hoverX, _setHoverX] = useState<number | null>(null);
   const setHoverXRaf = useRafThrottle<number | null>(_setHoverX);
 
@@ -279,7 +283,7 @@ export default function KpiWidget() {
           </select>
         </div>
 
-        {/* Playback 24h (hasta 7 días) */}
+        {/* Playback 24h (hasta 7 días) → izquierda=7d, derecha=ahora */}
         <div className="flex-1 min-w-[320px]">
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2">
@@ -290,7 +294,7 @@ export default function KpiWidget() {
                 onChange={(e) => { setPlayEnabled(e.target.checked); setPlaying(false); }}
               />
               <span className={`text-sm ${loc === "all" ? "text-gray-400" : "text-gray-700"}`}>
-                Playback 24 h (hasta 7 días atrás)
+                Playback 24 h (7 días → ahora)
               </span>
             </label>
 
@@ -307,18 +311,18 @@ export default function KpiWidget() {
           <div className="mt-2 flex items-center gap-3">
             <input
               type="range"
-              min={0}
+              min={MIN_OFFSET_MIN}
               max={MAX_OFFSET_MIN}
               step={1}
               disabled={!playEnabled}
-              value={playOffsetMin}
-              onChange={(e)=> setPlayOffsetMin(Number(e.target.value))}
+              value={playFinMin}
+              onChange={(e)=> setPlayFinMin(Number(e.target.value))}
               onMouseDown={()=> setDragging(true)}
               onMouseUp={()=> setDragging(false)}
               onTouchStart={()=> setDragging(true)}
               onTouchEnd={()=> setDragging(false)}
               className="w-full"
-              title="Fin de la ventana (minutos hacia atrás)"
+              title="Fin de la ventana (minutos desde el inicio base de 7 días)"
             />
           </div>
 
@@ -453,7 +457,7 @@ export default function KpiWidget() {
               xDomain={useXDomain}
               xTicks={xTicksDisplay}
               hoverX={hoverX}
-              onHoverX={setHoverXRaf}
+              onHoverX={useRafThrottle<number | null>((x)=>_setHoverX(x))}
               showBrushIf={120}
             />
             <OpsPumpsProfile
@@ -465,7 +469,7 @@ export default function KpiWidget() {
               xDomain={useXDomain}
               xTicks={xTicksDisplay}
               hoverX={hoverX}
-              onHoverX={setHoverXRaf}
+              onHoverX={useRafThrottle<number | null>((x)=>_setHoverX(x))}
             />
           </section>
         </>
