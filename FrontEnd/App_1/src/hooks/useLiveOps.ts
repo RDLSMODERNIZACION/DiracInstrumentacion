@@ -1,50 +1,53 @@
 // src/hooks/useLiveOps.ts
 //
-// Hook LIVE para Operación (24h): devuelve series sincronizadas para
-//  - Bombas: cantidad de bombas ON por minuto (perfil continuo)
-//  - Tanques: placeholder (hasta que tengamos endpoint live de niveles)
+// Hook LIVE de Operación: devuelve series sincronizadas para
+//  - Bombas: cantidad de bombas ON (perfil continuo, carry-forward en backend)
+//  - Tanques: nivel promedio del scope (LOCF opcional)
+// Soporta ventanas largas (periodHours) y bucket (1min/5min/15min/1h/1d).
 //
-// Principales mejoras:
-// 1) Usa el endpoint nuevo /kpi/bombas/live (carry-forward en backend).
-// 2) Ventana fija de 24h (configurable) alineada al minuto.
-// 3) Polling simple con abort/cleanup y tolerante a errores.
-// 4) API clara: locationId | companyId | pumpIds | connectedOnly.
-//
+// Parámetros clave:
+//  - locationId | companyId | pumpIds | tankIds | connectedOnly
+//  - periodHours (por defecto 24h) y bucket (auto: 1min si <=48h, si no 1h)
+//  - pumpAggMode (avg|max), pumpRoundCounts (redondeo en bucket)
+//  - tankAgg (avg|last) y tankCarry (LOCF por minuto)
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchPumpsLive, PumpsLiveResp } from "@/api/graphs";
+import {
+  fetchPumpsLive,
+  fetchTanksLive,
+  type PumpsLiveResp,
+  type TanksLiveResp,
+  type PumpsLiveArgs,
+  type TanksLiveArgs,
+} from "@/api/graphs";
 
-// ===== Tipos de salida que consumen los charts =====
-export type TankTs = {
-  timestamps?: Array<number | string>;
-  level_percent?: Array<number | string | null>;
-};
-export type PumpTs = {
-  timestamps?: number[];
-  is_on?: number[];
-};
+// ===== Tipos de salida para los charts =====
+export type TankTs = { timestamps?: number[]; level_percent?: Array<number | null> };
+export type PumpTs = { timestamps?: number[]; is_on?: Array<number | null> };
 
 type Args = {
-  /** Filtro por ubicación (undefined/"all" = todas) */
   locationId?: number | "all";
-  /** Scope por empresa (opcional) */
   companyId?: number;
-  /** Para filtrar bombas explícitas (omite company/location) */
   pumpIds?: number[];
-  /** Horas a mostrar (default 24) */
-  periodHours?: number;
-  /** Polling ms (default 15000) */
-  pollMs?: number;
-  /** Sólo contar bombas con heartbeats en ventana (default true) */
-  connectedOnly?: boolean;
+  tankIds?: number[];
+  periodHours?: number;                             // default 24
+  bucket?: "1min" | "5min" | "15min" | "1h" | "1d"; // default: auto (ver abajo)
+  pumpAggMode?: "avg" | "max";                      // agregación por bucket de bombas
+  pumpRoundCounts?: boolean;                        // redondear promedios de conteo
+  tankAgg?: "avg" | "last";                         // agregación dentro del minuto en tanques
+  tankCarry?: boolean;                              // LOCF por minuto en tanques
+  connectedOnly?: boolean;                          // default true (ambos)
+  pollMs?: number;                                  // default 15000
 };
 
 type LiveOps = {
   tankTs: TankTs | null;
   pumpTs: PumpTs | null;
-  pumpsTotal?: number;       // total de bombas del scope (empresa/loc o pumpIds)
-  pumpsConnected?: number;   // cuántas reportaron en [from,to)
-  window?: { start: number; end: number }; // epoch ms, alineado a minuto
+  pumpsTotal?: number;
+  pumpsConnected?: number;
+  tanksTotal?: number;
+  tanksConnected?: number;
+  window?: { start: number; end: number }; // epoch ms (alineado a minuto)
 };
 
 // ===== utilitarios de tiempo =====
@@ -53,89 +56,124 @@ function floorToMinute(ms: number) {
   d.setSeconds(0, 0);
   return d.getTime();
 }
-function endNowAligned() {
-  return floorToMinute(Date.now());
-}
-function startFrom(endMs: number, hours: number) {
-  return endMs - hours * 3600_000;
-}
 
 export function useLiveOps({
   locationId,
   companyId,
   pumpIds,
+  tankIds,
   periodHours = 24,
-  pollMs = 15_000,
+  bucket,
+  pumpAggMode = "avg",
+  pumpRoundCounts = false,
+  tankAgg = "avg",
+  tankCarry = true,
   connectedOnly = true,
+  pollMs = 15_000,
 }: Args = {}): LiveOps {
-  const [pump, setPump] = useState<PumpsLiveResp | null>(null);
+  const [p, setP] = useState<PumpsLiveResp | null>(null);
+  const [t, setT] = useState<TanksLiveResp | null>(null);
+  const [win, setWin] = useState<{ start: number; end: number }>();
 
-  // Guardamos última ventana pedida para exponerla al caller (widget)
-  const [win, setWin] = useState<{ start: number; end: number } | undefined>(undefined);
+  // Elegimos bucket por defecto según ventana (auto):
+  // - <= 48h  -> 1min
+  // -  > 48h  -> 1h
+  const effBucket: NonNullable<Args["bucket"]> = bucket ?? (periodHours > 48 ? "1h" : "1min");
 
   // Abort simple entre renders/polls
-  const abortSeq = useRef(0);
+  const seqRef = useRef(0);
 
   useEffect(() => {
-    let mounted = true;
-    const seq = ++abortSeq.current;
+    let alive = true;
+    const seq = ++seqRef.current;
 
-    async function load() {
+    const load = async () => {
       try {
-        // Ventana [from, to) alineada al minuto
-        const end = endNowAligned();
-        const start = startFrom(end, periodHours);
+        const end = floorToMinute(Date.now());
+        const start = end - periodHours * 3600_000;
         setWin({ start, end });
+
+        const common = {
+          from: new Date(start).toISOString(),
+          to: new Date(end).toISOString(),
+          company_id: companyId,
+        };
 
         const locId = typeof locationId === "number" ? locationId : undefined;
 
-        const resp = await fetchPumpsLive({
-          from: new Date(start).toISOString(),
-          to: new Date(end).toISOString(),
+        // Bombas: el backend no admite 1d; si piden 1d, usamos 1h para histórica
+        const pumpsArgs: PumpsLiveArgs = {
+          ...common,
           locationId: locId,
-          companyId,
           pumpIds,
+          bucket: effBucket === "1d" ? "1h" : effBucket,
+          aggMode: pumpAggMode,
+          roundCounts: pumpRoundCounts,
           connectedOnly,
-        });
+        };
 
-        if (!mounted || seq !== abortSeq.current) return;
-        setPump(resp);
+        const tanksArgs: TanksLiveArgs = {
+          ...common,
+          locationId: locId,
+          tankIds,
+          agg: tankAgg,
+          carry: tankCarry,
+          bucket: effBucket,
+          connectedOnly,
+        };
+
+        const [pRes, tRes] = await Promise.all([fetchPumpsLive(pumpsArgs), fetchTanksLive(tanksArgs)]);
+        if (!alive || seq !== seqRef.current) return;
+
+        setP(pRes);
+        setT(tRes);
       } catch (err) {
-        // Toleramos errores transitorios sin romper la UI
-        console.error("[useLiveOps] live fetch error:", err);
+        console.error("[useLiveOps] fetch error:", err);
       }
-    }
+    };
 
-    // Primera carga inmediata y polling
     load();
-    const t = window.setInterval(load, pollMs);
+    const h = window.setInterval(load, pollMs);
     return () => {
-      mounted = false;
-      window.clearInterval(t);
+      alive = false;
+      window.clearInterval(h);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationId, companyId, pumpIds?.join(","), periodHours, pollMs, connectedOnly]);
+  }, [
+    // deps de scope
+    locationId === "all" ? "__all__" : locationId,
+    companyId,
+    Array.isArray(pumpIds) ? pumpIds.join(",") : "",
+    Array.isArray(tankIds) ? tankIds.join(",") : "",
+    // deps de ventana/precisión
+    periodHours,
+    effBucket,
+    pumpAggMode,
+    pumpRoundCounts,
+    tankAgg,
+    tankCarry,
+    connectedOnly,
+    pollMs,
+  ]);
 
-  // ===== Adaptadores a la forma que consumen los charts =====
-
-  // Bombas: serie continua por minuto (ya alineada desde backend)
+  // Adaptadores a la forma que consumen los charts
   const pumpTs = useMemo<PumpTs | null>(() => {
-    if (!pump) return null;
-    return { timestamps: pump.timestamps, is_on: pump.is_on };
-  }, [pump]);
+    if (!p) return null;
+    return { timestamps: p.timestamps, is_on: p.is_on };
+  }, [p]);
 
-  // Tanques (placeholder): dejamos timestamps vacíos hasta tener endpoint live de niveles.
-  // Si querés que grafique “línea base”, podés replicar timestamps de bombas con nulls:
   const tankTs = useMemo<TankTs | null>(() => {
-    if (!pump) return null;
-    return { timestamps: pump.timestamps, level_percent: pump.timestamps.map(() => null) };
-  }, [pump]);
+    if (!t) return null;
+    return { timestamps: t.timestamps, level_percent: t.level_percent };
+  }, [t]);
 
   return {
     tankTs,
     pumpTs,
-    pumpsTotal: pump?.pumps_total,
-    pumpsConnected: pump?.pumps_connected,
+    pumpsTotal: p?.pumps_total,
+    pumpsConnected: p?.pumps_connected,
+    tanksTotal: t?.tanks_total,
+    tanksConnected: t?.tanks_connected,
     window: win,
   };
 }
