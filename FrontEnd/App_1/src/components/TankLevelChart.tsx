@@ -1,5 +1,4 @@
 import React, { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -9,62 +8,28 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
-  ReferenceArea,
   Legend,
 } from "recharts";
 
-type TankTs = {
-  timestamps?: Array<number | string>;
-  level_percent?: Array<number | string | null>;
-};
+type MaybeNum = number | string | null | undefined;
 
-type Thresholds = {
-  low_pct?: number | null;
-  low_low_pct?: number | null;
-  high_pct?: number | null;
-  high_high_pct?: number | null;
-};
+export type TankTs = {
+  timestamps?: MaybeNum[];
+  level_percent?: MaybeNum[];
+} | null;
 
-type Props = {
-  ts: TankTs | null;
-  title?: string;
-  thresholds?: Thresholds;
-  tz?: string;
-  height?: number;
-  showLegend?: boolean;
-  /** compat anterior (no se usa) */ showBrushIf?: number;
-  syncId?: string;
-  xDomain?: [number, number];
-  xTicks?: number[];
-  hoverX?: number | null;
-  onHoverX?: (x: number | null) => void;
-};
-
-// "01:30"
-const isHourLabel = (s: string) => /^\d{2}:\d{2}$/.test(s);
-
-const toMs = (x: string | number) => {
-  if (typeof x === "number") return x;
-  const n = Number(x);
-  if (Number.isFinite(n) && n > 10_000) return n;
-  return new Date(x).getTime();
-};
-
-const fmtTime = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
-  try {
-    return new Intl.DateTimeFormat("es-AR", {
-      timeZone: tz,
-      hour: "2-digit",
-      minute: "2-digit",
-      day: "2-digit",
-      month: "2-digit",
-    }).format(ms);
-  } catch {
-    return new Date(ms).toLocaleString();
+function toMs(x: MaybeNum): number {
+  if (typeof x === "number") return x > 2_000_000_000 ? x : x * 1000; // sec->ms heuristic
+  if (typeof x === "string") {
+    const n = Number(x);
+    if (Number.isFinite(n)) return n > 2_000_000_000 ? n : n * 1000;
+    const t = Date.parse(x);
+    if (Number.isFinite(t)) return t;
   }
-};
+  return NaN;
+}
 
-const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
+function fmtTime(ms: number, tz: string) {
   try {
     return new Intl.DateTimeFormat("es-AR", {
       timeZone: tz,
@@ -78,202 +43,122 @@ const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
     const mm = String(d.getMinutes()).padStart(2, "0");
     return `${hh}:${mm}`;
   }
-};
+}
 
 export default function TankLevelChart({
   ts,
-  title = "Nivel del tanque (24h • en vivo)",
-  thresholds,
-  tz = "America/Argentina/Buenos_Aires",
-  height = 260,
-  showLegend = true,
+  compareTs,
+  compareLabel = "Auditoría",
   syncId,
+  title = "Nivel del tanque",
+  tz,
   xDomain,
   xTicks,
   hoverX,
   onHoverX,
-}: Props) {
-  const rawT = ts?.timestamps ?? [];
-  const rawV = ts?.level_percent ?? [];
-
-  // si hay xDomain forzado, vamos en modo tiempo
-  const autoMode: "category" | "time" =
-    rawT.length && rawT.every((t) => t != null && isHourLabel(String(t)))
-      ? "category"
-      : "time";
-  const mode: "category" | "time" = xDomain ? "time" : autoMode;
-
-  const seriesRaw = useMemo(() => {
-    const N = Math.min(rawT.length, rawV.length);
-    const out: Array<{ x: number | string; label: string; nivel: number | null }> = [];
-    for (let i = 0; i < N; i++) {
-      const t = rawT[i];
-      const raw = rawV[i];
-
-      const n = raw == null ? NaN : Number(raw);
-      const nivel = Number.isFinite(n) ? n : null;
-
-      if (mode === "category") {
-        const lbl = String(t ?? "");
-        out.push({ x: i, label: lbl, nivel });
-      } else {
-        const ms = toMs(t as any);
-        if (!Number.isFinite(ms)) continue;
-        out.push({ x: ms, label: String(t ?? ""), nivel });
-      }
+}: {
+  ts?: TankTs;
+  compareTs?: TankTs;
+  compareLabel?: string;
+  syncId?: string;
+  title?: string;
+  tz: string;
+  xDomain?: [number, number];
+  xTicks?: number[];
+  hoverX?: number | null;
+  onHoverX?: (x: number | null) => void;
+}) {
+  const data = useMemo(() => {
+    const t = ts?.timestamps ?? [];
+    const v = ts?.level_percent ?? [];
+    const n = Math.min(t.length, v.length);
+    const rows: { ms: number; level: number | null }[] = [];
+    for (let i = 0; i < n; i++) {
+      const ms = toMs(t[i]);
+      const val = v[i] == null ? null : Number(v[i]);
+      if (!Number.isFinite(ms)) continue;
+      rows.push({ ms, level: Number.isFinite(val as number) ? (val as number) : null });
     }
-    if (mode === "time") out.sort((a, b) => (Number(a.x) as number) - (Number(b.x) as number));
-    return out;
-  }, [rawT, rawV, mode]);
+    return rows;
+  }, [ts]);
 
-  const hasData = seriesRaw.some((d) => d.nivel != null);
+  const dataCmp = useMemo(() => {
+    if (!compareTs) return null;
+    const t = compareTs.timestamps ?? [];
+    const v = compareTs.level_percent ?? [];
+    const n = Math.min(t.length, v.length);
+    const rows: { ms: number; level_cmp: number | null }[] = [];
+    for (let i = 0; i < n; i++) {
+      const ms = toMs(t[i]);
+      const val = v[i] == null ? null : Number(v[i]);
+      if (!Number.isFinite(ms)) continue;
+      rows.push({ ms, level_cmp: Number.isFinite(val as number) ? (val as number) : null });
+    }
+    return rows;
+  }, [compareTs]);
 
-  // Si NO hay datos, igual renderizamos el chart vacío usando el dominio recibido
-  // (o, si no vino, una ventana dummy de 24h relativa a "ahora")
-  const fallbackDomain: [number, number] = useMemo(() => {
-    if (xDomain) return xDomain;
-    const end = Date.now();
-    return [end - 24 * 60 * 60 * 1000, end];
-  }, [xDomain]);
-
-  const series = useMemo(() => {
-    if (hasData) return seriesRaw;
-    // dos puntos con nivel=null para que no pinte área pero sí ejes/grilla
-    return [
-      { x: fallbackDomain[0], label: fmtHM(fallbackDomain[0], tz), nivel: null },
-      { x: fallbackDomain[1], label: fmtHM(fallbackDomain[1], tz), nivel: null },
-    ];
-  }, [hasData, seriesRaw, fallbackDomain, tz]);
-
-  // Y-axis siempre visible (0..100) si no hay datos
-  const yMin = useMemo(() => {
-    if (!hasData) return 0;
-    const vals = seriesRaw.map((d) => (d.nivel == null ? Infinity : d.nivel));
-    const m = Math.min(...vals);
-    return Number.isFinite(m) ? Math.floor(Math.min(0, m)) : 0;
-  }, [hasData, seriesRaw]);
-
-  const yMax = useMemo(() => {
-    if (!hasData) return 100;
-    const vals = seriesRaw.map((d) => (d.nivel == null ? -Infinity : d.nivel));
-    const m = Math.max(...vals);
-    return Number.isFinite(m) ? Math.ceil(Math.max(100, m)) : 100;
-  }, [hasData, seriesRaw]);
-
-  const L  = thresholds?.low_pct ?? null;
-  const LL = thresholds?.low_low_pct ?? null;
-  const H  = thresholds?.high_pct ?? null;
-  const HH = thresholds?.high_high_pct ?? null;
-
-  const gradId = useMemo(() => `gradTank_${Math.random().toString(36).slice(2)}`, []);
+  const merged = useMemo(() => {
+    if (!dataCmp) return data;
+    const map = new Map<number, { ms: number; level: number | null; level_cmp?: number | null }>();
+    for (const r of data) map.set(r.ms, { ms: r.ms, level: r.level });
+    for (const r of dataCmp) {
+      const cur = map.get(r.ms);
+      if (cur) cur.level_cmp = r.level_cmp;
+      else map.set(r.ms, { ms: r.ms, level: null, level_cmp: r.level_cmp });
+    }
+    return Array.from(map.values()).sort((a, b) => a.ms - b.ms);
+  }, [data, dataCmp]);
 
   return (
-    <Card className="rounded-2xl">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
-      </CardHeader>
-
-      <CardContent style={{ height }}>
+    <div className="rounded-2xl border p-2">
+      <div className="text-sm text-gray-600 mb-1">{title}</div>
+      <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
-            data={series}
+            data={merged}
             syncId={syncId}
-            syncMethod="value"
-            margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
-            onMouseMove={(st: any) => {
-              if (st && typeof st.activeLabel === "number") onHoverX?.(st.activeLabel);
-            }}
-            onMouseLeave={() => onHoverX?.(null)}
+            onMouseMove={(e: any) => onHoverX && onHoverX(e?.activeLabel ?? null)}
+            onMouseLeave={() => onHoverX && onHoverX(null)}
           >
-            <defs>
-              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="currentColor" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="currentColor" stopOpacity={0.05} />
-              </linearGradient>
-            </defs>
-
-            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-
-            {mode === "time" ? (
-              <XAxis
-                dataKey="x"
-                type="number"
-                scale="time"
-                domain={xDomain ?? fallbackDomain}
-                ticks={xTicks}
-                tickFormatter={(v) => fmtHM(v as number, tz)}
-                tickMargin={8}
-                minTickGap={24}
-                allowDataOverflow
-              />
-            ) : (
-              <XAxis dataKey="label" type="category" tickMargin={8} minTickGap={16} />
-            )}
-
-            <YAxis domain={[yMin, yMax]} tickFormatter={(v) => `${v}%`} width={40} />
-
-            <Tooltip
-              cursor={false}
-              content={({ active, payload }) => {
-                if (!active || !payload || !payload.length) return null;
-                const p = payload[0].payload as { x: number | string; label: string; nivel: number | null };
-                const nivel = p.nivel == null ? "--" : `${p.nivel.toFixed(1)}%`;
-                const when = mode === "time" ? fmtTime(Number(p.x), tz) : String(p.label);
-                return (
-                  <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
-                    <div className="text-xs text-muted-foreground">{when}</div>
-                    <div className="text-sm font-medium">Nivel: {nivel}</div>
-                  </div>
-                );
-              }}
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              type="number"
+              dataKey="ms"
+              domain={(xDomain as any) ?? ["auto", "auto"]}
+              ticks={xTicks as any}
+              tickFormatter={(ms: any) => (Number.isFinite(ms) ? fmtTime(ms as number, tz) : "")}
             />
-
-            {/* Bandas y líneas de umbral */}
-            {typeof LL === "number" && <ReferenceArea y1={0} y2={LL} fill="var(--destructive)" fillOpacity={0.08} />}
-            {typeof HH === "number" && <ReferenceArea y1={HH} y2={Math.max(100, yMax)} fill="var(--destructive)" fillOpacity={0.08} />}
-            {typeof L === "number" && typeof H === "number" && H > L && (
-              <ReferenceArea y1={L} y2={H} fill="var(--primary)" fillOpacity={0.06} />
-            )}
-            {typeof LL === "number" && (
-              <ReferenceLine y={LL} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
-                label={{ value: `LL ${LL}%`, position: "insideTopRight", fontSize: 10 }} />
-            )}
-            {typeof L === "number" && (
-              <ReferenceLine y={L} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
-                label={{ value: `L ${L}%`, position: "insideTopRight", fontSize: 10 }} />
-            )}
-            {typeof H === "number" && (
-              <ReferenceLine y={H} stroke="currentColor" strokeDasharray="4 4" opacity={0.5}
-                label={{ value: `H ${H}%`, position: "insideTopRight", fontSize: 10 }} />
-            )}
-            {typeof HH === "number" && (
-              <ReferenceLine y={HH} stroke="currentColor" strokeDasharray="4 4" opacity={0.6}
-                label={{ value: `HH ${HH}%`, position: "insideTopRight", fontSize: 10 }} />
-            )}
-
-            {/* crosshair sincronizado */}
-            {typeof hoverX === "number" && (
-              <ReferenceLine x={hoverX} stroke="currentColor" strokeDasharray="4 4" opacity={0.6} />
-            )}
-
+            <YAxis domain={[0, 100]} tickFormatter={(n: any) => String(Number(n))} />
+            <Tooltip
+              labelFormatter={(ms) => fmtTime(Number(ms), tz)}
+              formatter={(v: any, name: any) => [`${Number(v).toFixed(1)}%`, name]}
+            />
+            <Legend />
             <Area
               type="monotone"
-              dataKey="nivel"
-              name="nivel"
-              stroke="currentColor"
+              dataKey="level"
+              name="Nivel (%)"
+              fillOpacity={0.25}
               strokeWidth={2}
-              fill={`url(#${gradId})`}
-              // si no hay datos, NO conectar nulls para que no pinte nada
-              connectNulls={hasData}
-              dot={false}
               isAnimationActive={false}
-              activeDot={{ r: 2 }}
+              connectNulls
             />
-
-            {showLegend && <Legend verticalAlign="top" height={24} />}
+            {dataCmp && (
+              <Area
+                type="monotone"
+                dataKey="level_cmp"
+                name={`${compareLabel} (%)`}
+                fillOpacity={0.15}
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                isAnimationActive={false}
+                connectNulls
+              />
+            )}
+            {hoverX ? <ReferenceLine x={hoverX} strokeWidth={1} /> : null}
           </AreaChart>
         </ResponsiveContainer>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

@@ -1,4 +1,3 @@
-// src/widget.tsx
 //
 // 24 h fija + Playback hasta 7 días atrás (orientación “natural”):
 // - La barra va de IZQUIERDA (hace 7 días) a DERECHA (ahora).
@@ -29,12 +28,6 @@ const TZ = "America/Argentina/Buenos_Aires";
 const H = 60 * 60 * 1000;
 
 // ===== helpers de tiempo / UI =====
-function toMs(x: number | string): number {
-  if (typeof x === "number") return x > 10_000 ? x : x * 1000;
-  const n = Number(x);
-  if (Number.isFinite(n) && n > 10_000) return n;
-  return new Date(x).getTime();
-}
 function startOfMin(ms: number) { const d = new Date(ms); d.setSeconds(0, 0); return d.getTime(); }
 function floorToHour(ms: number) { const d = new Date(ms); d.setMinutes(0,0,0); return d.getTime(); }
 function floorToMinuteISO(d: Date) { const dd = new Date(d); dd.setSeconds(0, 0); return dd.toISOString(); }
@@ -72,17 +65,28 @@ export default function KpiWidget() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("operacion");
 
-  // Filtro de ubicación
+  // Filtro de ubicación (BASE)
   const [loc, setLoc] = useState<number | "all">("all");
   const [locOptionsAll, setLocOptionsAll] = useState<LocOpt[]>([]);
 
-  // Selectores por localidad
+  // Selectores por localidad (BASE)
   const [pumpOptions, setPumpOptions] = useState<PumpInfo[]>([]);
   const [tankOptions, setTankOptions] = useState<TankInfo[]>([]);
   const [selectedPumpIds, setSelectedPumpIds] = useState<number[] | "all">("all");
   const [selectedTankIds, setSelectedTankIds] = useState<number[] | "all">("all");
 
-  // ==== snapshot KPI/tabla ====
+  // ==== AUDITORÍA (segunda ubicación, controles y gráficos propios) ====
+  const [auditEnabled, setAuditEnabled] = useState(false);
+  const [auditLoc, setAuditLoc] = useState<number | "">("");
+  const [auditPumpOptions, setAuditPumpOptions] = useState<PumpInfo[]>([]);
+  const [auditTankOptions, setAuditTankOptions] = useState<TankInfo[]>([]);
+  const [selectedAuditPumpIds, setSelectedAuditPumpIds] = useState<number[] | "all">("all");
+  const [selectedAuditTankIds, setSelectedAuditTankIds] = useState<number[] | "all">("all");
+  const [auditPumpTs, setAuditPumpTs] = useState<{timestamps:number[]; is_on:(number|null)[]} | null>(null);
+  const [auditTankTs, setAuditTankTs] = useState<{timestamps:number[]; level_percent:(number|null)[]} | null>(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  // ==== snapshot KPI/tabla (BASE) ====
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -99,7 +103,7 @@ export default function KpiWidget() {
     return () => { mounted = false; };
   }, [loc]);
 
-  // Cargar bombas/tanques por localidad
+  // Cargar bombas/tanques por localidad (BASE)
   useEffect(() => {
     let mounted = true;
     const locId = loc === "all" ? undefined : Number(loc);
@@ -123,7 +127,7 @@ export default function KpiWidget() {
 
   const byLocation = live?.byLocation || [];
 
-  // === LIVE 24h ===
+  // === LIVE 24h (BASE) ===
   const locId = loc === "all" ? undefined : Number(loc);
   const [playEnabled, setPlayEnabled] = useState(false);
   const pollMs = tab === "operacion" && !playEnabled ? 15_000 : 10 * 60_000;
@@ -140,9 +144,7 @@ export default function KpiWidget() {
   // ===== Playback 7 días (24h fija, de izquierda=7d atrás a derecha=ahora) =====
   const MAX_OFFSET_MIN = 7 * 24 * 60;       // 10080 min = 7 días
   const MIN_OFFSET_MIN = 24 * 60;           // el fin debe ser al menos +24h desde el inicio base
-  // El slider ahora indica **minutos desde el inicio base (hace 7 días)** hasta el **fin** de la ventana.
-  // Por defecto lo ponemos en “ahora” (derecha): MAX_OFFSET_MIN.
-  const [playFinMin, setPlayFinMin] = useState(MAX_OFFSET_MIN);
+  const [playFinMin, setPlayFinMin] = useState(MAX_OFFSET_MIN);   // fin = “ahora”
   const [dragging, setDragging] = useState(false);
   const [finDebounced, setFinDebounced] = useState(MAX_OFFSET_MIN);
   const [playing, setPlaying] = useState(false);
@@ -185,11 +187,10 @@ export default function KpiWidget() {
     return () => window.clearTimeout(id);
   }, [playEnabled, dragging, playFinMin, locId]);
 
-  // Fetch de la ventana 24h cuando cambia finDebounced
+  // Fetch de la ventana 24h cuando cambia finDebounced (BASE)
   useEffect(() => {
     if (!playEnabled || !locId) { setPlayTankTs(null); setPlayPumpTs(null); setPlayWindow(null); return; }
     let cancelled = false;
-    // “to” = baseStart + finDebounced
     const toMs = startOfMin(baseStartMs + finDebounced * 60_000);
     const fromMs = toMs - 24 * H;
     const fromISO = floorToMinuteISO(new Date(fromMs));
@@ -263,12 +264,115 @@ export default function KpiWidget() {
     () => liveSync.pumpsTotal ?? (kpis.pumps || undefined),
     [liveSync.pumpsTotal, kpis]
   );
+  const auditPumpsCap = useMemo(
+    () => (auditPumpOptions?.length || 0) || undefined,
+    [auditPumpOptions]
+  );
+
+  // =================== AUDITORÍA: cargar assets (bombas/tanques) ===================
+  useEffect(() => {
+    if (!auditEnabled) {
+      setAuditPumpOptions([]); setAuditTankOptions([]);
+      setSelectedAuditPumpIds("all"); setSelectedAuditTankIds("all");
+      setAuditPumpTs(null); setAuditTankTs(null);
+      return;
+    }
+    const locId = auditLoc === "" ? undefined : Number(auditLoc);
+    if (!locId) {
+      setAuditPumpOptions([]); setAuditTankOptions([]);
+      setSelectedAuditPumpIds("all"); setSelectedAuditTankIds("all");
+      setAuditPumpTs(null); setAuditTankTs(null);
+      return;
+    }
+    let mounted = true;
+    (async () => {
+      try {
+        const [p, t] = await Promise.all([listPumps({ locationId: locId }), listTanks({ locationId: locId })]);
+        if (!mounted) return;
+        setAuditPumpOptions(p || []);
+        setAuditTankOptions(t || []);
+        setSelectedAuditPumpIds("all");
+        setSelectedAuditTankIds("all");
+      } catch (e) {
+        if (mounted) { setAuditPumpOptions([]); setAuditTankOptions([]); }
+        console.error("[audit] options error:", e);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [auditEnabled, auditLoc]);
+
+  // =================== AUDITORÍA: fetch de series con la MISMA ventana ===================
+  useEffect(() => {
+    if (!auditEnabled) { setAuditPumpTs(null); setAuditTankTs(null); return; }
+    const locId = auditLoc === "" ? undefined : Number(auditLoc);
+    if (!locId) { setAuditPumpTs(null); setAuditTankTs(null); return; }
+
+    const fromMs = startOfMin(useXDomain[0]);
+    const toMs   = startOfMin(useXDomain[1]);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return;
+
+    const pumpIds =
+      selectedAuditPumpIds === "all"
+        ? auditPumpOptions.map(p => p.pump_id)
+        : (selectedAuditPumpIds as number[]);
+    const tankIds =
+      selectedAuditTankIds === "all"
+        ? auditTankOptions.map(t => t.tank_id)
+        : (selectedAuditTankIds as number[]);
+
+    let cancelled = false;
+    setLoadingAudit(true);
+    (async () => {
+      try {
+        const [pumps, tanks] = await Promise.all([
+          fetchPumpsLive({
+            from: floorToMinuteISO(new Date(fromMs)),
+            to: floorToMinuteISO(new Date(toMs)),
+            locationId: locId,
+            pumpIds: pumpIds.length ? pumpIds : undefined,
+            bucket: "1min",
+            aggMode: "avg",
+            connectedOnly: true,
+          }),
+          fetchTanksLive({
+            from: floorToMinuteISO(new Date(fromMs)),
+            to: floorToMinuteISO(new Date(toMs)),
+            locationId: locId,
+            tankIds: tankIds.length ? tankIds : undefined,
+            agg: "avg",
+            carry: true,
+            bucket: "1min",
+            connectedOnly: true,
+          }),
+        ]);
+        if (cancelled) return;
+        setAuditPumpTs({ timestamps: pumps.timestamps, is_on: pumps.is_on });
+        setAuditTankTs({ timestamps: tanks.timestamps, level_percent: tanks.level_percent });
+      } catch (e) {
+        if (!cancelled) { setAuditPumpTs(null); setAuditTankTs(null); }
+        console.error("[audit] series error:", e);
+      } finally {
+        if (!cancelled) setLoadingAudit(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [
+    auditEnabled,
+    auditLoc,
+    selectedAuditPumpIds,
+    selectedAuditTankIds,
+    auditPumpOptions,
+    auditTankOptions,
+    useXDomain[0],
+    useXDomain[1],
+  ]);
 
   return (
     <div className="p-6 space-y-6">
       {/* Fila filtros */}
       <div className="flex flex-wrap gap-4 items-center">
-        {/* Ubicación */}
+        {/* Ubicación BASE */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Ubicación:</span>
           <select
@@ -283,61 +387,62 @@ export default function KpiWidget() {
           </select>
         </div>
 
-        {/* Playback 24h (hasta 7 días) → izquierda=7d, derecha=ahora */}
-        <div className="flex-1 min-w-[320px]">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2">
+        {/* Playback 24h (hasta 7 días) → visible SOLO si NO está abierta la Auditoría */}
+        {!auditEnabled && (
+          <div className="flex-1 min-w-[320px]">
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  disabled={loc === "all"}
+                  checked={playEnabled}
+                  onChange={(e) => { setPlayEnabled(e.target.checked); setPlaying(false); }}
+                />
+                <span className={`text-sm ${loc === "all" ? "text-gray-400" : "text-gray-700"}`}>
+                  Playback 24 h (7 días → ahora)
+                </span>
+              </label>
+
+              <button
+                className="px-2 py-1 border rounded-lg text-sm"
+                disabled={!playEnabled}
+                onClick={()=> setPlaying(p=>!p)}
+                title={playing ? "Pausar" : "Reproducir"}
+              >
+                {playing ? "⏸" : "▶"}
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center gap-3">
               <input
-                type="checkbox"
-                disabled={loc === "all"}
-                checked={playEnabled}
-                onChange={(e) => { setPlayEnabled(e.target.checked); setPlaying(false); }}
+                type="range"
+                min={MIN_OFFSET_MIN}
+                max={MAX_OFFSET_MIN}
+                step={1}
+                disabled={!playEnabled}
+                value={playFinMin}
+                onChange={(e)=> setPlayFinMin(Number(e.target.value))}
+                onMouseDown={()=> setDragging(true)}
+                onMouseUp={()=> setDragging(false)}
+                onTouchStart={()=> setDragging(true)}
+                onTouchEnd={()=> setDragging(false)}
+                className="w-full"
+                title="Fin de la ventana (minutos desde el inicio base de 7 días)"
               />
-              <span className={`text-sm ${loc === "all" ? "text-gray-400" : "text-gray-700"}`}>
-                Playback 24 h (7 días → ahora)
-              </span>
-            </label>
+            </div>
 
-            <button
-              className="px-2 py-1 border rounded-lg text-sm"
-              disabled={!playEnabled}
-              onClick={()=> setPlaying(p=>!p)}
-              title={playing ? "Pausar" : "Reproducir"}
-            >
-              {playing ? "⏸" : "▶"}
-            </button>
+            <div className="mt-1 flex items-center justify-between text-xs">
+              <span className="text-gray-500">Inicio: <b>{startLabel}</b></span>
+              <span className="text-gray-500">Fin: <b>{endLabel}</b></span>
+            </div>
           </div>
-
-          <div className="mt-2 flex items-center gap-3">
-            <input
-              type="range"
-              min={MIN_OFFSET_MIN}
-              max={MAX_OFFSET_MIN}
-              step={1}
-              disabled={!playEnabled}
-              value={playFinMin}
-              onChange={(e)=> setPlayFinMin(Number(e.target.value))}
-              onMouseDown={()=> setDragging(true)}
-              onMouseUp={()=> setDragging(false)}
-              onTouchStart={()=> setDragging(true)}
-              onTouchEnd={()=> setDragging(false)}
-              className="w-full"
-              title="Fin de la ventana (minutos desde el inicio base de 7 días)"
-            />
-          </div>
-
-          {/* Etiquetas de rango actual */}
-          <div className="mt-1 flex items-center justify-between text-xs">
-            <span className="text-gray-500">Inicio: <b>{startLabel}</b></span>
-            <span className="text-gray-500">Fin: <b>{endLabel}</b></span>
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Selectores por localidad */}
+      {/* Selectores por localidad (BASE) */}
       {loc !== "all" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Bombas */}
+          {/* Bombas BASE */}
           <Card className="rounded-2xl">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-gray-500">Bombas (selección)</CardTitle>
@@ -380,7 +485,7 @@ export default function KpiWidget() {
             </CardContent>
           </Card>
 
-          {/* Tanques */}
+          {/* Tanques BASE */}
           <Card className="rounded-2xl">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-gray-500">Tanques (selección)</CardTitle>
@@ -447,21 +552,195 @@ export default function KpiWidget() {
             <KPI label="Bombas" value={k(liveSync?.pumpsTotal ?? kpis.pumps)} />
           </section>
 
-          {/* Gráficos */}
+          {/* ===== Controles de AUDITORÍA ===== */}
+          <section className="rounded-xl border p-3 space-y-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={auditEnabled}
+                onChange={(e) => setAuditEnabled(e.target.checked)}
+              />
+              <span className="text-sm">Auditar (comparar con otra ubicación)</span>
+              {loadingAudit && <span className="text-xs text-gray-500 ml-2">cargando…</span>}
+            </label>
+
+            {auditEnabled && (
+              <>
+                {/* Playback dentro de Auditoría (mismo estado global) */}
+                <div className="flex-1 min-w-[320px]">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        disabled={loc === "all"}
+                        checked={playEnabled}
+                        onChange={(e) => { setPlayEnabled(e.target.checked); setPlaying(false); }}
+                      />
+                      <span className={`text-sm ${loc === "all" ? "text-gray-400" : "text-gray-700"}`}>
+                        Playback 24 h (7 días → ahora)
+                      </span>
+                    </label>
+
+                    <button
+                      className="px-2 py-1 border rounded-lg text-sm"
+                      disabled={!playEnabled}
+                      onClick={()=> setPlaying(p=>!p)}
+                      title={playing ? "Pausar" : "Reproducir"}
+                    >
+                      {playing ? "⏸" : "▶"}
+                    </button>
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={MIN_OFFSET_MIN}
+                      max={MAX_OFFSET_MIN}
+                      step={1}
+                      disabled={!playEnabled}
+                      value={playFinMin}
+                      onChange={(e)=> setPlayFinMin(Number(e.target.value))}
+                      onMouseDown={()=> setDragging(true)}
+                      onMouseUp={()=> setDragging(false)}
+                      onTouchStart={()=> setDragging(true)}
+                      onTouchEnd={()=> setDragging(false)}
+                      className="w-full"
+                      title="Fin de la ventana (minutos desde el inicio base de 7 días)"
+                    />
+                  </div>
+
+                  <div className="mt-1 flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Inicio: <b>{startLabel}</b></span>
+                    <span className="text-gray-500">Fin: <b>{endLabel}</b></span>
+                  </div>
+                </div>
+
+                {/* Ubicación y selectores de Auditoría (formato igual al BASE) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Tanques AUDITORÍA */}
+                  <Card className="rounded-2xl">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm text-gray-500">Auditoría – Localidad y Tanques</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div>
+                        <div className="text-xs mb-1">Ubicación (auditoría)</div>
+                        <select
+                          className="w-full border rounded-md p-2 text-sm"
+                          value={auditLoc === "" ? "" : String(auditLoc)}
+                          onChange={(e) => setAuditLoc(e.target.value === "" ? "" : Number(e.target.value))}
+                        >
+                          <option value="">Elegí</option>
+                          {locOptionsAll.map((l) => (
+                            <option key={l.id} value={l.id}>{l.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedAuditTankIds === "all"}
+                            onChange={(e) => setSelectedAuditTankIds(e.target.checked ? "all" : [])}
+                            disabled={!auditLoc}
+                          />
+                          <span className="text-sm">Todos (promedio)</span>
+                        </label>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-auto">
+                        {auditTankOptions.map((t) => {
+                          const checked = selectedAuditTankIds === "all" ? false : (selectedAuditTankIds as number[]).includes(t.tank_id);
+                          return (
+                            <label key={t.tank_id}
+                              className={`px-2 py-1 border rounded-lg text-sm cursor-pointer ${checked ? "bg-black text-white" : "bg-white hover:bg-gray-50"}`}>
+                              <input
+                                type="checkbox"
+                                className="mr-2"
+                                checked={checked}
+                                disabled={selectedAuditTankIds === "all"}
+                                onChange={(e) => {
+                                  if (selectedAuditTankIds === "all") return;
+                                  const arr = new Set(selectedAuditTankIds as number[]);
+                                  if (e.target.checked) arr.add(t.tank_id); else arr.delete(t.tank_id);
+                                  setSelectedAuditTankIds(Array.from(arr));
+                                }}
+                              />
+                              {t.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <p className="text-xs text-gray-500">* “Todos” muestra el <b>promedio</b> de niveles.</p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Bombas AUDITORÍA */}
+                  <Card className="rounded-2xl">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm text-gray-500">Auditoría – Bombas (selección)</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedAuditPumpIds === "all"}
+                            onChange={(e) => setSelectedAuditPumpIds(e.target.checked ? "all" : [])}
+                            disabled={!auditLoc}
+                          />
+                          <span className="text-sm">Todas</span>
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-auto">
+                        {auditPumpOptions.map((p) => {
+                          const checked = selectedAuditPumpIds === "all" ? false : (selectedAuditPumpIds as number[]).includes(p.pump_id);
+                          return (
+                            <label key={p.pump_id}
+                              className={`px-2 py-1 border rounded-lg text-sm cursor-pointer ${checked ? "bg-black text-white" : "bg-white hover:bg-gray-50"}`}>
+                              <input
+                                type="checkbox"
+                                className="mr-2"
+                                checked={checked}
+                                disabled={selectedAuditPumpIds === "all"}
+                                onChange={(e) => {
+                                  if (selectedAuditPumpIds === "all") return;
+                                  const arr = new Set(selectedAuditPumpIds as number[]);
+                                  if (e.target.checked) arr.add(p.pump_id); else arr.delete(p.pump_id);
+                                  setSelectedAuditPumpIds(Array.from(arr));
+                                }}
+                              />
+                              {p.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <p className="text-xs text-gray-500">* “Todas” muestra la cantidad ON de todas las bombas de la localidad.</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            )}
+          </section>
+
+          {/* Gráficos BASE */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TankLevelChart
-              ts={playEnabled && playTankTs ? playTankTs : liveSync.tankTs}
+              ts={useTank}
               syncId="op-sync"
               title={playEnabled ? "Nivel del tanque (Playback 24 h)" : "Nivel del tanque (24h • en vivo)"}
               tz={TZ}
               xDomain={useXDomain}
               xTicks={xTicksDisplay}
               hoverX={hoverX}
-              onHoverX={useRafThrottle<number | null>((x)=>_setHoverX(x))}
+              onHoverX={setHoverXRaf}
               showBrushIf={120}
             />
             <OpsPumpsProfile
-              pumpsTs={playEnabled && playPumpTs ? playPumpTs : liveSync.pumpTs}
+              pumpsTs={usePump}
               max={totalPumpsCap}
               syncId="op-sync"
               title={playEnabled ? "Bombas ON (Playback 24 h)" : "Bombas ON (24h)"}
@@ -469,9 +748,36 @@ export default function KpiWidget() {
               xDomain={useXDomain}
               xTicks={xTicksDisplay}
               hoverX={hoverX}
-              onHoverX={useRafThrottle<number | null>((x)=>_setHoverX(x))}
+              onHoverX={setHoverXRaf}
             />
           </section>
+
+          {/* Gráficos AUDITORÍA (dos charts adicionales) */}
+          {auditEnabled && auditLoc !== "" && (
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <TankLevelChart
+                ts={auditTankTs ?? { timestamps: [], level_percent: [] }}
+                syncId="op-sync"
+                title="Nivel del tanque – Auditoría"
+                tz={TZ}
+                xDomain={useXDomain}
+                xTicks={xTicksDisplay}
+                hoverX={hoverX}
+                onHoverX={setHoverXRaf}
+              />
+              <OpsPumpsProfile
+                pumpsTs={auditPumpTs ?? { timestamps: [], is_on: [] }}
+                max={auditPumpsCap}
+                syncId="op-sync"
+                title="Bombas ON – Auditoría"
+                tz={TZ}
+                xDomain={useXDomain}
+                xTicks={xTicksDisplay}
+                hoverX={hoverX}
+                onHoverX={setHoverXRaf}
+              />
+            </section>
+          )}
         </>
       )}
 
