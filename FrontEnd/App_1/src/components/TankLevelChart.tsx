@@ -11,7 +11,7 @@ import {
   ReferenceLine,
   ReferenceArea,
   Legend,
-  Brush,
+  // Brush ← eliminado
 } from "recharts";
 
 /**
@@ -37,7 +37,8 @@ type Props = {
   tz?: string;            // default "America/Argentina/Buenos_Aires"
   height?: number;        // default 260
   showLegend?: boolean;   // default true
-  showBrushIf?: number;   // default 120
+  /** @deprecated sin uso: se eliminó el Brush inferior */
+  showBrushIf?: number;   // mantenido por compatibilidad, ya no se renderiza
   syncId?: string;        // ej: "op-sync"
   /** sincronización con Bombas */
   xDomain?: [number, number];
@@ -95,7 +96,7 @@ export default function TankLevelChart({
   tz = "America/Argentina/Buenos_Aires",
   height = 260,
   showLegend = true,
-  showBrushIf = 120,
+  // showBrushIf ← ignorado (se quitó el Brush)
   syncId,
   xDomain,
   xTicks,
@@ -264,15 +265,7 @@ export default function TankLevelChart({
 
               {showLegend && <Legend verticalAlign="top" height={24} />}
 
-              {series.length > showBrushIf && (
-                <Brush
-                  dataKey={mode === "time" ? "x" : "label"}
-                  height={22}
-                  stroke="currentColor"
-                  travellerWidth={8}
-                  tickFormatter={(v) => (mode === "time" ? fmtHM(v as number, tz) : String(v))}
-                />
-              )}
+              {/* Brush eliminado */}
             </AreaChart>
           </ResponsiveContainer>
         )}
