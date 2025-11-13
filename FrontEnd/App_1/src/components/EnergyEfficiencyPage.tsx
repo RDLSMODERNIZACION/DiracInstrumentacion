@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, PieChart, Pie, Tooltip, Legend, Cell } from "recharts";
-import { fetchEnergyDistribution, EnergyDistribution } from "@/api/energy";
+import { fetchEnergyRuntime, EnergyRuntime } from "@/api/energy";
 
 function ym(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 7); // "YYYY-MM"
@@ -10,46 +10,39 @@ export default function EnergyEfficiencyPage({
   locationId,
   tz = "America/Argentina/Buenos_Aires",
   month: initialMonth,
+  bandSetId,
 }: {
   locationId?: number;
   tz?: string;
-  month?: string; // "YYYY-MM"; default: actual
+  month?: string;              // "YYYY-MM"
+  bandSetId?: number;          // opcional
 }) {
   const [month, setMonth] = useState<string>(initialMonth ?? ym());
-  const [data, setData] = useState<EnergyDistribution | null>(null);
+  const [data, setData] = useState<EnergyRuntime | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     (async () => {
-      const res = await fetchEnergyDistribution({ month, locationId, tz });
+      const res = await fetchEnergyRuntime({ month, locationId, tz, bandSetId });
       if (!alive) return;
       setData(res);
       setLoading(false);
     })();
-    return () => {
-      alive = false;
-    };
-  }, [month, locationId, tz]);
+    return () => { alive = false; };
+  }, [month, locationId, tz, bandSetId]);
 
-  const total = data?.total_kwh ?? 0;
+  const totalH = data?.total_hours ?? 0;
   const chartData = useMemo(
-    () =>
-      (data?.buckets ?? []).map((b) => ({
-        name: b.label,
-        value: b.kwh,
-        key: b.key,
-      })),
+    () => (data?.buckets ?? []).map((b) => ({ name: b.label, value: b.hours, key: b.key })),
     [data]
   );
 
-  // Colores suaves; podés cambiarlos o dejarlos por defecto.
   const COLORS = ["#7dd3fc", "#86efac", "#fca5a5", "#fde68a", "#c4b5fd", "#93c5fd"];
 
   return (
     <div className="space-y-3">
-      {/* Selector de mes (simple y sin más UI) */}
       <div className="flex items-center gap-3">
         <label className="text-sm text-gray-600">Mes:</label>
         <input
@@ -61,7 +54,6 @@ export default function EnergyEfficiencyPage({
         {loading && <span className="text-xs text-gray-500">cargando…</span>}
       </div>
 
-      {/* Gráfico de torta */}
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -80,19 +72,17 @@ export default function EnergyEfficiencyPage({
                 <Cell key={entry.key} fill={COLORS[idx % COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(v: any) => [`${Number(v).toFixed(1)} kWh`, "Energía"]} />
+            <Tooltip formatter={(v: any) => [`${Number(v).toFixed(1)} h`, "Horas ON"]} />
             <Legend />
           </PieChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Total simple */}
       <div className="text-sm text-gray-600">
-        Total {month}: <b>{total.toFixed(1)} kWh</b>
+        Total {month}: <b>{totalH.toFixed(1)} h</b>
         {locationId ? <> • Ubicación ID: {locationId}</> : null}
       </div>
 
-      {/* Mensaje cuando no hay datos */}
       {!loading && chartData.length === 0 && (
         <div className="text-sm text-gray-500">No hay datos para el mes seleccionado.</div>
       )}
