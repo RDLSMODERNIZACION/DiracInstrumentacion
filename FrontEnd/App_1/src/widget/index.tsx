@@ -23,12 +23,10 @@ import AuditPanel from "./components/AuditPanel";
 
 import type { LocOpt, PumpInfo, TankInfo } from "./types";
 
-type TabId = "operacion" | "eficiencia" | "confiabilidad" | "calidad" | "gestion";
-
 export default function Widget() {
   const [live, setLive] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabId>("operacion");
+  const [tab, setTab] = useState("operacion");
 
   // Ubicación BASE
   const [loc, setLoc] = useState<number | "all">("all");
@@ -53,49 +51,31 @@ export default function Widget() {
         const optsNow = deriveLocOptions(data?.locations, data?.byLocation);
         setLocOptionsAll((prev) => mergeLocOptions(prev, optsNow));
       } catch (e) {
-        console.error("[Widget] loadDashboard error:", e);
+        console.error(e);
       } finally {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [loc]);
 
   // Cargar bombas/tanques BASE
   useEffect(() => {
     let mounted = true;
-
     if (!locId) {
-      setPumpOptions([]);
-      setTankOptions([]);
-      setSelectedPumpIds("all");
-      setSelectedTankIds("all");
-      return () => {
-        mounted = false;
-      };
+      setPumpOptions([]); setTankOptions([]);
+      setSelectedPumpIds("all"); setSelectedTankIds("all");
+      return;
     }
-
     (async () => {
       try {
-        const [p, t] = await Promise.all([
-          listPumps({ locationId: locId }),
-          listTanks({ locationId: locId }),
-        ]);
+        const [p, t] = await Promise.all([listPumps({ locationId: locId }), listTanks({ locationId: locId })]);
         if (!mounted) return;
-        setPumpOptions(p);
-        setTankOptions(t);
-        setSelectedPumpIds("all");
-        setSelectedTankIds("all");
-      } catch (e) {
-        console.error("[Widget] listPumps/listTanks error:", e);
-      }
+        setPumpOptions(p); setTankOptions(t);
+        setSelectedPumpIds("all"); setSelectedTankIds("all");
+      } catch (e) { console.error("[filters] list error:", e); }
     })();
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [locId]);
 
   // Live 24h BASE
@@ -138,15 +118,11 @@ export default function Widget() {
   const byLocation = live?.byLocation || [];
   const byLocationFiltered = useMemo(() => {
     if (loc === "all") return byLocation;
-    const locNum = Number(loc);
-    return (Array.isArray(byLocation) ? byLocation : []).filter(
-      (r: any) => Number(r?.location_id) === locNum
-    );
+    return (Array.isArray(byLocation) ? byLocation : []).filter((r: any) => Number(r?.location_id) === loc);
   }, [byLocation, loc]);
 
   const kpis = useMemo(() => {
-    let tanks = 0,
-      pumps = 0;
+    let tanks = 0, pumps = 0;
     for (const r of Array.isArray(byLocationFiltered) ? byLocationFiltered : []) {
       tanks += Number(r?.tanks_count ?? 0);
       pumps += Number(r?.pumps_count ?? 0);
@@ -166,30 +142,21 @@ export default function Widget() {
   return (
     <div className="p-6 space-y-6">
       {/* Filtros superiores */}
-      <div className="flex flex-wrap gap-4 items-center justify-between">
+      <div className="flex flex-wrap gap-4 items-center">
         {/* Ubicación BASE */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Ubicación:</span>
           <select
             className="border rounded-xl p-2 text-sm"
             value={loc === "all" ? "all" : String(loc)}
-            onChange={(e) =>
-              setLoc(e.target.value === "all" ? "all" : Number(e.target.value))
-            }
+            onChange={(e) => setLoc(e.target.value === "all" ? "all" : Number(e.target.value))}
           >
             <option value="all">Todas</option>
-            {locOptionsAll.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
+            {locOptionsAll.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
           </select>
         </div>
 
-        {/* Estado de carga simple */}
-        {loading && (
-          <div className="text-xs text-gray-400">Actualizando snapshot…</div>
-        )}
+        {/* ⛔ Playback exterior eliminado */}
       </div>
 
       {/* Selectores BASE */}
@@ -207,7 +174,7 @@ export default function Widget() {
       {/* Tabs */}
       <Tabs
         value={tab}
-        onChange={(v) => setTab(v as TabId)}
+        onChange={setTab}
         tabs={[
           { id: "operacion", label: "Operación" },
           { id: "eficiencia", label: "Eficiencia energética" },
@@ -222,16 +189,8 @@ export default function Widget() {
         <>
           {/* KPIs */}
           <section className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-2 gap-3">
-            <KPI
-              label="Tanques"
-              value={k(
-                (live?.byLocation?.[0]?.tanks_count ?? 0) || kpis.tanks
-              )}
-            />
-            <KPI
-              label="Bombas"
-              value={k(liveSync?.pumpsTotal ?? kpis.pumps)}
-            />
+            <KPI label="Tanques" value={k((live?.byLocation?.[0]?.tanks_count ?? 0) || kpis.tanks)} />
+            <KPI label="Bombas" value={k(liveSync?.pumpsTotal ?? kpis.pumps)} />
           </section>
 
           {/* Panel de Auditoría (incluye Playback adentro y selectores propios) */}
@@ -270,11 +229,7 @@ export default function Widget() {
             <TankLevelChart
               ts={playback.tankTs}
               syncId="op-sync"
-              title={
-                playback.playEnabled
-                  ? "Nivel del tanque (Playback 24 h)"
-                  : "Nivel del tanque (24h • en vivo)"
-              }
+              title={playback.playEnabled ? "Nivel del tanque (Playback 24 h)" : "Nivel del tanque (24h • en vivo)"}
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -286,11 +241,7 @@ export default function Widget() {
               pumpsTs={playback.pumpTs}
               max={totalPumpsCap}
               syncId="op-sync"
-              title={
-                playback.playEnabled
-                  ? "Bombas ON (Playback 24 h)"
-                  : "Bombas ON (24h)"
-              }
+              title={playback.playEnabled ? "Bombas ON (Playback 24 h)" : "Bombas ON (24h)"}
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -328,7 +279,7 @@ export default function Widget() {
         </>
       )}
 
-      {/* ===== Eficiencia energética (torta por mes y franja) ===== */}
+      {/* ===== Eficiencia energética (nuevo: torta por mes y franja) ===== */}
       {tab === "eficiencia" && (
         <section>
           <EnergyEfficiencyPage
@@ -340,16 +291,8 @@ export default function Widget() {
 
       {/* ===== Confiabilidad ===== */}
       {tab === "confiabilidad" && (
-        <section>
-          <ReliabilityPage
-            locationId={loc === "all" ? "all" : Number(loc)}
-            thresholdLow={90}
-          />
-        </section>
+        <ReliabilityPage locationId={loc === "all" ? "all" : Number(loc)} thresholdLow={90} />
       )}
-
-      {/* (Por ahora las tabs "calidad" y "gestion" no tienen contenido específico;
-          igual mantenemos el resumen por ubicación debajo para todas las vistas) */}
 
       {/* Resumen por ubicación */}
       <section>
