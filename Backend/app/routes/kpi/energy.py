@@ -1,3 +1,4 @@
+# app/routes/kpi/energy.py
 from fastapi import APIRouter, Query
 from typing import Optional
 from psycopg.rows import dict_row
