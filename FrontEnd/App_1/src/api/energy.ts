@@ -1,43 +1,89 @@
-// Distribución mensual de HORAS ON por bandas
-import * as http from "@/lib/http";
+// src/api/energy.ts
+// API de Eficiencia Energética: distribución mensual de HORAS ON por bandas.
+
+import { scopedUrl, getApiHeaders } from "@/lib/config";
+import { authHeaders } from "@/lib/http";
 
 export type EnergyBucketH = { key: string; label: string; hours: number };
-export type EnergyRuntime = { month: string; total_hours: number; buckets: EnergyBucketH[] };
+export type EnergyRuntime = {
+  month: string;
+  total_hours: number;
+  buckets: EnergyBucketH[];
+};
 
-async function getJSONCompat<T>(url: string): Promise<T> {
-  const anyHttp = http as any;
-  if (typeof anyHttp.getJSON === "function") return anyHttp.getJSON(url);
-  if (typeof anyHttp.fetchJSON === "function") return anyHttp.fetchJSON(url);
-  const headers: Record<string, string> = { Accept: "application/json" };
-  const basic =
-    sessionStorage.getItem("BASIC_AUTH") ||
-    localStorage.getItem("BASIC_AUTH") ||
-    localStorage.getItem("Authorization");
-  if (basic) headers.Authorization = basic;
-  const res = await fetch(url, { headers, credentials: "include" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()) as T;
-}
-
-export async function fetchEnergyRuntime(params: {
-  month: string;              // "YYYY-MM"
+export type EnergyRuntimeArgs = {
+  month: string; // "YYYY-MM"
   locationId?: number;
   tz?: string;
   bandSetId?: number;
-}): Promise<EnergyRuntime | null> {
-  // En tu backend quedó bajo /energy/runtime (sin /kpi)
-  const url = new URL("/energy/runtime", window.location.origin);
-  url.searchParams.set("month", params.month);
-  if (params.locationId) url.searchParams.set("location_id", String(params.locationId));
-  if (params.tz) url.searchParams.set("tz", params.tz);
-  if (params.bandSetId) url.searchParams.set("band_set_id", String(params.bandSetId));
+  companyId?: number; // si querés forzar empresa distinta a la del scope
+};
+
+function headers(): HeadersInit {
+  // Igual que en src/api/status.ts
+  return { ...getApiHeaders(), ...authHeaders(), Accept: "application/json" };
+}
+
+export async function fetchEnergyRuntime(
+  params: EnergyRuntimeArgs
+): Promise<EnergyRuntime | null> {
+  const {
+    month,
+    locationId,
+    tz = "America/Argentina/Buenos_Aires",
+    bandSetId,
+    companyId,
+  } = params;
+
+  if (!month || month.length !== 7 || month[4] !== "-") {
+    console.warn("[energy] month inválido, esperado 'YYYY-MM':", month);
+    return null;
+  }
+
+  // Partimos de la URL ya "scoped" (agrega ?company_id=XX si corresponde)
+  const url = new URL(scopedUrl("/energy/runtime", companyId));
+
+  url.searchParams.set("month", month);
+  if (locationId != null) url.searchParams.set("location_id", String(locationId));
+  if (tz) url.searchParams.set("tz", tz);
+  if (bandSetId != null) url.searchParams.set("band_set_id", String(bandSetId));
 
   try {
-    const data = await getJSONCompat<EnergyRuntime>(url.toString());
-    if (!data || !Array.isArray(data.buckets)) return null;
-    return data;
+    const res = await fetch(url.toString(), { headers: headers() });
+    if (!res.ok) {
+      console.error(
+        "[energy] HTTP error",
+        res.status,
+        res.statusText,
+        "url:",
+        url.toString()
+      );
+      return null;
+    }
+
+    const raw = (await res.json()) as any;
+
+    // Normalizar tipos
+    const buckets: EnergyBucketH[] = Array.isArray(raw?.buckets)
+      ? raw.buckets.map((b: any) => ({
+          key: String(b.key ?? ""),
+          label: String(b.label ?? b.key ?? ""),
+          hours: typeof b.hours === "string" ? parseFloat(b.hours) : Number(b.hours ?? 0),
+        }))
+      : [];
+
+    const total =
+      typeof raw?.total_hours === "string"
+        ? parseFloat(raw.total_hours)
+        : Number(raw?.total_hours ?? buckets.reduce((a, b) => a + b.hours, 0));
+
+    return {
+      month,
+      total_hours: total,
+      buckets,
+    };
   } catch (e) {
-    console.error("[energy] runtime fetch error:", e);
+    console.error("[energy] runtime fetch exception:", e);
     return null;
   }
 }
