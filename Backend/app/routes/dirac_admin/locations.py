@@ -222,3 +222,4 @@ def delete_location(location_id: int, move_to: int | None = Query(default=None))
         cur.execute("DELETE FROM locations WHERE id=%s", (location_id,))
         conn.commit()
         return {"ok": True, "deleted": location_id}
+    
