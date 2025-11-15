@@ -1,400 +1,212 @@
 // src/components/ReliabilityPage.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "./ui/card";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceLine,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  Brush,
-} from "recharts";
-import {
-  fetchUptime30dByLocation,
-  fetchUptime30dByPump,
-  fetchActiveAlarms,
-  getTanks,
-  type UptimePumpRow,
-  type UptimeLocRow,
-  type Alarm,
-  type Tank,
-} from "@/api/kpi";
+import { fetchLocationTimeline, ReliabilityTimelineResponse } from "@/api/reliability";
 
 type Props = {
+  // En el Widget lo estás llamando como: locationId={loc === "all" ? "all" : Number(loc)}
   locationId: number | "all";
-  thresholdLow?: number; // % bajo el cual es “riesgo”
-  topN?: number;         // cuántos peores listar
+  thresholdLow?: number; // % mínimo para considerarlo "en verde" (default 90)
+  days?: number; // por si después querés cambiar la ventana
+  bucketMinutes?: number; // default 60
 };
 
-const COLORS = {
-  ok: "#10B981",
-  risk: "#F97316",
-  critical: "#EF4444",
-  textMuted: "#6B7280",
+type DayBuckets = {
+  dateKey: string;
+  label: string;
+  buckets: {
+    has_data: boolean;
+  }[];
 };
 
-type Mode = "pumps" | "tanks";
+function formatDateLabel(d: Date) {
+  return d.toLocaleDateString("es-AR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
 
 export default function ReliabilityPage({
   locationId,
   thresholdLow = 90,
-  topN = 8,
+  days = 7,
+  bucketMinutes = 60,
 }: Props) {
-  const [mode, setMode] = useState<Mode>("pumps");
-
-  const [loading, setLoading] = useState(true);
-  const [pumps, setPumps] = useState<UptimePumpRow[]>([]);
-  const [locRows, setLocRows] = useState<UptimeLocRow[]>([]);
-  const [alarms, setAlarms] = useState<Alarm[]>([]);
-  const [tanks, setTanks] = useState<Tank[]>([]);
+  const [data, setData] = useState<ReliabilityTimelineResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
+    let cancelled = false;
+
+    async function load() {
       setLoading(true);
+      setError(null);
       try {
-        const [rowsPump, rowsLoc, alarmsActive, tanksNow] = await Promise.all([
-          fetchUptime30dByPump({ location_id: locationId }),
-          fetchUptime30dByLocation({ location_id: locationId }),
-          fetchActiveAlarms({ location_id: locationId }),
-          getTanks(),
-        ]);
-        if (!mounted) return;
-        setPumps(rowsPump || []);
-        setLocRows(rowsLoc || []);
-        setAlarms((alarmsActive || []).filter(a => a.is_active));
-        const tanksFiltered =
-          locationId === "all"
-            ? (tanksNow || [])
-            : (tanksNow || []).filter(t => Number(t.location_id ?? -1) === Number(locationId));
-        setTanks(tanksFiltered);
+        const locNumber = locationId === "all" ? undefined : locationId;
+        const res = await fetchLocationTimeline({
+          locationId: locNumber,
+          days,
+          bucketMinutes,
+        });
+        if (cancelled) return;
+        setData(res);
+        if (!res) {
+          setError("No se pudieron cargar los datos de confiabilidad.");
+        }
       } catch (e) {
-        console.error("[ReliabilityPage] load error", e);
+        console.error("[ReliabilityPage] load error:", e);
+        if (!cancelled) setError("Error al cargar datos de confiabilidad.");
       } finally {
-        if (mounted) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    })();
-    return () => { mounted = false; };
-  }, [locationId]);
+    }
 
-  // -------------------- Bombas --------------------
-  const rowsPumps = useMemo(() => {
-    const pick = (r: UptimePumpRow) =>
-      typeof r.uptime_pct_30d === "number" ? r.uptime_pct_30d :
-      typeof r.uptime_pct === "number" ? r.uptime_pct : null;
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [locationId, days, bucketMinutes]);
 
-    return (pumps || [])
-      .map(r => ({
-        id: r.pump_id,
-        name: r.name || `pump #${r.pump_id}`,
-        uptime: Number(pick(r) ?? 0),
-      }))
-      .filter(r => Number.isFinite(r.uptime));
-  }, [pumps]);
+  const uptimePct = useMemo(() => {
+    if (!data || data.uptime_ratio == null) return null;
+    return data.uptime_ratio * 100;
+  }, [data]);
 
-  const rowsPumpsSortedAsc = useMemo(
-    () => [...rowsPumps].sort((a, b) => a.uptime - b.uptime),
-    [rowsPumps]
-  );
+  const healthColor = useMemo(() => {
+    if (uptimePct == null) return "text-gray-500";
+    if (uptimePct >= thresholdLow) return "text-emerald-600";
+    if (uptimePct >= thresholdLow - 10) return "text-amber-500";
+    return "text-red-500";
+  }, [uptimePct, thresholdLow]);
 
-  const kpisPumps = useMemo(() => {
-    const total = rowsPumps.length;
-    const risk = rowsPumps.filter(r => r.uptime < thresholdLow).length;
-    const ok = total - risk;
-    const avg = rowsPumps.length ? rowsPumps.reduce((a, b) => a + b.uptime, 0) / rowsPumps.length : 0;
-    const worst = rowsPumpsSortedAsc[0]?.uptime ?? 0;
-    const best = rowsPumpsSortedAsc.length ? rowsPumpsSortedAsc[rowsPumpsSortedAsc.length - 1].uptime : 0;
+  const grouped: DayBuckets[] = useMemo(() => {
+    if (!data || !data.timeline?.length) return [];
 
-    // Si el backend da uptimes por ubicación, usamos su promedio
-    const avgLoc = (locRows || [])
-      .map(r => Number(r.uptime_pct_30d ?? r.uptime_pct ?? NaN))
-      .filter(Number.isFinite);
-    const avgFromLoc = avgLoc.length ? (avgLoc.reduce((a, b) => a + b, 0) / avgLoc.length) : null;
+    const byDay = new Map<string, DayBuckets>();
 
-    return { total, ok, risk, avg: avgFromLoc ?? avg, worst, best };
-  }, [rowsPumps, rowsPumpsSortedAsc, locRows, thresholdLow]);
+    for (const b of data.timeline) {
+      const d = new Date(b.bucket_start);
+      const dateKey = d.toISOString().slice(0, 10); // yyyy-mm-dd (aprox, suficiente para agrupar)
+      const existing = byDay.get(dateKey);
+      const entry: DayBuckets =
+        existing ??
+        {
+          dateKey,
+          label: formatDateLabel(d),
+          buckets: [],
+        };
 
-  // -------------------- Tanques --------------------
-  // Aproximación: uptime = online ? 100 : 0 (mismo criterio que el mock de bombas)
-  const rowsTanks = useMemo(() => {
-    return (tanks || []).map(t => ({
-      id: t.tank_id,
-      name: t.name ?? `tank #${t.tank_id}`,
-      uptime: t.online ? 100 : 0,
-    }));
-  }, [tanks]);
+      entry.buckets.push({ has_data: b.has_data });
+      if (!existing) byDay.set(dateKey, entry);
+    }
 
-  const rowsTanksSortedAsc = useMemo(
-    () => [...rowsTanks].sort((a, b) => a.uptime - b.uptime),
-    [rowsTanks]
-  );
+    // Ordenamos por fecha ascendente
+    const rows = Array.from(byDay.values()).sort((a, b) =>
+      a.dateKey.localeCompare(b.dateKey)
+    );
 
-  const kpisTanks = useMemo(() => {
-    const total = rowsTanks.length;
-    const risk = rowsTanks.filter(r => r.uptime < thresholdLow).length;
-    const ok = total - risk;
-    const avg = rowsTanks.length ? rowsTanks.reduce((a, b) => a + b.uptime, 0) / rowsTanks.length : 0;
-    const worst = rowsTanksSortedAsc[0]?.uptime ?? 0;
-    const best = rowsTanksSortedAsc.length ? rowsTanksSortedAsc[rowsTanksSortedAsc.length - 1].uptime : 0;
-    return { total, ok, risk, avg, worst, best };
-  }, [rowsTanks, rowsTanksSortedAsc, thresholdLow]);
+    return rows;
+  }, [data]);
 
-  // -------------------- Alarmas activas (tanques) --------------------
-  const tanksAlarmStats = useMemo(() => {
-    const alarmed = (alarms || []).length; // ya vienen filtradas por is_active
-    const critical = (alarms || []).filter(a => a.severity === "critical").length;
-    return { alarmed, critical };
-  }, [alarms]);
-
-  // -------------------- Modo seleccionado --------------------
-  const noun = mode === "pumps" ? "bombas" : "tanques";
-  const rowsSortedAsc = mode === "pumps" ? rowsPumpsSortedAsc : rowsTanksSortedAsc;
-  const kpis = mode === "pumps" ? kpisPumps : kpisTanks;
-
-  const donutData = useMemo(() => ([
-    { name: "OK", value: kpis.ok, key: "ok" as const, color: COLORS.ok },
-    { name: "En riesgo", value: kpis.risk, key: "risk" as const, color: COLORS.risk },
-  ]), [kpis.ok, kpis.risk]);
-
-  const yAxisWidth = useMemo(() => {
-    const maxLen = rowsSortedAsc.reduce((m, r) => Math.max(m, (r.name ?? "").length), 0);
-    return Math.min(220, Math.max(80, Math.round(maxLen * 7.2)));
-  }, [rowsSortedAsc]);
-
-  const barColorFor = (uptime: number) => uptime < thresholdLow ? COLORS.risk : COLORS.ok;
-  const fmtPct = (n: number) => `${n.toFixed(1)}%`;
+  const bucketLabel =
+    bucketMinutes >= 60
+      ? `${bucketMinutes / 60} h`
+      : `${bucketMinutes} min`;
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      {/* Toggle Bombas / Tanques — pill segmentado */}
-      <div className="xl:col-span-2 flex items-center gap-3">
-        <span className="text-sm text-gray-500">Ver:</span>
-        <div className="inline-flex items-center gap-1 rounded-xl border bg-muted/50 p-1 shadow-sm">
-          <ModeTab active={mode === "pumps"} onClick={() => setMode("pumps")} label="Bombas" />
-          <ModeTab active={mode === "tanks"} onClick={() => setMode("tanks")} label="Tanques" />
+    <div className="space-y-4">
+      {/* Encabezado y KPI */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium text-gray-700">
+            Operación y confiabilidad
+          </div>
+          <div className="text-xs text-gray-500">
+            Continuidad de datos (bombas y tanques) en los últimos {days} días.
+          </div>
         </div>
-      </div>
 
-      {/* KPIs 2×2 (sin huecos) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <StatTile title={`Uptime promedio (30d — ${noun})`} value={fmtPct(kpis.avg)} accent="#111827" />
-        <StatTile
-          title={`${mode === "pumps" ? "Bombas" : "Tanques"} en riesgo`}
-          value={`${kpis.risk}`}
-          subtitle={`umbral < ${thresholdLow}%`}
-          accent={kpis.risk > 0 ? COLORS.risk : COLORS.ok}
-          valueColor={kpis.risk > 0 ? COLORS.risk : COLORS.ok}
-        />
-        <StatTile
-          title="Alarmas activas (tanques)"
-          value={`${tanksAlarmStats.alarmed}`}
-          subtitle={tanksAlarmStats.critical > 0 ? `críticas: ${tanksAlarmStats.critical}` : undefined}
-          accent={tanksAlarmStats.critical > 0 ? COLORS.critical : COLORS.textMuted}
-          subtitleColor={tanksAlarmStats.critical > 0 ? COLORS.critical : COLORS.textMuted}
-        />
-        <Card className="rounded-2xl min-h-[120px]">
-          <CardHeader className="pb-1">
-            <CardTitle className="text-sm text-gray-500">Mejor / Peor</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-1">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <span className="text-xs text-gray-500">Mejor</span>
-                <span className="text-2xl font-semibold font-mono tabular-nums" style={{ color: COLORS.ok }}>
-                  {fmtPct(kpis.best)}
-                </span>
+        <div className="text-right text-sm">
+          {uptimePct != null ? (
+            <>
+              <div className={`font-semibold ${healthColor}`}>
+                Confiabilidad {days} días: {uptimePct.toFixed(1)}%
               </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-gray-500">Peor</span>
-                <span className="text-2xl font-semibold font-mono tabular-nums" style={{ color: COLORS.risk }}>
-                  {fmtPct(kpis.worst)}
-                </span>
+              <div className="text-[11px] text-gray-500">
+                Resolución: {bucketLabel} por bloque
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Donut OK vs En riesgo */}
-      <Card className="rounded-2xl">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-gray-500">Estado de {noun}</CardTitle>
-        </CardHeader>
-        <CardContent className="h-64">
-          {rowsSortedAsc.length === 0 ? (
-            <div className="h-full grid place-items-center text-sm text-gray-500">Sin datos</div>
+            </>
+          ) : loading ? (
+            <div className="text-xs text-gray-400">Calculando…</div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={donutData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={58}
-                  outerRadius={92}
-                  labelLine={false}
-                  label={(d: any) => `${d.name} ${d.value}`}
-                >
-                  {donutData.map(d => <Cell key={d.key} fill={d.color} />)}
-                </Pie>
-                <Tooltip formatter={(v: any, n: any) => [String(v), n]} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+            <div className="text-xs text-gray-400">Sin datos suficientes.</div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* === MISMA FILA: gráfico (2/3) + lista (1/3) === */}
-      <div className="xl:col-span-2">
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          {/* Gráfico */}
-          <Card className="rounded-2xl xl:col-span-2">
-            <CardHeader className="pb-2 flex items-center justify-between">
-              <CardTitle className="text-sm text-gray-500">
-                Uptime por {mode === "pumps" ? "bomba" : "tanque"} (30d aprox.)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-96">
-              {rowsSortedAsc.length === 0 ? (
-                <div className="h-full grid place-items-center text-sm text-gray-500">Sin datos</div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={rowsSortedAsc}
-                    layout="vertical"
-                    margin={{ top: 10, right: 16, bottom: 10, left: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis type="number" domain={[0, 100]} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={yAxisWidth}
-                      tick={{ fontSize: 12 }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval={0}
-                    />
-                    <Tooltip formatter={(v: any) => [`${Number(v).toFixed(1)}%`, "Uptime"]} />
-                    <ReferenceLine
-                      x={thresholdLow}
-                      stroke={COLORS.risk}
-                      strokeDasharray="4 4"
-                      label={{ value: `umbral ${thresholdLow}%`, position: "top", fontSize: 10 }}
-                    />
-                    <Bar dataKey="uptime" isAnimationActive={false} barSize={14}>
-                      {rowsSortedAsc.map((r, i) => (
-                        <Cell key={i} fill={barColorFor(r.uptime)} />
-                      ))}
-                    </Bar>
-                    {rowsSortedAsc.length > 15 && (
-                      <Brush dataKey="name" height={22} stroke="currentColor" travellerWidth={8} />
-                    )}
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Lista peores */}
-          <Card className="rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-gray-500">
-                Peores {topN} {noun}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {rowsSortedAsc.length === 0 ? (
-                <div className="text-sm text-gray-500">Sin datos</div>
-              ) : (
-                <ul className="text-sm divide-y">
-                  {rowsSortedAsc.slice(0, topN).map((r) => (
-                    <li key={r.id} className="py-2 flex items-center justify-between">
-                      <span className="truncate">{r.name}</span>
-                      <span className="font-semibold" style={{ color: barColorFor(r.uptime) }}>
-                        {r.uptime.toFixed(1)}%
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
-    </div>
-  );
-}
 
-/* ---------- Subcomponentes ---------- */
-function StatTile({
-  title,
-  value,
-  subtitle,
-  accent = "#111827",
-  valueColor,
-  subtitleColor = COLORS.textMuted,
-}: {
-  title: string;
-  value: string;
-  subtitle?: string;
-  accent?: string;
-  valueColor?: string;
-  subtitleColor?: string;
-}) {
-  return (
-    <Card className="rounded-2xl min-h-[120px]">
-      <CardHeader className="pb-1 flex items-center gap-3">
-        <span className="inline-block h-6 w-1.5 rounded-full" style={{ backgroundColor: accent }} />
-        <CardTitle className="text-sm text-gray-500">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-1">
-        <div className="text-3xl font-semibold font-mono tabular-nums" style={{ color: valueColor ?? "#111827" }}>
-          {value}
+      {/* Estado de carga / error */}
+      {loading && !data && (
+        <div className="text-xs text-gray-400">Cargando timeline…</div>
+      )}
+      {error && (
+        <div className="text-xs text-red-500">{error}</div>
+      )}
+
+      {/* Leyenda */}
+      <div className="flex items-center gap-4 text-[11px] text-gray-500">
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
+          <span>Conectado (hubo datos)</span>
         </div>
-        {subtitle && (
-          <div className="text-xs mt-1" style={{ color: subtitleColor }}>
-            {subtitle}
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-sm bg-gray-200 border border-gray-300" />
+          <span>Sin datos (posible caída / sin operación)</span>
+        </div>
+      </div>
+
+      {/* Timeline semanal */}
+      <div className="border rounded-2xl bg-white p-3 space-y-2">
+        {grouped.length === 0 && !loading && (
+          <div className="text-xs text-gray-400">
+            No hay datos de operación en los últimos {days} días.
           </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
 
-function ModeTab({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={[
-        "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500/40",
-        active
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      ].join(" ")}
-    >
-      {label}
-    </button>
+        {grouped.map((day) => {
+          const cols = day.buckets.length || 1;
+          return (
+            <div
+              key={day.dateKey}
+              className="flex items-center gap-2 text-[11px]"
+            >
+              {/* Etiqueta de día */}
+              <div className="w-20 text-right text-gray-500 shrink-0">
+                {day.label}
+              </div>
+
+              {/* Barras */}
+              <div
+                className="flex-1 grid gap-[1px]"
+                style={{
+                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                }}
+              >
+                {day.buckets.map((b, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-3 rounded-sm ${
+                      b.has_data
+                        ? "bg-emerald-500"
+                        : "bg-gray-200 border border-gray-200"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

@@ -48,6 +48,7 @@ export default function Widget() {
         const data = await loadDashboard(loc);
         if (!mounted) return;
         setLive(data);
+
         const optsNow = deriveLocOptions(data?.locations, data?.byLocation);
         setLocOptionsAll((prev) => mergeLocOptions(prev, optsNow));
       } catch (e) {
@@ -56,26 +57,42 @@ export default function Widget() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [loc]);
 
   // Cargar bombas/tanques BASE
   useEffect(() => {
     let mounted = true;
+
     if (!locId) {
-      setPumpOptions([]); setTankOptions([]);
-      setSelectedPumpIds("all"); setSelectedTankIds("all");
+      setPumpOptions([]);
+      setTankOptions([]);
+      setSelectedPumpIds("all");
+      setSelectedTankIds("all");
       return;
     }
+
     (async () => {
       try {
-        const [p, t] = await Promise.all([listPumps({ locationId: locId }), listTanks({ locationId: locId })]);
+        const [p, t] = await Promise.all([
+          listPumps({ locationId: locId }),
+          listTanks({ locationId: locId }),
+        ]);
         if (!mounted) return;
-        setPumpOptions(p); setTankOptions(t);
-        setSelectedPumpIds("all"); setSelectedTankIds("all");
-      } catch (e) { console.error("[filters] list error:", e); }
+        setPumpOptions(p);
+        setTankOptions(t);
+        setSelectedPumpIds("all");
+        setSelectedTankIds("all");
+      } catch (e) {
+        console.error("[filters] list error:", e);
+      }
     })();
-    return () => { mounted = false; };
+
+    return () => {
+      mounted = false;
+    };
   }, [locId]);
 
   // Live 24h BASE
@@ -114,16 +131,29 @@ export default function Widget() {
     if (!auditEnabled) playback.setPlayEnabled(false);
   }, [auditEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // =========================
   // KPIs / tabla
-  const byLocation = live?.byLocation || [];
+  // =========================
+
+  const byLocation = useMemo(
+    () => (Array.isArray(live?.byLocation) ? live.byLocation : []),
+    [live?.byLocation]
+  );
+
   const byLocationFiltered = useMemo(() => {
-    if (loc === "all") return byLocation;
-    return (Array.isArray(byLocation) ? byLocation : []).filter((r: any) => Number(r?.location_id) === loc);
-  }, [byLocation, loc]);
+    // "all" => sin filtro, mostramos todas
+    if (locId == null) return byLocation;
+    return byLocation.filter(
+      (r: any) => Number(r?.location_id) === locId
+    );
+  }, [byLocation, locId]);
 
   const kpis = useMemo(() => {
-    let tanks = 0, pumps = 0;
-    for (const r of Array.isArray(byLocationFiltered) ? byLocationFiltered : []) {
+    let tanks = 0,
+      pumps = 0;
+    for (const r of Array.isArray(byLocationFiltered)
+      ? byLocationFiltered
+      : []) {
       tanks += Number(r?.tanks_count ?? 0);
       pumps += Number(r?.pumps_count ?? 0);
     }
@@ -149,10 +179,18 @@ export default function Widget() {
           <select
             className="border rounded-xl p-2 text-sm"
             value={loc === "all" ? "all" : String(loc)}
-            onChange={(e) => setLoc(e.target.value === "all" ? "all" : Number(e.target.value))}
+            onChange={(e) =>
+              setLoc(
+                e.target.value === "all" ? "all" : Number(e.target.value)
+              )
+            }
           >
             <option value="all">Todas</option>
-            {locOptionsAll.map((o) => (<option key={o.id} value={o.id}>{o.name}</option>))}
+            {locOptionsAll.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -189,8 +227,11 @@ export default function Widget() {
         <>
           {/* KPIs */}
           <section className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-2 gap-3">
-            <KPI label="Tanques" value={k((live?.byLocation?.[0]?.tanks_count ?? 0) || kpis.tanks)} />
-            <KPI label="Bombas" value={k(liveSync?.pumpsTotal ?? kpis.pumps)} />
+            <KPI label="Tanques" value={k(kpis.tanks)} />
+            <KPI
+              label="Bombas"
+              value={k(liveSync?.pumpsTotal ?? kpis.pumps)}
+            />
           </section>
 
           {/* Panel de Auditoría (incluye Playback adentro y selectores propios) */}
@@ -229,7 +270,11 @@ export default function Widget() {
             <TankLevelChart
               ts={playback.tankTs}
               syncId="op-sync"
-              title={playback.playEnabled ? "Nivel del tanque (Playback 24 h)" : "Nivel del tanque (24h • en vivo)"}
+              title={
+                playback.playEnabled
+                  ? "Nivel del tanque (Playback 24 h)"
+                  : "Nivel del tanque (24h • en vivo)"
+              }
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -241,7 +286,11 @@ export default function Widget() {
               pumpsTs={playback.pumpTs}
               max={totalPumpsCap}
               syncId="op-sync"
-              title={playback.playEnabled ? "Bombas ON (Playback 24 h)" : "Bombas ON (24h)"}
+              title={
+                playback.playEnabled
+                  ? "Bombas ON (Playback 24 h)"
+                  : "Bombas ON (24h)"
+              }
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -279,11 +328,11 @@ export default function Widget() {
         </>
       )}
 
-      {/* ===== Eficiencia energética (nuevo: torta por mes y franja) ===== */}
+      {/* ===== Eficiencia energética ===== */}
       {tab === "eficiencia" && (
         <section>
           <EnergyEfficiencyPage
-            locationId={loc === "all" ? undefined : Number(loc)}
+            locationId={locId}
             tz="America/Argentina/Buenos_Aires"
           />
         </section>
@@ -291,7 +340,10 @@ export default function Widget() {
 
       {/* ===== Confiabilidad ===== */}
       {tab === "confiabilidad" && (
-        <ReliabilityPage locationId={loc === "all" ? "all" : Number(loc)} thresholdLow={90} />
+        <ReliabilityPage
+          locationId={loc === "all" ? "all" : locId ?? "all"}
+          thresholdLow={90}
+        />
       )}
 
       {/* Resumen por ubicación */}
