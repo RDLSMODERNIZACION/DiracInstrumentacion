@@ -30,7 +30,10 @@ import {
   importLayout as importLayoutLS,
 } from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
-import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
+import {
+  createEdge as apiCreateEdge,
+  deleteEdge as apiDeleteEdge,
+} from "./services/edges";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -253,7 +256,12 @@ export default function InfraDiagram() {
         (n.location_id != null ? `Ubicación ${n.location_id}` : "Sin ubicación");
 
       if (!groups[key]) {
-        groups[key] = { key, name: locName, nodes: [], location_id: n.location_id ?? null };
+        groups[key] = {
+          key,
+          name: locName,
+          nodes: [],
+          location_id: n.location_id ?? null,
+        };
       }
       groups[key].nodes.push(n);
     }

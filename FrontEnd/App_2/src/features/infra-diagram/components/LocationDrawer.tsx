@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { triggerLocationAlarm } from "../services/locationOps";
 
 type Props = {
@@ -11,6 +11,15 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
   const [tab, setTab] = useState<"info" | "alarm">("info");
   const [isSending, setIsSending] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
+
+  // Reseteamos estado cuando se abre/cierra o cambia de localidad
+  useEffect(() => {
+    if (!open) {
+      setTab("info");
+      setIsSending(false);
+      setLastResult(null);
+    }
+  }, [open, location?.id]);
 
   if (!open || !location) return null;
 
@@ -30,6 +39,13 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleClose = () => {
+    setTab("info");
+    setIsSending(false);
+    setLastResult(null);
+    onClose();
   };
 
   return (
@@ -82,7 +98,7 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
           )}
         </div>
         <button
-          onClick={onClose}
+          onClick={handleClose}
           style={{
             border: "none",
             background: "transparent",
@@ -284,7 +300,7 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
             >
               Más adelante podemos agregar:
               <ul style={{ margin: 0, paddingLeft: 16 }}>
-                <li>Duración configurables de la sirena.</li>
+                <li>Duración configurable de la sirena.</li>
                 <li>Modos de luces (fija / intermitente).</li>
                 <li>Historial de activaciones por localidad.</li>
               </ul>

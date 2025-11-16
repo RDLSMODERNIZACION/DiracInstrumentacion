@@ -1,14 +1,13 @@
 // src/features/infra-diagram/services/locationOps.ts
 export async function triggerLocationAlarm(location_id: number): Promise<void> {
-  // TODO: ajustá este endpoint a tu backend real
-  const res = await fetch("/dirac/ops/location/alarm", {
+  const res = await fetch("/infraestructura/location_alarm", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({
       location_id,
-      action: "activate_lights_and_siren",
+      action: "on", // luces + sirena ON
     }),
-    credentials: "include",
   });
 
   if (!res.ok) {
