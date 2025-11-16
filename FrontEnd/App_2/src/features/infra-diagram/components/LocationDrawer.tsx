@@ -14,25 +14,29 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
 
   // Reseteamos estado cuando se abre/cierra o cambia de localidad
   useEffect(() => {
-    if (!open) {
-      setTab("info");
-      setIsSending(false);
-      setLastResult(null);
-    }
+    setTab("info");
+    setIsSending(false);
+    setLastResult(null);
   }, [open, location?.id]);
 
   if (!open || !location) return null;
 
-  const handleAlarmClick = async () => {
+  const sendAlarmCommand = async (action: "on" | "off" | "pulse") => {
     if (location.id == null) {
-      alert("Esta localidad no tiene ID asociado.");
+      setLastResult("Esta localidad no tiene ID asociado.");
       return;
     }
     try {
       setIsSending(true);
       setLastResult(null);
-      await triggerLocationAlarm(location.id);
-      setLastResult("Comando enviado correctamente.");
+      await triggerLocationAlarm(location.id, action);
+      if (action === "off") {
+        setLastResult("Comando de apagado enviado correctamente.");
+      } else if (action === "on") {
+        setLastResult("Comando de encendido enviado correctamente.");
+      } else {
+        setLastResult("Comando de alarma enviado correctamente.");
+      }
     } catch (err: any) {
       console.error(err);
       setLastResult(err?.message || "Error al enviar comando.");
@@ -175,10 +179,7 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
       >
         {tab === "info" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ color: "#475569" }}>
-              Resumen de la localidad. Más adelante podemos completar con datos
-              reales del backend (empresa, dirección, cantidad de activos, etc.).
-            </div>
+            <div style={{ color: "#475569" }}>Resumen de la localidad</div>
 
             <div
               style={{
@@ -206,7 +207,6 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
               )}
             </div>
 
-            {/* Placeholder para futuros datos */}
             <div
               style={{
                 marginTop: 4,
@@ -227,8 +227,9 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
             }}
           >
             <div style={{ color: "#475569" }}>
-              Este comando enciende las <strong>luces</strong> y la{" "}
-              <strong>sirena</strong> de esta localidad al mismo tiempo.
+              Estos comandos controlan las <strong>luces</strong> y la{" "}
+              <strong>sirena</strong> de esta localidad. Podés activarlas y
+              luego apagarlas manualmente.
             </div>
 
             <div
@@ -243,13 +244,14 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
             >
               <div style={{ fontWeight: 600, marginBottom: 4 }}>Aviso</div>
               <div>
-                Usar solo en situaciones de prueba controlada o emergencia
-                real. El comando impacta toda la localidad.
+                Usar solo en situaciones de prueba controlada o emergencia real.
+                El comando impacta toda la localidad.
               </div>
             </div>
 
+            {/* Botón de activar (pulse/on) */}
             <button
-              onClick={handleAlarmClick}
+              onClick={() => sendAlarmCommand("pulse")}
               disabled={isSending}
               style={{
                 padding: "12px 16px",
@@ -267,6 +269,24 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
               {isSending
                 ? "Enviando comando…"
                 : "Activar LUCES + SIRENA ahora"}
+            </button>
+
+            {/* Botón de apagar */}
+            <button
+              onClick={() => sendAlarmCommand("off")}
+              disabled={isSending}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 999,
+                border: "1px solid #cbd5f5",
+                cursor: isSending ? "default" : "pointer",
+                background: "#e5e7eb",
+                color: "#111827",
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+            >
+              Apagar LUCES + SIRENA
             </button>
 
             {lastResult && (
@@ -288,23 +308,6 @@ export default function LocationDrawer({ open, onClose, location }: Props) {
                 {lastResult}
               </div>
             )}
-
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 11,
-                color: "#94a3b8",
-                borderTop: "1px dashed #e2e8f0",
-                paddingTop: 8,
-              }}
-            >
-              Más adelante podemos agregar:
-              <ul style={{ margin: 0, paddingLeft: 16 }}>
-                <li>Duración configurable de la sirena.</li>
-                <li>Modos de luces (fija / intermitente).</li>
-                <li>Historial de activaciones por localidad.</li>
-              </ul>
-            </div>
           </div>
         )}
       </div>

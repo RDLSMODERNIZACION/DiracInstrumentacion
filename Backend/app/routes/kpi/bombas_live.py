@@ -2,7 +2,7 @@
 import os
 from fastapi import APIRouter, Query, HTTPException
 from psycopg.rows import dict_row
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
 from app.db import get_conn
 
@@ -10,40 +10,57 @@ router = APIRouter(prefix="/kpi/bombas", tags=["kpi-bombas"])
 
 PUMPS_TABLE     = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
-# ← apuntá aquí a tu vista limpia o MV limpia:
-#   - vista: kpi.v_pump_hb_clean  (pump_id, hb_ts timestamptz, relay boolean)
-#   - MV   : kpi.mv_pump_hb_clean (mismo esquema, con índices)
 HB_SOURCE       = (os.getenv("PUMP_HB_SOURCE") or "kpi.v_pump_hb_clean").strip()
 
 def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
-    if date_to is None:   date_to = datetime.now(timezone.utc)
-    if date_from is None: date_from = date_to - timedelta(hours=24)
-    if date_to.tzinfo is None:   date_to   = date_to.replace(tzinfo=timezone.utc)
-    else:                        date_to   = date_to.astimezone(timezone.utc)
-    if date_from.tzinfo is None: date_from = date_from.replace(tzinfo=timezone.utc)
-    else:                        date_from = date_from.astimezone(timezone.utc)
-    date_to   = date_to.replace(second=0, microsecond=0)
+    if date_to is None:
+        date_to = datetime.now(timezone.utc)
+    if date_from is None:
+        date_from = date_to - timedelta(hours=24)
+
+    if date_to.tzinfo is None:
+        date_to = date_to.replace(tzinfo=timezone.utc)
+    else:
+        date_to = date_to.astimezone(timezone.utc)
+
+    if date_from.tzinfo is None:
+        date_from = date_from.replace(tzinfo=timezone.utc)
+    else:
+        date_from = date_from.astimezone(timezone.utc)
+
+    date_to = date_to.replace(second=0, microsecond=0)
     date_from = date_from.replace(second=0, microsecond=0)
+
     if date_from >= date_to:
         raise HTTPException(status_code=400, detail="'from' debe ser menor que 'to'")
+
     return date_from, date_to
 
 def _bucket_expr_sql(bucket: str) -> str:
-    if bucket=="1min":  return "m"
-    if bucket=="5min":  return "date_trunc('hour', m) + ((extract(minute from m)::int/5 )*5 )*interval '1 min'"
-    if bucket=="15min": return "date_trunc('hour', m) + ((extract(minute from m)::int/15)*15)*interval '1 min'"
-    if bucket=="1h":    return "date_trunc('hour', m)"
-    if bucket=="1d":    return "date_trunc('day', m)"
+    if bucket == "1min":
+        return "m"
+    if bucket == "5min":
+        return "date_trunc('hour', m) + ((extract(minute from m)::int/5 )*5 )*interval '1 min'"
+    if bucket == "15min":
+        return "date_trunc('hour', m) + ((extract(minute from m)::int/15)*15)*interval '1 min'"
+    if bucket == "1h":
+        return "date_trunc('hour', m)"
+    if bucket == "1d":
+        return "date_trunc('day', m)"
     raise HTTPException(status_code=400, detail="bucket inválido")
 
 def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
-    if not csv: return None
+    if not csv:
+        return None
     out: List[int] = []
     for t in csv.split(","):
         t = t.strip()
-        if not t: continue
-        try: out.append(int(t))
-        except: pass
+        if not t:
+            continue
+        try:
+            out.append(int(t))
+        except:
+            pass
     return out or None
 
 @router.get("/live")
@@ -60,8 +77,8 @@ def pumps_live(
     df, dt = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
-    # 1) scope de bombas
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # 1) scope de bombas por empresa / localidad / ids
         if ids:
             scope_ids_all = ids
         else:
@@ -83,10 +100,15 @@ def pumps_live(
 
         pumps_total_all = len(scope_ids_all)
         if not pumps_total_all:
-            return {"timestamps": [], "is_on": [], "pumps_total": 0, "pumps_connected": 0,
-                    "window": {"from": df.isoformat(), "to": dt.isoformat()}}
+            return {
+                "timestamps": [],
+                "is_on": [],
+                "pumps_total": 0,
+                "pumps_connected": 0,
+                "window": {"from": df.isoformat(), "to": dt.isoformat()},
+            }
 
-        # 2) bombas conectadas en ventana
+        # 2) bombas conectadas (tienen HB en ventana)
         cur.execute(
             f"""
             SELECT DISTINCT h.pump_id
@@ -97,14 +119,35 @@ def pumps_live(
             {"ids": scope_ids_all, "df": df, "dt": dt},
         )
         connected_set = {int(r["pump_id"]) for r in cur.fetchall()}
-        scope_ids = scope_ids_all if not connected_only else [pid for pid in scope_ids_all if pid in connected_set]
-        if not scope_ids:
-            return {"timestamps": [], "is_on": [], "pumps_total": pumps_total_all, "pumps_connected": 0,
-                    "window": {"from": df.isoformat(), "to": dt.isoformat()}}
 
-        # 3) timeline (baseline + edges) desde vista/MV limpia
-        #    - baseline: último relay antes de df
-        #    - edges: transiciones (prev != relay) en ventana extendida
+        # 3) bombas ACTIVAS = conectadas + con RUN (relay = true en la ventana)
+        cur.execute(
+            f"""
+            SELECT DISTINCT h.pump_id
+            FROM {HB_SOURCE} h
+            WHERE h.pump_id = ANY(%(ids)s::int[])
+              AND h.hb_ts >= %(df)s AND h.hb_ts <= %(dt)s
+              AND h.relay = TRUE
+            """,
+            {"ids": scope_ids_all, "df": df, "dt": dt},
+        )
+        active_set = {int(r["pump_id"]) for r in cur.fetchall()}
+
+        # Para la serie de tiempo usamos solo las bombas activas si connected_only = True,
+        # caso contrario todo el scope (pero igual el "ON" sale de relay=true).
+        scope_ids = scope_ids_all if not connected_only else [pid for pid in scope_ids_all if pid in active_set]
+
+        if not scope_ids:
+            return {
+                "timestamps": [],
+                "is_on": [],
+                "pumps_total": pumps_total_all,
+                # ahora pumps_connected = bombas activas (RUN + conectadas)
+                "pumps_connected": len(active_set),
+                "window": {"from": df.isoformat(), "to": dt.isoformat()},
+            }
+
+        # 4) timeline (baseline + edges) desde vista/MV limpia
         cur.execute(
             f"""
             WITH bounds AS (
@@ -188,6 +231,6 @@ def pumps_live(
         "timestamps": [int(r["ts_ms"]) for r in rows],
         "is_on":      [None if r["val"] is None else float(r["val"]) for r in rows],
         "pumps_total": pumps_total_all,
-        "pumps_connected": len(connected_set),
+        "pumps_connected": len(active_set),  # RUN + conectadas en la ventana
         "window": {"from": df.isoformat(), "to": dt.isoformat()},
     }
