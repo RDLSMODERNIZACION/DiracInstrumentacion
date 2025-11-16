@@ -43,6 +43,25 @@ type LiveOps = {
   window?: { start: number; end: number }; // epoch ms (alineado a minuto)
 };
 
+// =======================
+// Debug helpers
+// =======================
+
+function hasWindow() {
+  return typeof window !== "undefined";
+}
+
+const LIVEOPS_DEBUG =
+  String(import.meta.env?.VITE_DEBUG_LIVEOPS ?? "").trim() === "1" ||
+  (hasWindow() && window.localStorage?.getItem("DEBUG_LIVEOPS") === "1");
+
+function dlog(...args: any[]) {
+  if (LIVEOPS_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.debug("[useLiveOps]", ...args);
+  }
+}
+
 // ===== utilitarios de tiempo =====
 function floorToMinute(ms: number) {
   const d = new Date(ms);
@@ -50,7 +69,7 @@ function floorToMinute(ms: number) {
   return d.getTime();
 }
 
-/** Elige bucket por defecto según la ventana (sin fallback de 1d->1h: bombas ya soporta 1d) */
+/** Elige bucket por defecto según la ventana */
 function pickAutoBucket(hours: number): NonNullable<Args["bucket"]> {
   if (hours >= 24 * 30) return "1d";   // 30 días
   if (hours > 48)        return "1h";  // 7 días típico
@@ -83,6 +102,11 @@ export function useLiveOps({
   const seqRef = useRef(0);
 
   useEffect(() => {
+    if (!hasWindow()) {
+      dlog("no window detected (SSR/test), skipping live polling");
+      return;
+    }
+
     let alive = true;
     const seq = ++seqRef.current;
 
@@ -95,7 +119,7 @@ export function useLiveOps({
         const common = {
           from: new Date(start).toISOString(),
           to: new Date(end).toISOString(),
-          company_id: companyId,
+          companyId, // 👈 IMPORTANTE: camelCase para que graphs.ts lo mapee a ?company_id=
         };
 
         const pumpsArgs: PumpsLiveArgs = {
@@ -118,24 +142,47 @@ export function useLiveOps({
           connectedOnly,
         };
 
+        dlog("poll start", {
+          seq,
+          window: { start, end },
+          bucket: effBucket,
+          pumpsArgs,
+          tanksArgs,
+        });
+
         const [pRes, tRes] = await Promise.all([
           fetchPumpsLive(pumpsArgs),
           fetchTanksLive(tanksArgs),
         ]);
 
-        if (!alive || seq !== seqRef.current) return;
+        if (!alive || seq !== seqRef.current) {
+          dlog("discarding response (stale seq)", { seq, currentSeq: seqRef.current });
+          return;
+        }
+
+        dlog("poll success", {
+          seq,
+          pumpsPoints: pRes?.timestamps?.length ?? 0,
+          tanksPoints: tRes?.timestamps?.length ?? 0,
+          pumpsTotal: pRes?.pumps_total,
+          tanksTotal: tRes?.tanks_total,
+        });
+
         setP(pRes);
         setT(tRes);
       } catch (err) {
         console.error("[useLiveOps] fetch error:", err);
+        dlog("poll error", { error: String(err) });
       }
     };
 
     load();
     const h = window.setInterval(load, pollMs);
+
     return () => {
       alive = false;
       window.clearInterval(h);
+      dlog("cleanup interval", { seq });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [

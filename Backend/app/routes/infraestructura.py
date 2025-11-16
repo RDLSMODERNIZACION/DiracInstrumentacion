@@ -35,15 +35,18 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at
                     FROM public.layout_edges
                     ORDER BY updated_at DESC
-                """)
+                    """
+                )
                 return cur.fetchall()
 
             # Scoped por empresa: limitamos por node_id de los nodos de esa empresa
-            cur.execute("""
+            cur.execute(
+                """
                 WITH nodes AS (
                   SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id
                   FROM public.tanks t
@@ -74,7 +77,9 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
                 ORDER BY e.updated_at DESC
-            """, (company_id, company_id, company_id, company_id))
+                """,
+                (company_id, company_id, company_id, company_id),
+            )
             return cur.fetchall()
     except HTTPException:
         raise
@@ -95,24 +100,29 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
         * level_pct = último tank_ingest
         * online (tanques) = último ingest ≤ 60s
         * alarma (tanques) = eval de level_pct contra tank_configs:
-            - ≤ low_low_pct -> 'critico'
-            - ≤ low_pct     -> 'alerta'
+            - ≤ low_low_pct   -> 'critico'
+            - ≤ low_pct       -> 'alerta'
             - ≥ high_high_pct -> 'critico'
             - ≥ high_pct      -> 'alerta'
           (si faltan umbrales o nivel => NULL)
+        * Además devuelve location_id / location_name para agrupar por ubicación en el front.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
-                cur.execute("""
+                # Ojo: esta vista no incluye location_id/name.
+                cur.execute(
+                    """
                     SELECT node_id, id, type, x, y, updated_at, online, state, level_pct, alarma
                     FROM public.v_layout_combined
                     ORDER BY type, id
-                """)
+                    """
+                )
                 return cur.fetchall()
 
-            # Scoped por empresa con cálculo de online/alarma
-            cur.execute("""
+            # Scoped por empresa con cálculo de online/alarma y ubicación
+            cur.execute(
+                """
                 WITH t AS (
                   SELECT
                     COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
@@ -138,7 +148,9 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       WHEN tc.high_high_pct IS NOT NULL AND lvl.level_pct >= tc.high_high_pct THEN 'critico'
                       WHEN tc.high_pct      IS NOT NULL AND lvl.level_pct >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
-                    END::text                           AS alarma
+                    END::text                           AS alarma,
+                    l.id::bigint                        AS location_id,
+                    l.name::text                        AS location_name
                   FROM public.tanks t
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
@@ -161,7 +173,9 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     s.online                             AS online,
                     s.state                              AS state,
                     NULL::numeric                        AS level_pct,
-                    NULL::text                           AS alarma
+                    NULL::text                           AS alarma,
+                    l.id::bigint                         AS location_id,
+                    l.name::text                         AS location_name
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
@@ -177,7 +191,9 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::boolean                         AS online,
                     NULL::text                            AS state,
                     NULL::numeric                         AS level_pct,
-                    NULL::text                            AS alarma
+                    NULL::text                            AS alarma,
+                    l.id::bigint                          AS location_id,
+                    l.name::text                          AS location_name
                   FROM public.valves v
                   JOIN public.locations l ON l.id = v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
@@ -192,21 +208,25 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::boolean                            AS online,
                     NULL::text                               AS state,
                     NULL::numeric                            AS level_pct,
-                    NULL::text                               AS alarma
+                    NULL::text                               AS alarma,
+                    l.id::bigint                             AS location_id,
+                    l.name::text                             AS location_name
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   WHERE l.company_id = %s
                 )
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM m
                 ORDER BY type,id
-            """, (company_id, company_id, company_id, company_id))
+                """,
+                (company_id, company_id, company_id, company_id),
+            )
             return cur.fetchall()
     except HTTPException:
         raise
@@ -286,31 +306,38 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
     NO devolvemos 404 por listas vacías: [] (200 OK).
     También aplica el cálculo de online/alarma de tanques (umbral 60s).
+    Ahora, en modo scoped, también incluye location_id / location_name en cada nodo.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
-                cur.execute("""
+                # Vista global (sin location_id/name)
+                cur.execute(
+                    """
                     SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
                     FROM public.v_layout_combined ORDER BY type,id
-                """)
+                    """
+                )
                 nodes = cur.fetchall()
 
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT edge_id,src_node_id,dst_node_id,relacion,prioridad,updated_at
                     FROM public.layout_edges ORDER BY updated_at DESC
-                """)
+                    """
+                )
                 edges = cur.fetchall()
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Scoped: nodos (con online/alarma tanque = 60s)
-            cur.execute("""
+            # Scoped: nodos (con online/alarma tanque = 60s) + ubicación
+            cur.execute(
+                """
                 WITH t AS (
                   SELECT
                     COALESCE(lt.node_id,'tank:'||t.id) AS node_id,
-                    t.id::bigint AS id,
-                    'tank'::text AS type,
+                    t.id::bigint                        AS id,
+                    'tank'::text                        AS type,
                     lt.x, lt.y, lt.updated_at,
                     COALESCE((
                       SELECT (now() - i.created_at) <= interval '60 seconds'
@@ -318,13 +345,13 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       WHERE i.tank_id = t.id
                       ORDER BY i.created_at DESC
                       LIMIT 1
-                    ), false) AS online,
-                    NULL::text AS state,
+                    ), false)                           AS online,
+                    NULL::text                          AS state,
                     (SELECT i.level_pct
                      FROM public.tank_ingest i
                      WHERE i.tank_id=t.id
                      ORDER BY i.created_at DESC
-                     LIMIT 1)::numeric AS level_pct,
+                     LIMIT 1)::numeric                  AS level_pct,
                     CASE
                       WHEN (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) IS NULL
                         THEN NULL
@@ -333,7 +360,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       WHEN tc.high_high_pct IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) >= tc.high_high_pct THEN 'critico'
                       WHEN tc.high_pct      IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
-                    END::text AS alarma
+                    END::text                           AS alarma,
+                    l.id::bigint                        AS location_id,
+                    l.name::text                        AS location_name
                   FROM public.tanks t
                   JOIN public.locations l ON l.id=t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
@@ -341,8 +370,17 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   WHERE l.company_id=%s
                 ),
                 p AS (
-                  SELECT COALESCE(lp.node_id,'pump:'||p.id), p.id::bigint, 'pump'::text,
-                         lp.x, lp.y, lp.updated_at, s.online, s.state, NULL::numeric, NULL::text
+                  SELECT
+                    COALESCE(lp.node_id,'pump:'||p.id)  AS node_id,
+                    p.id::bigint                        AS id,
+                    'pump'::text                        AS type,
+                    lp.x, lp.y, lp.updated_at,
+                    s.online                            AS online,
+                    s.state                             AS state,
+                    NULL::numeric                       AS level_pct,
+                    NULL::text                          AS alarma,
+                    l.id::bigint                        AS location_id,
+                    l.name::text                        AS location_name
                   FROM public.pumps p
                   JOIN public.locations l ON l.id=p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
@@ -350,35 +388,59 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   WHERE l.company_id=%s
                 ),
                 v AS (
-                  SELECT COALESCE(lv.node_id,'valve:'||v.id), v.id::bigint, 'valve'::text,
-                         lv.x, lv.y, lv.updated_at, NULL::boolean, NULL::text, NULL::numeric, NULL::text
+                  SELECT
+                    COALESCE(lv.node_id,'valve:'||v.id) AS node_id,
+                    v.id::bigint                        AS id,
+                    'valve'::text                       AS type,
+                    lv.x, lv.y, lv.updated_at,
+                    NULL::boolean                       AS online,
+                    NULL::text                          AS state,
+                    NULL::numeric                       AS level_pct,
+                    NULL::text                          AS alarma,
+                    l.id::bigint                        AS location_id,
+                    l.name::text                        AS location_name
                   FROM public.valves v
                   JOIN public.locations l ON l.id=v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
                   WHERE l.company_id=%s
                 ),
                 m AS (
-                  SELECT COALESCE(lm.node_id,'manifold:'||m.id), m.id::bigint, 'manifold'::text,
-                         lm.x, lm.y, lm.updated_at, NULL::boolean, NULL::text, NULL::numeric, NULL::text
+                  SELECT
+                    COALESCE(lm.node_id,'manifold:'||m.id) AS node_id,
+                    m.id::bigint                            AS id,
+                    'manifold'::text                        AS type,
+                    lm.x, lm.y, lm.updated_at,
+                    NULL::boolean                           AS online,
+                    NULL::text                              AS state,
+                    NULL::numeric                           AS level_pct,
+                    NULL::text                              AS alarma,
+                    l.id::bigint                            AS location_id,
+                    l.name::text                            AS location_name
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id=m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id=%s
                 ),
                 nodes AS (
-                  SELECT * FROM t
-                  UNION ALL SELECT * FROM p
-                  UNION ALL SELECT * FROM v
-                  UNION ALL SELECT * FROM m
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM t
+                  UNION ALL
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM p
+                  UNION ALL
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM v
+                  UNION ALL
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM m
                 )
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name
                 FROM nodes
                 ORDER BY type,id
-            """, (company_id, company_id, company_id, company_id))
+                """,
+                (company_id, company_id, company_id, company_id),
+            )
             nodes = cur.fetchall()
 
             # Scoped: edges
-            cur.execute("""
+            cur.execute(
+                """
                 WITH nodes AS (
                   SELECT COALESCE(lt.node_id,'tank:'||t.id) AS node_id
                   FROM public.tanks t
@@ -409,7 +471,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
                 ORDER BY e.updated_at DESC
-            """, (company_id, company_id, company_id, company_id))
+                """,
+                (company_id, company_id, company_id, company_id),
+            )
             edges = cur.fetchall()
 
             return {"nodes": nodes, "edges": edges}
