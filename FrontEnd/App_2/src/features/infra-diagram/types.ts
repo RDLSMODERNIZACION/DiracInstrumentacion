@@ -10,6 +10,10 @@ export type CombinedNodeDTO = {
   state?: string | null;
   level_pct?: number | string | null;
   alarma?: string | null;
+
+  // NUEVO: info de ubicación que viene del backend
+  location_id?: number | null;
+  location_name?: string | null;
 };
 
 export type EdgeDTO = {
@@ -35,6 +39,10 @@ export type UINodeBase = {
   x: number;
   y: number;
   type: "pump" | "tank" | "manifold" | "valve";
+
+  // NUEVO: info de ubicación para agrupar y dibujar fondos
+  location_id?: number | null;
+  location_name?: string | null;
 } & BaseExtras;
 
 export type TankNode = UINodeBase & { type: "tank" };

@@ -13,7 +13,10 @@ from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
 from app.routes.arduino_controler import router as arduino_router
-from app.routes.infraestructura import router as infraestructura_router
+from app.routes.infraestructura import router as infraestructura_router  # layout + alarmas
+
+# ===== PLC (consumo de comandos) =====
+from app.routes.plc import router as plc_router
 
 # ===== KPI (agregador) =====
 #   /kpi/* (dashboard + tanques)  y  /kpi/bombas/*  (bombas_live)
@@ -35,8 +38,6 @@ from app.routes.dirac_admin.tanks import router as admin_tanks_router
 from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
-
-from app.routes.infra_edit import router as infra_edit_router
 
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -99,12 +100,17 @@ def health_db():
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
-# ===== Rutas (operación) =====
+# ===== Rutas (operación base) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
+
+# Infraestructura (diagramas + alarmas por localidad)
 app.include_router(infraestructura_router)
+
+# Endpoints para PLC / Node-RED (lectura de comandos, ack, etc.)
+app.include_router(plc_router)
 
 # ===== KPI (agregador: dashboard + tanques + bombas_live) =====
 app.include_router(kpi_router)
@@ -117,7 +123,8 @@ app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
 # ===== Administración (CRUD abierto) =====
-# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations, /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves, /dirac/admin/manifolds
+# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations,
+# /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves, /dirac/admin/manifolds
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
@@ -125,9 +132,6 @@ app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
-
-# ===== Otros =====
-app.include_router(infra_edit_router)   # comparte el prefix "/infraestructura"
 
 # ===== Cierre ordenado del pool de DB =====
 @app.on_event("shutdown")

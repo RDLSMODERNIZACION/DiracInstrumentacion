@@ -24,7 +24,11 @@ import {
   ValveNode,
 } from "./types";
 
-import { loadLayoutFromStorage, saveLayoutToStorage, importLayout as importLayoutLS } from "@/layout/layoutIO";
+import {
+  loadLayoutFromStorage,
+  saveLayoutToStorage,
+  importLayout as importLayoutLS,
+} from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 
@@ -35,6 +39,14 @@ import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
 import EditableEdge from "./components/edges/EditableEdge";
 import OpsDrawer from "./components/OpsDrawer";
+import LocationDrawer from "./components/LocationDrawer";
+
+type LocationGroup = {
+  key: string;
+  name: string;
+  bbox: { minx: number; miny: number; w: number; h: number };
+  location_id: number | null;
+};
 
 export default function InfraDiagram() {
   const [nodes, setNodes] = useState<UINode[]>([]);
@@ -82,14 +94,24 @@ export default function InfraDiagram() {
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Ops drawer
+  // Ops drawer (por nodo)
   const [opsOpen, setOpsOpen] = useState(false);
   const [opsNode, setOpsNode] = useState<UINode | null>(null);
+
+  // Drawer de localidad
+  const [locationDrawerOpen, setLocationDrawerOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<{
+    id: number | null;
+    name: string;
+  } | null>(null);
 
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
-  const showTip = (e: React.MouseEvent, content: { title: string; lines: string[] }) => {
+  const showTip = (
+    e: React.MouseEvent,
+    content: { title: string; lines: string[] }
+  ) => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTip({
@@ -136,6 +158,8 @@ export default function InfraDiagram() {
       state: n.state ?? null,
       level_pct: toNumber(n.level_pct),
       alarma: n.alarma ?? null,
+      location_id: n.location_id ?? null,
+      location_name: n.location_name ?? null,
     })) as UINode[];
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
@@ -169,15 +193,21 @@ export default function InfraDiagram() {
     }));
 
     const saved = loadLayoutFromStorage();
-    const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-    const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
+    const cleaned = (saved ?? []).filter(
+      (p) => Number.isFinite(p.x) && Number.isFinite(p.y)
+    );
+    const nodesWithSaved = cleaned.length
+      ? (importLayoutLS(uiNodes, cleaned) as UINode[])
+      : uiNodes;
 
     setNodes(nodesWithSaved);
     setEdges(uiEdges);
 
     log("UI NODES", {
       total: nodesWithSaved.length,
-      byType: summarizeTypes(nodesWithSaved.map((n) => ({ type: n.type }) as any)),
+      byType: summarizeTypes(
+        nodesWithSaved.map((n) => ({ type: n.type }) as any)
+      ),
     });
     log("UI EDGES", { total: uiEdges.length });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,6 +229,46 @@ export default function InfraDiagram() {
     const bb = computeBBox(nodes, pad);
     setVb(bb);
     setViewBoxStr(`${bb.minx} ${bb.miny} ${bb.w} ${bb.h}`);
+  }, [nodes]);
+
+  // ===== Fondos por ubicación =====
+  const locationGroups: LocationGroup[] = useMemo(() => {
+    if (!nodes.length) return [];
+
+    const groups: Record<
+      string,
+      { key: string; name: string; nodes: UINode[]; location_id: number | null }
+    > = {};
+
+    for (const n of nodes) {
+      const key =
+        n.location_id != null
+          ? String(n.location_id)
+          : n.location_name
+          ? `name:${n.location_name}`
+          : "unknown";
+
+      const locName =
+        n.location_name ||
+        (n.location_id != null ? `Ubicación ${n.location_id}` : "Sin ubicación");
+
+      if (!groups[key]) {
+        groups[key] = { key, name: locName, nodes: [], location_id: n.location_id ?? null };
+      }
+      groups[key].nodes.push(n);
+    }
+
+    return Object.values(groups)
+      .filter((g) => g.nodes.length > 0)
+      .map((g) => {
+        const bbox = computeBBox(g.nodes, 80); // padding para la caja de esa ubicación
+        return {
+          key: g.key,
+          name: g.name,
+          bbox,
+          location_id: g.location_id,
+        };
+      });
   }, [nodes]);
 
   const getPos = (id: string) => {
@@ -256,8 +326,10 @@ export default function InfraDiagram() {
   function clientToSvgPoint(e: React.MouseEvent | React.PointerEvent) {
     if (!svgRef.current) return null;
     const pt = svgRef.current.createSVGPoint();
-    pt.x = (e as any).clientX; pt.y = (e as any).clientY;
-    const m = svgRef.current.getScreenCTM(); if (!m) return null;
+    pt.x = (e as any).clientX;
+    pt.y = (e as any).clientY;
+    const m = svgRef.current.getScreenCTM();
+    if (!m) return null;
     const p = pt.matrixTransform(m.inverse());
     return { x: p.x, y: p.y };
   }
@@ -268,8 +340,21 @@ export default function InfraDiagram() {
     if (src === dst || edgeExists(src, dst)) return;
     try {
       const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
-      setEdges((prev) => [{ id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad }, ...prev]);
-      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
+      setEdges((prev) => [
+        {
+          id: created.edge_id,
+          a: created.src_node_id,
+          b: created.dst_node_id,
+          relacion: created.relacion,
+          prioridad: created.prioridad,
+        },
+        ...prev,
+      ]);
+      log("EDGE CREATED", {
+        id: created.edge_id,
+        src: created.src_node_id,
+        dst: created.dst_node_id,
+      });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
@@ -283,7 +368,13 @@ export default function InfraDiagram() {
         setConnectFrom(null);
         setSelectedEdgeId(null);
         setOpsOpen(false);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedEdgeId != null && editMode) {
+        setLocationDrawerOpen(false);
+        setSelectedLocation(null);
+      } else if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedEdgeId != null &&
+        editMode
+      ) {
         e.preventDefault();
         handleDeleteEdge(selectedEdgeId);
       }
@@ -316,7 +407,9 @@ export default function InfraDiagram() {
     const newTanks = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const byId: Record<string, UINode> = {};
-    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach((n) => (byId[n.id] = n));
+    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach(
+      (n) => (byId[n.id] = n)
+    );
     const next = nodes.map((n) => byId[n.id] ?? n);
     setNodes(next);
 
@@ -336,33 +429,78 @@ export default function InfraDiagram() {
     return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ey} L ${ex} ${ey}`;
   }
 
-  // abrir operación si no estamos conectando/edición y el nodo está online
+  // abrir operación por nodo
   function maybeOpenOps(n: UINode) {
-    if (editMode || connectMode) return;        // operamos solo fuera de edición/conexión
-    if (n.online !== true) return;              // solo online
+    if (editMode || connectMode) return;
+    if (n.online !== true) return;
     setOpsNode(n);
     setOpsOpen(true);
+  }
+
+  // abrir drawer de localidad al hacer click en el fondo
+  function handleLocationClick(g: LocationGroup) {
+    setSelectedLocation({ id: g.location_id, name: g.name });
+    setLocationDrawerOpen(true);
   }
 
   return (
     <div style={{ padding: 0 }}>
       {/* barra superior */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#64748b", padding: "6px 8px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          fontSize: 12,
+          color: "#64748b",
+          padding: "6px 8px",
+        }}
+      >
         {error ? (
-          <span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>
+          <span style={{ color: "#b91c1c" }}>
+            Error: {(error as Error)?.message || "Error desconocido"}
+          </span>
         ) : isFetching ? (
           "Actualizando…"
         ) : (
           "Sincronizado"
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={toggleEdit} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: editMode ? "#0ea5e9" : "#ffffff", color: editMode ? "#ffffff" : "#0f172a" }}>
+          <button
+            onClick={toggleEdit}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: editMode ? "#0ea5e9" : "#ffffff",
+              color: editMode ? "#ffffff" : "#0f172a",
+            }}
+          >
             {editMode ? "Salir edición" : "Editar"}
           </button>
-          <button onClick={applyAutoLayout} disabled={!editMode} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#ffffff" }}>
+          <button
+            onClick={applyAutoLayout}
+            disabled={!editMode}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+            }}
+          >
             Auto-ordenar
           </button>
-          <button onClick={() => setConnectMode((v) => !v)} disabled={!editMode} style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #cbd5e1", background: connectMode ? "#0ea5e9" : "#ffffff", color: connectMode ? "#ffffff" : "#0f172a" }}>
+          <button
+            onClick={() => setConnectMode((v) => !v)}
+            disabled={!editMode}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: connectMode ? "#0ea5e9" : "#ffffff",
+              color: connectMode ? "#ffffff" : "#0f172a",
+            }}
+          >
             {connectMode ? "Conectar: ON" : "Conectar"}
           </button>
         </div>
@@ -372,9 +510,20 @@ export default function InfraDiagram() {
       {!error && (
         <div
           ref={wrapRef}
-          style={{ position: "relative", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}
+          style={{
+            position: "relative",
+            border: "1px solid #e2e8f0",
+            borderRadius: 12,
+            overflow: "hidden",
+            background: "#ffffff",
+          }}
         >
-          <TransformWrapper initialScale={1} minScale={0.6} maxScale={2.5} wheel={{ step: 0.1 }}>
+          <TransformWrapper
+            initialScale={1}
+            minScale={0.6}
+            maxScale={2.5}
+            wheel={{ step: 0.1 }}
+          >
             <TransformComponent wrapperStyle={{ width: "100%" }}>
               <svg
                 ref={svgRef}
@@ -392,19 +541,98 @@ export default function InfraDiagram() {
                 }}
               >
                 <defs>
-                  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+                  <pattern
+                    id="grid"
+                    width="24"
+                    height="24"
+                    patternUnits="userSpaceOnUse"
+                  >
+                    <path
+                      d="M 24 0 L 0 0 0 24"
+                      fill="none"
+                      stroke="#e2e8f0"
+                      strokeWidth="1"
+                    />
                   </pattern>
-                  <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="coloredBlur" /><feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-                  <linearGradient id="lgTank" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5f7fa" /><stop offset="100%" stopColor="#e9edf2" /></linearGradient>
-                  <linearGradient id="lgSteel" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#f8fafc" /><stop offset="50%" stopColor="#e2e8f0" /><stop offset="100%" stopColor="#f8fafc" /></linearGradient>
-                  <linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" /><stop offset="100%" stopColor="#ffffff" stopOpacity="0" /></linearGradient>
-                  <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#cfe6ff" /><stop offset="100%" stopColor="#7bb3f8" /></linearGradient>
+                  <filter id="glow">
+                    <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+                    <feMerge>
+                      <feMergeNode in="coloredBlur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                  <linearGradient id="lgTank" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f5f7fa" />
+                    <stop offset="100%" stopColor="#e9edf2" />
+                  </linearGradient>
+                  <linearGradient id="lgSteel" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#f8fafc" />
+                    <stop offset="50%" stopColor="#e2e8f0" />
+                    <stop offset="100%" stopColor="#f8fafc" />
+                  </linearGradient>
+                  <linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+                    <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                  </linearGradient>
+                  <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#cfe6ff" />
+                    <stop offset="100%" stopColor="#7bb3f8" />
+                  </linearGradient>
                 </defs>
 
                 {/* Fondo dinámico = mismo rectángulo que el viewBox */}
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
+                <rect
+                  x={vb.minx}
+                  y={vb.miny}
+                  width={vb.w}
+                  height={vb.h}
+                  fill="#ffffff"
+                />
+                <rect
+                  x={vb.minx}
+                  y={vb.miny}
+                  width={vb.w}
+                  height={vb.h}
+                  fill="url(#grid)"
+                  opacity={0.6}
+                />
+
+                {/* Fondos por ubicación (clickeables) */}
+                {locationGroups.map((g) => (
+                  <g
+                    key={`loc-bg-${g.key}`}
+                    style={{ cursor: "pointer" }}
+                    onClick={(e) => {
+                      // no queremos que el click limpie selección ni active otras cosas
+                      e.stopPropagation();
+                      handleLocationClick(g);
+                    }}
+                  >
+                    <rect
+                      x={g.bbox.minx}
+                      y={g.bbox.miny}
+                      width={g.bbox.w}
+                      height={g.bbox.h}
+                      rx={18}
+                      ry={18}
+                      fill="#f8fafc"
+                      stroke="#cbd5e1"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={g.bbox.minx + 16}
+                      y={g.bbox.miny + 24}
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        fill: "#64748b",
+                        pointerEvents: "none", // para que el click agarre el <g>
+                      }}
+                    >
+                      {g.name}
+                    </text>
+                  </g>
+                ))}
 
                 {/* Aristas */}
                 {edges.map((e) =>
@@ -420,7 +648,12 @@ export default function InfraDiagram() {
                       onSelect={(id) => setSelectedEdgeId(id)}
                     />
                   ) : (
-                    <Edge key={`edge-${e.id}`} a={e.a} b={e.b} nodesById={nodesById as any} />
+                    <Edge
+                      key={`edge-${e.id}`}
+                      a={e.a}
+                      b={e.b}
+                      nodesById={nodesById as any}
+                    />
                   )
                 )}
 
@@ -436,7 +669,9 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() =>
+                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
+                      }
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -448,7 +683,9 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() =>
+                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
+                      }
                     />
                   ) : n.type === "manifold" ? (
                     <ManifoldNodeView
@@ -460,7 +697,9 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() =>
+                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
+                      }
                     />
                   ) : n.type === "valve" ? (
                     <ValveNodeView
@@ -472,36 +711,55 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() =>
+                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
+                      }
                     />
                   ) : null
                 )}
 
                 {/* Puertos Node-RED (solo en conectar) */}
-                {editMode && connectMode &&
+                {editMode &&
+                  connectMode &&
                   nodes.map((n) => {
                     const P = portsOf(n);
                     return (
                       <g key={`ports-${n.id}`}>
                         <circle
-                          cx={P.in.x} cy={P.in.y} r={5}
-                          fill="#ffffff" stroke="#64748b" strokeWidth={1.6}
+                          cx={P.in.x}
+                          cy={P.in.y}
+                          r={5}
+                          fill="#ffffff"
+                          stroke="#64748b"
+                          strokeWidth={1.6}
                           onMouseUp={() => {
                             if (connectFrom && connectFrom.side === "out") {
                               tryCreateEdge(connectFrom.nodeId, n.id);
-                              setConnectFrom(null); setMouseSvg(null);
+                              setConnectFrom(null);
+                              setMouseSvg(null);
                             }
                           }}
                         />
                         <circle
-                          cx={P.out.x} cy={P.out.y} r={5}
-                          fill="#ffffff" stroke="#0ea5e9" strokeWidth={1.8}
+                          cx={P.out.x}
+                          cy={P.out.y}
+                          r={5}
+                          fill="#ffffff"
+                          stroke="#0ea5e9"
+                          strokeWidth={1.8}
                           onMouseDown={(e) => {
                             e.stopPropagation();
                             setSelectedEdgeId(null);
                             setOpsOpen(false);
-                            setConnectFrom({ nodeId: n.id, side: "out", x: P.out.x, y: P.out.y });
-                            const p = clientToSvgPoint(e); if (p) setMouseSvg(p);
+                            setLocationDrawerOpen(false);
+                            setConnectFrom({
+                              nodeId: n.id,
+                              side: "out",
+                              x: P.out.x,
+                              y: P.out.y,
+                            });
+                            const p = clientToSvgPoint(e);
+                            if (p) setMouseSvg(p);
                           }}
                         />
                       </g>
@@ -511,8 +769,17 @@ export default function InfraDiagram() {
                 {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
-                    d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
-                    stroke="#0ea5e9" strokeWidth={2} strokeDasharray="6 6" fill="none" opacity={0.9}
+                    d={previewPath(
+                      connectFrom.x,
+                      connectFrom.y,
+                      mouseSvg.x,
+                      mouseSvg.y
+                    )}
+                    stroke="#0ea5e9"
+                    strokeWidth={2}
+                    strokeDasharray="6 6"
+                    fill="none"
+                    opacity={0.9}
                   />
                 )}
               </svg>
@@ -524,12 +791,24 @@ export default function InfraDiagram() {
         </div>
       )}
 
-      {/* Drawer de operación */}
+      {/* Drawer de operación por nodo (bombas, tanques, etc.) */}
       <OpsDrawer
         open={opsOpen}
         onClose={() => setOpsOpen(false)}
         node={opsNode}
-        onCommandSent={() => {/* refrescos si querés */}}
+        onCommandSent={() => {
+          /* refrescos si querés */
+        }}
+      />
+
+      {/* Drawer de localidad: info + botón de luces + sirena */}
+      <LocationDrawer
+        open={locationDrawerOpen}
+        onClose={() => {
+          setLocationDrawerOpen(false);
+          setSelectedLocation(null);
+        }}
+        location={selectedLocation}
       />
     </div>
   );
