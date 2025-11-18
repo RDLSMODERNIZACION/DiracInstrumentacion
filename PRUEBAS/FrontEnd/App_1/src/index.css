@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+:root {
+  --radius: 12px;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  /* lo mismo que antes, pero funciona igual en v4 */
+  @apply bg-gray-50 text-gray-900;
+}

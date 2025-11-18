@@ -24,7 +24,10 @@ export type ScopeResolution = {
  *   1) cid explícito (argumento)
  *   2) URL ?company_id= / ?org_id=
  *   3) sessionStorage / localStorage (dirac.company_id)
- *   4) VITE_COMPANY_ID / VITE_ORG_ID (solo para dev)
+ *   4) VITE_COMPANY_ID / VITE_ORG_ID (solo para DEV)
+ *
+ * En producción NO se usa ENV para resolver el company_id:
+ * tiene que venir del login / URL / storage.
  */
 export function resolveScope(cidOverride?: number | null): ScopeResolution {
   // 1) explícito
@@ -54,9 +57,13 @@ export function resolveScope(cidOverride?: number | null): ScopeResolution {
   let fromStorage: number | null = null;
   if (typeof window !== "undefined") {
     try {
-      fromStorage =
-        toNum(window.sessionStorage.getItem("dirac.company_id")) ??
-        toNum(window.localStorage.getItem("dirac.company_id"));
+      const fromSession = toNum(
+        window.sessionStorage.getItem("dirac.company_id")
+      );
+      const fromLocal = toNum(
+        window.localStorage.getItem("dirac.company_id")
+      );
+      fromStorage = fromSession ?? fromLocal;
       if (fromStorage) {
         log("scope from storage =", fromStorage);
         return { companyId: fromStorage, source: "session" };
@@ -66,13 +73,16 @@ export function resolveScope(cidOverride?: number | null): ScopeResolution {
     }
   }
 
-  // 4) ENV (fallback para desarrollo)
-  const envCid =
-    toNum(import.meta.env?.VITE_COMPANY_ID) ??
-    toNum(import.meta.env?.VITE_ORG_ID);
-  if (envCid) {
-    log("scope from ENV =", envCid);
-    return { companyId: envCid, source: "env" };
+  // 4) ENV (solo como ayuda en DESARROLLO, nunca en producción)
+  const isDev = !!import.meta.env?.DEV;
+  if (isDev) {
+    const envCid =
+      toNum(import.meta.env?.VITE_COMPANY_ID) ??
+      toNum(import.meta.env?.VITE_ORG_ID);
+    if (envCid) {
+      log("scope from ENV (DEV) =", envCid);
+      return { companyId: envCid, source: "env" };
+    }
   }
 
   log("no company_id resolved");
