@@ -85,7 +85,7 @@ export default function AppRoot() {
         if (chosenCompanyId !== null) {
           // 1) intentar /dirac/me (companies[].company_name | name)
           try {
-            const meRes = await api("/dirac/me");
+            const meRes = await api("/dirac/me/locations");
             if (meRes.ok) {
               const me: MeResponse = await meRes.json();
               const found = (me.companies || []).find(

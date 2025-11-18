@@ -14,7 +14,7 @@ import { getCompanyIdFromURL } from "@/lib/scope";
 const EXCLUDE_PREFIXES = [
   "/auth/login",
   "/auth/logout",
-  "/dirac/me",
+  "/dirac/me/locations",
   // agregá otros si hace falta
 ];
 

@@ -27,7 +27,7 @@ export function useMe() {
   const refresh = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const data: MeResponse = await getJSON("/dirac/me");
+      const data: MeResponse = await getJSON("/dirac/me/locations");
       setMe(data);
       const persisted = sessionStorage.getItem(COMPANY_KEY);
       if (persisted) _setCompanyId(Number(persisted));
@@ -62,7 +62,7 @@ export function useCompanySummary(companyId?: number | null) {
       if (!companyId) { setData(null); return; }
       setLoading(true); setErr(null);
       try {
-        const s = await getJSON(`/dirac/me/summary?company_id=${companyId}`);
+        const s = await getJSON(`/dirac/me/locations/summary?company_id=${companyId}`);
         setData(s);
       } catch (e: any) {
         setErr(e?.message || String(e));
