@@ -5,8 +5,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DIRAC</title>
-    <!-- 👇 CSS del widget KPI, servido desde /public/kpi/style.css -->
-    <link rel="stylesheet" href="/kpi/style.css" data-kpi-css>
+    <!--
+      CSS del widget KPI:
+      Antes intentábamos cargar /kpi/style.css, pero el build actual del KPI
+      genera /kpi/index.html + /kpi/assets/*.css (no un style.css fijo).
+      Si en el futuro empaquetamos el KPI como widget UMD con un CSS único,
+      podemos volver a agregar acá el <link> correspondiente.
+    -->
+    <!-- <link rel="stylesheet" href="/kpi/style.css" data-kpi-css> -->
   </head>
   <body>
     <div id="root"></div>
