@@ -58,22 +58,12 @@ app = FastAPI(
 )
 
 # ===== CORS y GZIP =====
-
-# Orígenes permitidos (agregá acá los que uses)
-CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
-    "https://diracserviciosenergia.com",
-    # Proyecto actual en Vercel (ajustar si cambia):
-    "https://dirac-instrumentacion-kbqekdgdr-tecnologiainnovacions-projects.vercel.app",
-]
-
+# CORS totalmente abierto para simplificar (front y back en dominios distintos)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],      # aceptar cualquier origen
+    allow_methods=["*"],      # aceptar cualquier método (GET, POST, etc.)
+    allow_headers=["*"],      # aceptar cualquier header
     allow_credentials=False,  # usamos Basic Auth, no cookies
     expose_headers=["*"],
     max_age=3600,
@@ -84,33 +74,37 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # ===== Health =====
 @app.get("/", tags=["health"])
 def root():
-  return {
-      "ok": True,
-      "service": "Backend MIN API",
-      "version": os.getenv("RENDER_GIT_COMMIT", "")[:8] or "dev",
-      "docs": "/docs" if enable_docs else None,
-      "health": "/health",
-      "health_db": "/health/db",
-  }
+    return {
+        "ok": True,
+        "service": "Backend MIN API",
+        "version": os.getenv("RENDER_GIT_COMMIT", "")[:8] or "dev",
+        "docs": "/docs" if enable_docs else None,
+        "health": "/health",
+        "health_db": "/health/db",
+    }
+
 
 @app.head("/", include_in_schema=False)
 def head_root():
-  return Response(status_code=200)
+    return Response(status_code=200)
+
 
 @app.get("/health", tags=["health"])
 def health():
-  return {"ok": True}
+    return {"ok": True}
+
 
 @app.get("/health/db", tags=["health"])
 def health_db():
-  try:
-      with get_conn() as conn, conn.cursor() as cur:
-          cur.execute("select 1")
-          cur.fetchone()
-      return {"ok": True, "db": "up"}
-  except Exception:
-      logging.exception("DB health check failed")
-      return JSONResponse({"ok": False, "db": "down"}, status_code=503)
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select 1")
+            cur.fetchone()
+        return {"ok": True, "db": "up"}
+    except Exception:
+        logging.exception("DB health check failed")
+        return JSONResponse({"ok": False, "db": "down"}, status_code=503)
+
 
 # ===== Rutas (operación base) =====
 app.include_router(tanks_router)
@@ -144,6 +138,7 @@ app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
+
 
 # ===== Cierre ordenado del pool de DB =====
 @app.on_event("shutdown")
