@@ -126,8 +126,6 @@ def pumps_live(
             }
 
         # 2) Bombas "conectadas" según su ÚLTIMO heartbeat
-        #    - buscamos el último hb_ts de cada bomba hasta 'dt'
-        #    - la consideramos conectada si hb_ts >= dt - PUMP_CONNECTED_WINDOW_MIN
         recent_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
 
         cur.execute(
@@ -156,8 +154,6 @@ def pumps_live(
         }
 
         # Scope para la serie de tiempo:
-        #  - connected_only=True  -> solo bombas conectadas "ahora"
-        #  - connected_only=False -> todas las bombas del scope
         scope_ids = scope_ids_all if not connected_only else [pid for pid in scope_ids_all if pid in connected_set]
 
         if not scope_ids:
@@ -171,7 +167,8 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 3) Timeline (baseline + edges) desde la vista/MV limpia
+        # 3) Timeline robusto: para cada minuto, miramos el último HB por bomba
+        #    y contamos cuántas están ON.
         cur.execute(
             f"""
             WITH bounds AS (
@@ -180,83 +177,44 @@ def pumps_live(
             scope AS (
               SELECT unnest(%(ids)s::int[]) AS pump_id
             ),
-            baseline AS (
-              -- último estado conocido antes de df para cada bomba
-              SELECT DISTINCT ON (h.pump_id)
-                     h.pump_id, h.hb_ts AS ts, h.relay
-              FROM {HB_SOURCE} h
-              JOIN scope s ON s.pump_id = h.pump_id
-              WHERE h.hb_ts < (SELECT df FROM bounds)
-              ORDER BY h.pump_id, h.hb_ts DESC
-            ),
-            window_hb AS (
-              -- heartbeats en una ventana extendida para capturar transiciones
-              SELECT h.pump_id, h.hb_ts, h.relay,
-                     lag(h.relay) OVER (PARTITION BY h.pump_id ORDER BY h.hb_ts) AS prev
-              FROM {HB_SOURCE} h
-              JOIN scope s ON s.pump_id = h.pump_id
-              JOIN bounds b ON h.hb_ts <= b.dt AND h.hb_ts >= b.df - interval '48 hours'
-            ),
-            edges AS (
-              -- solo puntos donde cambia el estado (prev != relay)
-              SELECT pump_id, hb_ts AS ts, relay
-              FROM window_hb
-              WHERE prev IS DISTINCT FROM relay
-            ),
-            timeline AS (
-              -- timeline de cambios + baseline en df
-              SELECT pump_id, ts, relay FROM edges
-              UNION ALL
-              SELECT pump_id, (SELECT df FROM bounds) AS ts, COALESCE(relay,false) AS relay
-              FROM scope
-              LEFT JOIN baseline USING (pump_id)
-            ),
             minutes AS (
-              -- minutos dentro de [df, dt]
-              SELECT generate_series((SELECT df FROM bounds),(SELECT dt FROM bounds), interval '1 minute') AS m
+              SELECT generate_series(
+                       (SELECT df FROM bounds),
+                       (SELECT dt FROM bounds),
+                       interval '1 minute'
+                     ) AS m
             ),
-            intervals AS (
-              -- intervalos donde la bomba estuvo en determinado estado
+            state_per_minute AS (
               SELECT
-                pump_id,
-                GREATEST(ts, (SELECT df FROM bounds)) AS t_from,
-                LEAST(
-                  LEAD(ts,1,(SELECT dt FROM bounds)) OVER (PARTITION BY pump_id ORDER BY ts),
-                  (SELECT dt FROM bounds)
-                ) AS t_to,
-                relay
-              FROM timeline
-            ),
-            events AS (
-              -- marcamos +1 al inicio y -1 al final de cada tramo ON
-              SELECT date_trunc('minute', t_from + interval '59 seconds') AS m, +1::int AS delta
-              FROM intervals
-              WHERE relay = true AND t_to > t_from
-              UNION ALL
-              SELECT date_trunc('minute', t_to   + interval '59 seconds') AS m, -1::int AS delta
-              FROM intervals
-              WHERE relay = true AND t_to > t_from
-            ),
-            deltas AS (
-              SELECT m, SUM(delta)::int AS delta
-              FROM events
-              GROUP BY m
+                minutes.m,
+                scope.pump_id,
+                COALESCE(
+                  (
+                    SELECT h.relay
+                    FROM {HB_SOURCE} h
+                    WHERE h.pump_id = scope.pump_id
+                      AND h.hb_ts <= minutes.m
+                    ORDER BY h.hb_ts DESC
+                    LIMIT 1
+                  ),
+                  false
+                ) AS relay
+              FROM minutes
+              CROSS JOIN scope
             ),
             running AS (
-              -- conteo acumulado de bombas ON por minuto
-              SELECT minutes.m,
-                     SUM(COALESCE(deltas.delta,0)) OVER (ORDER BY minutes.m) AS on_count
-              FROM minutes
-              LEFT JOIN deltas USING (m)
-              ORDER BY minutes.m
+              SELECT
+                m,
+                SUM(CASE WHEN relay THEN 1 ELSE 0 END)::float AS on_count
+              FROM state_per_minute
+              GROUP BY m
             ),
             bucketed AS (
-              -- agregamos por bucket
               SELECT
                 { _bucket_expr_sql(bucket) } AS b,
                 CASE
-                  WHEN %(agg_mode)s = 'max' THEN MAX(on_count)::float
-                  ELSE AVG(on_count)::float
+                  WHEN %(agg_mode)s = 'max' THEN MAX(on_count)
+                  ELSE AVG(on_count)
                 END AS v
               FROM running
               GROUP BY 1
@@ -273,7 +231,6 @@ def pumps_live(
         "timestamps": [int(r["ts_ms"]) for r in rows],
         "is_on":      [None if r["val"] is None else float(r["val"]) for r in rows],
         "pumps_total": pumps_total_all,
-        # bombas actualmente conectadas (último HB reciente)
         "pumps_connected": len(connected_set),
         "window": {"from": df.isoformat(), "to": dt.isoformat()},
     }
