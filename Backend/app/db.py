@@ -17,13 +17,18 @@ pool = ConnectionPool(
     timeout=30,  # segundos para conseguir una conexión del pool
     kwargs={
         "sslmode": "require",
-        "connect_timeout": 5,  # segundos para abrir el socket a la DB
+        "connect_timeout": 5,      # segundos para abrir el socket a la DB
+        "prepare_threshold": None, # <- desactiva prepared statements del lado servidor
     },
 )
 
+
 def get_conn():
     """Uso: with get_conn() as conn: ..."""
+    # pool.connection() devuelve un context manager:
+    # with get_conn() as conn: ...  -> devuelve la conexión al pool al salir
     return pool.connection()
+
 
 def close_pool():
     try:
