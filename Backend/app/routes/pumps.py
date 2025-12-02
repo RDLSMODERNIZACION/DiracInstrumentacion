@@ -1,73 +1,57 @@
-# app/routes/arduino_controler.py
-
-import logging
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+# app/routes/pumps.py
+from fastapi import APIRouter
 from app.db import get_conn
 from psycopg.rows import dict_row
 
-router = APIRouter(prefix="/arduino-controler", tags=["arduino"])
+router = APIRouter(prefix="/pumps", tags=["pumps"])
 
-# -----------------------------------------------------------
-# MODELO DEL HEARTBEAT QUE ENVÍA EL PLC / NODE-RED
-# -----------------------------------------------------------
-
-class HeartbeatIn(BaseModel):
-    pump_id: int
-    state: str | None = None          # "run" / "stop" (opcional)
-    relay: bool | None = None         # true / false (opcional)
-    di01_raw: str | int | None = None
-    fw: str | None = None
-    uptime: int | None = None
-    # Agregá acá más campos si los estás mandando (AI01, AI02, etc.)
-
-
-# -----------------------------------------------------------
-# POST /heartbeat  (NUEVO CORRECTO)
-# -----------------------------------------------------------
-
-@router.post("/heartbeat")
-def receive_heartbeat(hb: HeartbeatIn):
+@router.get("/config")
+def list_pumps_config():
     """
-    Recibe el estado de la bomba desde PLC/Node-RED.
-    Guarda:
-        - payload JSON completo
-        - plc_state ("run" / "stop") proveniente del PLC
+    Devuelve bombas con estado (run/stop) y conectividad (online/age_sec)
+    leyendo de public.v_pumps_with_status.
     """
+    sql = """
+    SELECT
+      pump_id,
+      name,
+      location_id,
+      location_name,
 
-    # ----------------------------------------
-    # DETERMINAR ESTADO DEL PLC
-    # ----------------------------------------
-    if hb.state is not None:
-        plc_state = hb.state.lower().strip()
-    elif hb.relay is not None:
-        plc_state = "run" if hb.relay else "stop"
-    else:
-        plc_state = None
+      -- estado del relé (último pump_events)
+      state,
+      latest_event_id,
+      event_ts,
 
-    # validar
-    if plc_state is not None and plc_state not in ("run", "stop"):
-        logging.warning(f"Heartbeat inválido: plc_state={plc_state} para pump_id={hb.pump_id}")
-        plc_state = None
-
-    # ----------------------------------------
-    # INSERTAR HEARTBEAT EN DB
-    # ----------------------------------------
+      -- conectividad (último pump_heartbeat)
+      latest_hb_id,
+      hb_ts,
+      age_sec,
+      online
+    FROM public.v_pumps_with_status
+    ORDER BY pump_id
+    """
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            """
-            INSERT INTO public.pump_heartbeat (pump_id, payload, plc_state)
-            VALUES (%s, %s, %s)
-            RETURNING id, created_at
-            """,
-            (hb.pump_id, hb.dict(), plc_state)
-        )
-        row = cur.fetchone()
-        conn.commit()
+        cur.execute(sql)
+        rows = cur.fetchall()
 
-    return {
-        "ok": True,
-        "hb_id": row["id"],
-        "ts": row["created_at"],
-        "plc_state": plc_state,
-    }
+    out = []
+    for r in rows:
+        out.append({
+            "pump_id":        r["pump_id"],
+            "name":           r["name"],
+            "location_id":    r["location_id"],
+            "location_name":  r["location_name"],
+
+            # estado relé
+            "state":          r.get("state") or "stop",
+            "latest_event_id": r.get("latest_event_id"),
+            "event_ts":       r.get("event_ts"),
+
+            # heartbeat / conectividad
+            "latest_hb_id":   r.get("latest_hb_id"),
+            "hb_ts":          r.get("hb_ts"),
+            "age_sec":        int(r["age_sec"]) if r.get("age_sec") is not None else None,
+            "online":         bool(r["online"]) if r.get("online") is not None else False,
+        })
+    return out
