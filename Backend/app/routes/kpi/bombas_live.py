@@ -86,10 +86,16 @@ def pumps_live(
     connected_only: bool = Query(True),
 ):
     """
-    Devuelve un timeline de cuántas bombas están ON (relay = true) en cada bucket,
+    Devuelve un timeline de cuántas bombas están ON (según PLC) en cada bucket,
     junto con:
       - pumps_total: cantidad total de bombas en el scope (empresa / localidad / ids)
       - pumps_connected: bombas actualmente conectadas (último HB reciente)
+
+    ⚠️ IMPORTANTE:
+    ON/OFF se calcula ahora a partir de plc_state del último heartbeat:
+      plc_state = 'run'  -> ON
+      plc_state = 'stop' -> OFF
+      si plc_state es NULL -> se usa h.relay como fallback (retrocompatibilidad)
     """
     df, dt = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
@@ -128,19 +134,24 @@ def pumps_live(
         # 2) Bombas "conectadas" según su ÚLTIMO heartbeat
         recent_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
 
+        # Usamos plc_state como verdad, relay sólo fallback
         cur.execute(
             f"""
             WITH last_hb AS (
               SELECT DISTINCT ON (h.pump_id)
                      h.pump_id,
                      h.hb_ts,
-                     h.relay
+                     CASE
+                       WHEN h.plc_state = 'run' THEN true
+                       WHEN h.plc_state = 'stop' THEN false
+                       ELSE h.relay
+                     END AS is_on
               FROM {HB_SOURCE} h
               WHERE h.pump_id = ANY(%(ids)s::int[])
                 AND h.hb_ts <= %(dt)s
               ORDER BY h.pump_id, h.hb_ts DESC
             )
-            SELECT pump_id, hb_ts, relay
+            SELECT pump_id, hb_ts, is_on AS relay
             FROM last_hb;
             """,
             {"ids": scope_ids_all, "dt": dt},
@@ -168,7 +179,7 @@ def pumps_live(
             }
 
         # 3) Timeline robusto: para cada minuto, miramos el último HB por bomba
-        #    y contamos cuántas están ON.
+        #    y contamos cuántas están ON (según plc_state / relay fallback).
         cur.execute(
             f"""
             WITH bounds AS (
@@ -190,7 +201,12 @@ def pumps_live(
                 scope.pump_id,
                 COALESCE(
                   (
-                    SELECT h.relay
+                    SELECT
+                      CASE
+                        WHEN h.plc_state = 'run' THEN true
+                        WHEN h.plc_state = 'stop' THEN false
+                        ELSE h.relay
+                      END AS is_on
                     FROM {HB_SOURCE} h
                     WHERE h.pump_id = scope.pump_id
                       AND h.hb_ts <= minutes.m
