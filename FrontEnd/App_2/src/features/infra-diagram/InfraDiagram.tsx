@@ -29,6 +29,7 @@ import {
   saveLayoutToStorage,
   importLayout as importLayoutLS,
 } from "@/layout/layoutIO";
+
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import {
   createEdge as apiCreateEdge,
@@ -52,10 +53,13 @@ type LocationGroup = {
 };
 
 export default function InfraDiagram() {
+  // altura de la barra superior (en px)
+  const TOPBAR_H = 44;
+
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdge[]>([]);
 
-  // ⬇️ viewBox dinámico (string para el <svg> y objeto para el fondo/grid)
+  // viewBox dinámico
   const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
   const [vb, setVb] = useState({ minx: 0, miny: 0, w: 1000, h: 520 });
 
@@ -68,7 +72,7 @@ export default function InfraDiagram() {
     if (DEBUG) console.log("[InfraDiagram]", ...args);
   };
 
-  // Company scope leído del querystring (?company_id=XX) — SOLO válido si > 0
+  // Company scope leído del querystring (?company_id=XX)
   const companyId = useMemo(() => {
     const qs = new URLSearchParams(window.location.search);
     const raw = qs.get("company_id");
@@ -91,7 +95,7 @@ export default function InfraDiagram() {
   const [connectMode, setConnectMode] = useState(false);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
-  // Node-RED ports state (resumen)
+  // Node-RED ports state
   type PortRef = { nodeId: string; side: "out" | "in"; x: number; y: number };
   const [connectFrom, setConnectFrom] = useState<PortRef | null>(null);
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
@@ -126,22 +130,25 @@ export default function InfraDiagram() {
   };
   const hideTip = () => setTip(null);
 
-  // Consulta viva (scope por empresa lo inyecta fetchJSON + withScope)
+  // Consulta viva
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
       const urlNodes = `/infraestructura/get_layout_combined`;
       const urlEdges = `/infraestructura/get_layout_edges`;
       log("FETCH ->", urlNodes, "&&", urlEdges);
+
       const [nodesRaw, edgesRaw] = await Promise.all([
         fetchJSON<CombinedNodeDTO[]>(urlNodes, signal),
         fetchJSON<EdgeDTO[]>(urlEdges, signal),
       ]);
+
       log("FETCH DONE", {
         nodes: nodesRaw?.length ?? 0,
         edges: edgesRaw?.length ?? 0,
         types: summarizeTypes(nodesRaw),
       });
+
       return { nodesRaw, edgesRaw };
     },
     (raw) => raw
@@ -208,15 +215,13 @@ export default function InfraDiagram() {
 
     log("UI NODES", {
       total: nodesWithSaved.length,
-      byType: summarizeTypes(
-        nodesWithSaved.map((n) => ({ type: n.type }) as any)
-      ),
+      byType: summarizeTypes(nodesWithSaved.map((n) => ({ type: n.type }) as any)),
     });
     log("UI EDGES", { total: uiEdges.length });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // Mapa y viewBox
+  // Mapa por id
   const nodesById = useMemo(() => {
     const m: Record<string, UINode> = {};
     for (const n of nodes) {
@@ -225,13 +230,26 @@ export default function InfraDiagram() {
     return m;
   }, [nodes]);
 
-  // ⬇️ viewBox y fondo dinámicos: usamos el bbox real de los nodos (con padding)
+  // viewBox y fondo dinámicos + CLAMP (evita “zoom microscópico”)
   useEffect(() => {
     if (!nodes.length) return;
-    const pad = 90; // margen extra para que no quede todo pegado al borde
+
+    const pad = 90;
     const bb = computeBBox(nodes, pad);
-    setVb(bb);
-    setViewBoxStr(`${bb.minx} ${bb.miny} ${bb.w} ${bb.h}`);
+
+    // clamp: si un nodo quedó lejísimo, no te destruye la vista
+    const MAX_W = 6000;
+    const MAX_H = 3500;
+
+    const safe = {
+      minx: bb.minx,
+      miny: bb.miny,
+      w: Math.min(bb.w, MAX_W),
+      h: Math.min(bb.h, MAX_H),
+    };
+
+    setVb(safe);
+    setViewBoxStr(`${safe.minx} ${safe.miny} ${safe.w} ${safe.h}`);
   }, [nodes]);
 
   // ===== Fondos por ubicación =====
@@ -269,7 +287,7 @@ export default function InfraDiagram() {
     return Object.values(groups)
       .filter((g) => g.nodes.length > 0)
       .map((g) => {
-        const bbox = computeBBox(g.nodes, 80); // padding para la caja de esa ubicación
+        const bbox = computeBBox(g.nodes, 80);
         return {
           key: g.key,
           name: g.name,
@@ -309,13 +327,8 @@ export default function InfraDiagram() {
       setSelectedEdgeId(null);
     }
   };
-  const toggleConnect = () => {
-    const v = !connectMode;
-    setConnectMode(v);
-    if (!v) setConnectFrom(null);
-  };
 
-  // ====== Node-RED helpers (resumen) ======
+  // ====== Node-RED helpers ======
   function halfByType(t?: string) {
     const tt = (t || "").toLowerCase();
     if (tt === "tank") return 66;
@@ -452,16 +465,18 @@ export default function InfraDiagram() {
   }
 
   return (
-    <div style={{ padding: 0 }}>
+    <div style={{ width: "100%", padding: 0 }}>
       {/* barra superior */}
       <div
         style={{
+          height: TOPBAR_H,
           display: "flex",
           alignItems: "center",
           gap: 12,
           fontSize: 12,
           color: "#64748b",
           padding: "6px 8px",
+          boxSizing: "border-box",
         }}
       >
         {error ? (
@@ -473,6 +488,7 @@ export default function InfraDiagram() {
         ) : (
           "Sincronizado"
         )}
+
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button
             onClick={toggleEdit}
@@ -486,6 +502,7 @@ export default function InfraDiagram() {
           >
             {editMode ? "Salir edición" : "Editar"}
           </button>
+
           <button
             onClick={applyAutoLayout}
             disabled={!editMode}
@@ -498,6 +515,7 @@ export default function InfraDiagram() {
           >
             Auto-ordenar
           </button>
+
           <button
             onClick={() => setConnectMode((v) => !v)}
             disabled={!editMode}
@@ -524,6 +542,9 @@ export default function InfraDiagram() {
             borderRadius: 12,
             overflow: "hidden",
             background: "#ffffff",
+            width: "100%",
+            height: `calc(100vh - ${TOPBAR_H}px)`,
+            boxSizing: "border-box",
           }}
         >
           <TransformWrapper
@@ -532,20 +553,21 @@ export default function InfraDiagram() {
             maxScale={2.5}
             wheel={{ step: 0.1 }}
           >
-            <TransformComponent wrapperStyle={{ width: "100%" }}>
+            <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
-                width={1000}
-                height={520}
+                width="100%"
+                height="100%"
                 viewBox={viewBoxStr}
-                style={{ display: "block", width: "100%" }}
+                preserveAspectRatio="none"
+                style={{ display: "block" }}
                 onMouseMove={(e) => {
                   if (!connectFrom) return;
                   const p = clientToSvgPoint(e);
                   if (p) setMouseSvg(p);
                 }}
                 onMouseDown={() => {
-                  if (editMode) setSelectedEdgeId(null); // click en fondo limpia selección
+                  if (editMode) setSelectedEdgeId(null);
                 }}
               >
                 <defs>
@@ -562,6 +584,7 @@ export default function InfraDiagram() {
                       strokeWidth="1"
                     />
                   </pattern>
+
                   <filter id="glow">
                     <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
                     <feMerge>
@@ -569,33 +592,31 @@ export default function InfraDiagram() {
                       <feMergeNode in="SourceGraphic" />
                     </feMerge>
                   </filter>
+
                   <linearGradient id="lgTank" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#f5f7fa" />
                     <stop offset="100%" stopColor="#e9edf2" />
                   </linearGradient>
+
                   <linearGradient id="lgSteel" x1="0" y1="0" x2="1" y2="0">
                     <stop offset="0%" stopColor="#f8fafc" />
                     <stop offset="50%" stopColor="#e2e8f0" />
                     <stop offset="100%" stopColor="#f8fafc" />
                   </linearGradient>
+
                   <linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
                     <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
                   </linearGradient>
+
                   <linearGradient id="lgWaterDeep" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#cfe6ff" />
                     <stop offset="100%" stopColor="#7bb3f8" />
                   </linearGradient>
                 </defs>
 
-                {/* Fondo dinámico = mismo rectángulo que el viewBox */}
-                <rect
-                  x={vb.minx}
-                  y={vb.miny}
-                  width={vb.w}
-                  height={vb.h}
-                  fill="#ffffff"
-                />
+                {/* Fondo dinámico */}
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
                 <rect
                   x={vb.minx}
                   y={vb.miny}
@@ -611,7 +632,6 @@ export default function InfraDiagram() {
                     key={`loc-bg-${g.key}`}
                     style={{ cursor: "pointer" }}
                     onClick={(e) => {
-                      // no queremos que el click limpie selección ni active otras cosas
                       e.stopPropagation();
                       handleLocationClick(g);
                     }}
@@ -634,7 +654,7 @@ export default function InfraDiagram() {
                         fontSize: 12,
                         fontWeight: 600,
                         fill: "#64748b",
-                        pointerEvents: "none", // para que el click agarre el <g>
+                        pointerEvents: "none",
                       }}
                     >
                       {g.name}
@@ -726,7 +746,7 @@ export default function InfraDiagram() {
                   ) : null
                 )}
 
-                {/* Puertos Node-RED (solo en conectar) */}
+                {/* Puertos Node-RED */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
@@ -793,23 +813,18 @@ export default function InfraDiagram() {
               </svg>
             </TransformComponent>
 
-            {/* Tooltip */}
             <Tooltip tip={tip} />
           </TransformWrapper>
         </div>
       )}
 
-      {/* Drawer de operación por nodo (bombas, tanques, etc.) */}
       <OpsDrawer
         open={opsOpen}
         onClose={() => setOpsOpen(false)}
         node={opsNode}
-        onCommandSent={() => {
-          /* refrescos si querés */
-        }}
+        onCommandSent={() => {}}
       />
 
-      {/* Drawer de localidad: info + botón de luces + sirena */}
       <LocationDrawer
         open={locationDrawerOpen}
         onClose={() => {
