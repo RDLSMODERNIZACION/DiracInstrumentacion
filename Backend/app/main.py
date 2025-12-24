@@ -13,7 +13,13 @@ from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
 from app.routes.arduino_controler import router as arduino_router
-from app.routes.infraestructura import router as infraestructura_router  # layout + alarmas
+
+# Infraestructura (lectura: layout + alarmas por localidad)
+from app.routes.infraestructura import router as infraestructura_router
+
+# ✅ Infraestructura (edición: CRUD de edges + update_layout_many)
+# IMPORTANTE: esto publica DELETE /infraestructura/edges/{edge_id}
+from app.routes.infra_edit.edit import router as infra_edit_router
 
 # ===== PLC (consumo de comandos) =====
 from app.routes.plc import router as plc_router
@@ -112,8 +118,12 @@ app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
 
-# Infraestructura (diagramas + alarmas por localidad)
+# Infraestructura (lectura: diagramas + alarmas por localidad)
 app.include_router(infraestructura_router)
+
+# ✅ Infraestructura (edición: edges + layout_many)
+# Esto es lo que te faltaba para que no dé 404 en DELETE /infraestructura/edges/{id}
+app.include_router(infra_edit_router)
 
 # Endpoints para PLC / Node-RED (lectura de comandos, ack, etc.)
 app.include_router(plc_router)
@@ -138,7 +148,6 @@ app.include_router(admin_tanks_router)
 app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
-
 
 # ===== Cierre ordenado del pool de DB =====
 @app.on_event("shutdown")
