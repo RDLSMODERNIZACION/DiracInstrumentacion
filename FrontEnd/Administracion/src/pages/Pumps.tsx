@@ -293,15 +293,26 @@ export default function Pumps() {
   }
 
   async function remove(id: number) {
-    if (!confirm("¿Eliminar bomba?")) return;
+    if (!confirm("¿Eliminar bomba? Esto también borra heartbeat/eventos/comandos asociados.")) return;
     try {
-      await del(`/dirac/admin/pumps/${id}`);
+      // ✅ FIX: bombas requieren ?force=true si tienen referencias
+      await del(`/dirac/admin/pumps/${id}?force=true`);
       await load();
     } catch (e: any) {
-      const msg =
-        e?.response?.status === 403 || String(e).includes("403")
+      // Si el backend te devuelve counts en 409, mostramos algo útil
+      const raw = e?.message || String(e);
+
+      let msg =
+        e?.response?.status === 403 || raw.includes("403")
           ? "No tenés permiso para borrar bombas."
-          : e?.message || String(e);
+          : raw;
+
+      if (raw.includes("409") || raw.toLowerCase().includes("conflict")) {
+        msg =
+          "No se pudo borrar la bomba (409). Puede estar referenciada por layout/heartbeat/eventos/comandos. " +
+          "Reintentá o revisá refs.";
+      }
+
       setErr(msg);
     }
   }
