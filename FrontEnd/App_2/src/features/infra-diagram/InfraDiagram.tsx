@@ -31,10 +31,7 @@ import {
 } from "@/layout/layoutIO";
 
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
-import {
-  createEdge as apiCreateEdge,
-  deleteEdge as apiDeleteEdge,
-} from "./services/edges";
+import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -55,6 +52,9 @@ type LocationGroup = {
 export default function InfraDiagram() {
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
+
+  // ✅ Zoom máximo inicial (arranca “cerca”)
+  const ZOOM_MAX = 2.5;
 
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdge[]>([]);
@@ -115,10 +115,7 @@ export default function InfraDiagram() {
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
-  const showTip = (
-    e: React.MouseEvent,
-    content: { title: string; lines: string[] }
-  ) => {
+  const showTip = (e: React.MouseEvent, content: { title: string; lines: string[] }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTip({
@@ -203,12 +200,8 @@ export default function InfraDiagram() {
     }));
 
     const saved = loadLayoutFromStorage();
-    const cleaned = (saved ?? []).filter(
-      (p) => Number.isFinite(p.x) && Number.isFinite(p.y)
-    );
-    const nodesWithSaved = cleaned.length
-      ? (importLayoutLS(uiNodes, cleaned) as UINode[])
-      : uiNodes;
+    const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
 
     setNodes(nodesWithSaved);
     setEdges(uiEdges);
@@ -371,11 +364,7 @@ export default function InfraDiagram() {
         },
         ...prev,
       ]);
-      log("EDGE CREATED", {
-        id: created.edge_id,
-        src: created.src_node_id,
-        dst: created.dst_node_id,
-      });
+      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
@@ -391,11 +380,7 @@ export default function InfraDiagram() {
         setOpsOpen(false);
         setLocationDrawerOpen(false);
         setSelectedLocation(null);
-      } else if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        selectedEdgeId != null &&
-        editMode
-      ) {
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedEdgeId != null && editMode) {
         e.preventDefault();
         handleDeleteEdge(selectedEdgeId);
       }
@@ -428,9 +413,7 @@ export default function InfraDiagram() {
     const newTanks = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const byId: Record<string, UINode> = {};
-    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach(
-      (n) => (byId[n.id] = n)
-    );
+    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach((n) => (byId[n.id] = n));
     const next = nodes.map((n) => byId[n.id] ?? n);
     setNodes(next);
 
@@ -548,9 +531,10 @@ export default function InfraDiagram() {
           }}
         >
           <TransformWrapper
-            initialScale={1}
+            initialScale={ZOOM_MAX}
             minScale={0.6}
-            maxScale={2.5}
+            maxScale={ZOOM_MAX}
+            centerOnInit
             wheel={{ step: 0.1 }}
           >
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
@@ -571,12 +555,7 @@ export default function InfraDiagram() {
                 }}
               >
                 <defs>
-                  <pattern
-                    id="grid"
-                    width="24"
-                    height="24"
-                    patternUnits="userSpaceOnUse"
-                  >
+                  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
                     <path
                       d="M 24 0 L 0 0 0 24"
                       fill="none"
@@ -617,14 +596,7 @@ export default function InfraDiagram() {
 
                 {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect
-                  x={vb.minx}
-                  y={vb.miny}
-                  width={vb.w}
-                  height={vb.h}
-                  fill="url(#grid)"
-                  opacity={0.6}
-                />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
                 {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
@@ -676,12 +648,7 @@ export default function InfraDiagram() {
                       onSelect={(id) => setSelectedEdgeId(id)}
                     />
                   ) : (
-                    <Edge
-                      key={`edge-${e.id}`}
-                      a={e.a}
-                      b={e.b}
-                      nodesById={nodesById as any}
-                    />
+                    <Edge key={`edge-${e.id}`} a={e.a} b={e.b} nodesById={nodesById as any} />
                   )
                 )}
 
@@ -697,9 +664,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() =>
-                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
-                      }
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -711,9 +676,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() =>
-                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
-                      }
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "manifold" ? (
                     <ManifoldNodeView
@@ -725,9 +688,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() =>
-                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
-                      }
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "valve" ? (
                     <ValveNodeView
@@ -739,9 +700,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() =>
-                        !editMode && !connectMode ? maybeOpenOps(n) : undefined
-                      }
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : null
                 )}
@@ -797,12 +756,7 @@ export default function InfraDiagram() {
                 {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
-                    d={previewPath(
-                      connectFrom.x,
-                      connectFrom.y,
-                      mouseSvg.x,
-                      mouseSvg.y
-                    )}
+                    d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
                     stroke="#0ea5e9"
                     strokeWidth={2}
                     strokeDasharray="6 6"
@@ -818,12 +772,7 @@ export default function InfraDiagram() {
         </div>
       )}
 
-      <OpsDrawer
-        open={opsOpen}
-        onClose={() => setOpsOpen(false)}
-        node={opsNode}
-        onCommandSent={() => {}}
-      />
+      <OpsDrawer open={opsOpen} onClose={() => setOpsOpen(false)} node={opsNode} onCommandSent={() => {}} />
 
       <LocationDrawer
         open={locationDrawerOpen}
