@@ -2,6 +2,7 @@
 import os
 import traceback
 from datetime import datetime, timezone
+from collections import defaultdict
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -18,7 +19,6 @@ PUMP_OFFLINE_SEC = int(os.getenv("TELEGRAM_PUMP_OFFLINE_SEC", "300"))  # 5 min
 def _age_sec(ts):
     if ts is None:
         return None
-    # ts viene con tz (UTC), comparamos en UTC
     now = datetime.now(timezone.utc)
     return int((now - ts).total_seconds())
 
@@ -27,19 +27,18 @@ def _age_sec(ts):
 def telegram_report_now():
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            # TANQUES: último ingest + config
+            # ---- TANQUES + localidad + último ingest ----
             cur.execute(
                 """
                 SELECT
+                  l.id AS location_id,
+                  l.name AS location_name,
                   t.id AS tank_id,
                   t.name AS tank_name,
                   ti.level_pct,
-                  ti.created_at AS last_seen,
-                  tc.low_low_pct,
-                  tc.low_pct,
-                  tc.high_pct,
-                  tc.high_high_pct
+                  ti.created_at AS last_seen
                 FROM public.tanks t
+                JOIN public.locations l ON l.id = t.location_id
                 LEFT JOIN LATERAL (
                   SELECT level_pct, created_at
                   FROM public.tank_ingest
@@ -47,22 +46,23 @@ def telegram_report_now():
                   ORDER BY created_at DESC
                   LIMIT 1
                 ) ti ON true
-                LEFT JOIN public.tank_configs tc
-                  ON tc.tank_id = t.id
-                ORDER BY t.name
+                ORDER BY l.name, t.name
                 """
             )
             tanks = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
 
-            # BOMBAS: último heartbeat
+            # ---- BOMBAS + localidad + último heartbeat ----
             cur.execute(
                 """
                 SELECT
+                  l.id AS location_id,
+                  l.name AS location_name,
                   p.id AS pump_id,
                   p.name AS pump_name,
                   ph.plc_state,
                   ph.created_at AS last_seen
                 FROM public.pumps p
+                JOIN public.locations l ON l.id = p.location_id
                 LEFT JOIN LATERAL (
                   SELECT plc_state, created_at
                   FROM public.pump_heartbeat
@@ -70,82 +70,84 @@ def telegram_report_now():
                   ORDER BY created_at DESC
                   LIMIT 1
                 ) ph ON true
-                ORDER BY p.name
+                ORDER BY l.name, p.name
                 """
             )
             pumps = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
 
-        # ---- Mensaje ----
-        now_txt = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [f"📊 <b>REPORTE SCADA</b> <code>{now_txt}</code>", ""]
+        # ---- Agrupar por localidad ----
+        by_loc = defaultdict(lambda: {"location_name": None, "tanks": [], "pumps": [], "loc_online": False})
 
-        # TANQUES
-        lines.append("🛢️ <b>TANQUES</b>")
         for t in tanks:
-            name = t["tank_name"]
-            level = t.get("level_pct")
-            last_seen = t.get("last_seen")
-            age = _age_sec(last_seen)
+            loc_id = t["location_id"]
+            loc = by_loc[loc_id]
+            loc["location_name"] = t["location_name"]
 
-            if level is None:
-                level_s = "N/D"
-            else:
-                level_s = f"{float(level):.1f}%"
-
+            age = _age_sec(t.get("last_seen"))
             online = (age is not None) and (age <= TANK_OFFLINE_SEC)
-            online_s = "🟢 Online" if online else "🔴 Offline"
+            if online:
+                loc["loc_online"] = True
 
-            # Severidad por umbrales si existen
-            sev = ""
-            try:
-                if level is not None:
-                    lv = float(level)
-                    ll = t.get("low_low_pct")
-                    l = t.get("low_pct")
-                    h = t.get("high_pct")
-                    hh = t.get("high_high_pct")
-                    if ll is not None and lv <= float(ll):
-                        sev = " ⛔ LOW-LOW"
-                    elif l is not None and lv <= float(l):
-                        sev = " ⚠️ LOW"
-                    elif hh is not None and lv >= float(hh):
-                        sev = " ⛔ HIGH-HIGH"
-                    elif h is not None and lv >= float(h):
-                        sev = " ⚠️ HIGH"
-            except Exception:
-                pass
+            level = t.get("level_pct")
+            level_s = "N/D" if level is None else f"{float(level):.1f}%"
+            status = "🟢" if online else "🔴"
+            age_txt = "" if age is None else f" ({age}s)"
+            loc["tanks"].append(f"{status} {t['tank_name']}: {level_s}{age_txt}")
 
-            age_txt = "" if age is None else f" (hace {age}s)"
-            lines.append(f"• {name}: {level_s} — {online_s}{sev}{age_txt}")
-
-        # BOMBAS
-        lines.append("")
-        lines.append("🚰 <b>BOMBAS</b>")
         for p in pumps:
-            name = p["pump_name"]
-            plc_state = p.get("plc_state")
-            last_seen = p.get("last_seen")
-            age = _age_sec(last_seen)
+            loc_id = p["location_id"]
+            loc = by_loc[loc_id]
+            loc["location_name"] = p["location_name"]
 
+            age = _age_sec(p.get("last_seen"))
             online = (age is not None) and (age <= PUMP_OFFLINE_SEC)
+            if online:
+                loc["loc_online"] = True
 
             if not online:
                 st = "🔴 Offline"
             else:
-                if plc_state == "run":
-                    st = "🟢 En marcha"
-                elif plc_state == "stop":
-                    st = "⏸️ Detenida"
+                if p.get("plc_state") == "run":
+                    st = "🟢 Run"
+                elif p.get("plc_state") == "stop":
+                    st = "⏸ Stop"
                 else:
-                    st = "❓ Sin estado"
+                    st = "❓ N/D"
 
-            age_txt = "" if age is None else f" (hace {age}s)"
-            lines.append(f"• {name}: {st}{age_txt}")
+            age_txt = "" if age is None else f" ({age}s)"
+            loc["pumps"].append(f"• {p['pump_name']}: {st}{age_txt}")
 
-        msg = "\n".join(lines)
+        # ---- Construir mensaje SOLO con localidades online ----
+        online_locs = [loc for loc in by_loc.values() if loc["loc_online"]]
+
+        now_txt = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines = [f"📊 <b>REPORTE SCADA POR LOCALIDAD</b> <code>{now_txt}</code>", ""]
+
+        if not online_locs:
+            lines.append("⚠️ No hay localidades online (según staleness).")
+            msg = "\n".join(lines)
+            send_telegram_message(msg)
+            return {"ok": True, "forced": True, "locations_sent": 0}
+
+        # Ordenar por nombre
+        online_locs.sort(key=lambda x: (x["location_name"] or "").lower())
+
+        for loc in online_locs:
+            lines.append(f"📍 <b>{loc['location_name']}</b>")
+            if loc["tanks"]:
+                lines.append("  🛢️ <b>Tanques</b>")
+                for s in loc["tanks"]:
+                    lines.append(f"  • {s}")
+            if loc["pumps"]:
+                lines.append("  🚰 <b>Bombas</b>")
+                for s in loc["pumps"]:
+                    lines.append(f"  {s}")
+            lines.append("")  # separador
+
+        msg = "\n".join(lines).strip()
         send_telegram_message(msg)
 
-        return {"ok": True, "forced": True, "tanks": len(tanks), "pumps": len(pumps)}
+        return {"ok": True, "forced": True, "locations_sent": len(online_locs)}
 
     except Exception as e:
         return JSONResponse(
