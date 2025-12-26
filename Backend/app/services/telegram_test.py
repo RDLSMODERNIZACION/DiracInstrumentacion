@@ -15,7 +15,10 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 TANK_OFFLINE_SEC = int(os.getenv("TELEGRAM_TANK_OFFLINE_SEC", "600"))  # 10 min
 PUMP_OFFLINE_SEC = int(os.getenv("TELEGRAM_PUMP_OFFLINE_SEC", "300"))  # 5 min
-TZ = ZoneInfo(os.getenv("TELEGRAM_TZ", "America/Argentina/Buenos_Aires"))
+
+# ✅ Zona horaria para mostrar hora local
+TZ_NAME = os.getenv("TELEGRAM_TZ", "America/Argentina/Buenos_Aires")
+TZ = ZoneInfo(TZ_NAME)
 
 
 def _age_sec(ts):
@@ -123,14 +126,19 @@ def telegram_report_now():
         # ---- Construir mensaje SOLO con localidades online ----
         online_locs = [loc for loc in by_loc.values() if loc["loc_online"]]
 
-        now_txt = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-        lines = [f"📊 <b>REPORTE SCADA POR LOCALIDAD</b> <code>{now_txt}</code>", ""]
+        # ✅ Hora local Argentina (o la que venga en TELEGRAM_TZ)
+        # Incluimos tz abreviada para que sea obvio (ART suele aparecer como -03)
+        now_local = datetime.now(TZ)
+        tz_abbr = now_local.strftime("%Z") or TZ_NAME
+        now_txt = now_local.strftime("%Y-%m-%d %H:%M:%S")
+
+        lines = [f"📊 <b>REPORTE SCADA POR LOCALIDAD</b> <code>{now_txt}</code> <i>{tz_abbr}</i>", ""]
 
         if not online_locs:
             lines.append("⚠️ No hay localidades online (según staleness).")
             msg = "\n".join(lines)
             send_telegram_message(msg)
-            return {"ok": True, "forced": True, "locations_sent": 0}
+            return {"ok": True, "forced": True, "locations_sent": 0, "tz": TZ_NAME}
 
         # Ordenar por nombre
         online_locs.sort(key=lambda x: (x["location_name"] or "").lower())
@@ -150,7 +158,7 @@ def telegram_report_now():
         msg = "\n".join(lines).strip()
         send_telegram_message(msg)
 
-        return {"ok": True, "forced": True, "locations_sent": len(online_locs)}
+        return {"ok": True, "forced": True, "locations_sent": len(online_locs), "tz": TZ_NAME}
 
     except Exception as e:
         return JSONResponse(
