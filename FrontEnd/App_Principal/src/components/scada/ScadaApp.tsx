@@ -180,7 +180,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
   const noPermsBanner = (
     <div className="max-w-7xl mx-auto p-4 md:p-6">
       <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-4 py-3 text-sm">
-        No tenés permisos suficientes para acceder a esta sección. Se requiere rol <b>Owner</b> o <b>Admin</b>.
+        No tenés permisos suficientes para acceder a esta sección.
       </div>
     </div>
   );
@@ -188,7 +188,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
   const ownerOnlyBanner = (
     <div className="max-w-7xl mx-auto p-4 md:p-6">
       <div className="rounded-lg border border-rose-300 bg-rose-50 text-rose-800 px-4 py-3 text-sm">
-        No tenés permisos suficientes para acceder a <b>Administración</b>. Se requiere rol <b>Owner</b>.
+        No tenés permisos suficientes para acceder a <b>Administración</b>. 
       </div>
     </div>
   );
