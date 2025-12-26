@@ -1,0 +1,387 @@
+@import url("https://unpkg.com/leaflet/dist/leaflet.css");
+
+:root {
+  --bg: #070b1a;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel2: rgba(255, 255, 255, 0.1);
+  --stroke: rgba(255, 255, 255, 0.12);
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.7);
+  --muted2: rgba(255, 255, 255, 0.55);
+
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --alarm: #ef4444;
+  --off: #94a3b8;
+
+  --water: #60a5fa;
+  --sludge: #c084fc;
+  --zone: #22d3ee;
+
+  --glow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 30px rgba(0, 0, 0, 0.35);
+  --glowStrong: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 45px rgba(0, 0, 0, 0.45);
+
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 420px 1fr;
+}
+
+.sidebar {
+  padding: 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(800px 500px at 20% 0%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(600px 500px at 60% 30%, rgba(192, 132, 252, 0.1), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brandTitle {
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.brandSub {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.btnRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 9px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: var(--glow);
+  font-size: 13px;
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+.btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: var(--glowStrong);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btnPrimary {
+  border-color: rgba(34, 211, 238, 0.35);
+  background: rgba(34, 211, 238, 0.12);
+}
+.btnDanger {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: var(--glow);
+}
+
+.sectionTitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kpiBig {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+.kpiLabel {
+  font-size: 12px;
+  color: var(--muted2);
+  margin-top: 3px;
+}
+
+.pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+.item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+.itemTitle {
+  font-weight: 800;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.itemSub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.switch {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  position: relative;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.switchKnob {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  transition: left 0.18s ease, background 0.18s ease;
+}
+.switch.on {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+.switch.on .switchKnob {
+  left: 23px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+/* Overlay */
+.badgeOverlay {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 999;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--glow);
+}
+
+.badgeTitle {
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.badgeSub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* Toasts */
+.toastWrap {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  z-index: 999;
+  display: grid;
+  gap: 10px;
+  width: 360px;
+}
+
+.toast {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: var(--glow);
+}
+.toastTitle {
+  font-weight: 900;
+  font-size: 13px;
+}
+.toastSub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.mapWrap {
+  position: relative;
+}
+.map {
+  height: 100%;
+}
+
+/* ✅ MAPA GRIS cuando MapContainer tiene className="mapGrey"
+   OJO: Leaflet renderiza tiles como <img class="leaflet-tile"> */
+.leaflet-container.mapGrey .leaflet-tile {
+  filter: grayscale(1) contrast(1.05) brightness(0.9);
+}
+
+/* (Opcional) suaviza un poco el mapa en gris para que no sea tan "duro" */
+.leaflet-container.mapGrey {
+  transition: filter 0.15s ease;
+}
+
+/* Pulse marker (assets) */
+.pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  position: relative;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8), 0 12px 30px rgba(0, 0, 0, 0.25);
+}
+.pulse::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.65;
+  }
+  80% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* FLOW animation helper: brighten lines when flowing */
+.leaflet-interactive.flow-on {
+  filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.35))
+    drop-shadow(0 0 14px rgba(96, 165, 250, 0.18));
+}
+
+/* Leaflet tweaks */
+.leaflet-container {
+  background: #061029;
+}
+.leaflet-control-attribution {
+  display: none;
+}
+
+/* ===========================
+   MAPA GRIS (robusto)
+   =========================== */
+
+/* 1) Lo más confiable: filtrar el pane completo de tiles */
+.leaflet-container.mapGrey .leaflet-tile-pane {
+  filter: grayscale(1) contrast(1.05) brightness(0.9) !important;
+}
+
+/* 2) Backup: por si el navegador no aplica bien al pane */
+.leaflet-container.mapGrey img.leaflet-tile {
+  filter: grayscale(1) contrast(1.05) brightness(0.9) !important;
+}
+
+/* 3) Extra: algunos plugins/variantes usan .leaflet-layer */
+.leaflet-container.mapGrey .leaflet-layer {
+  filter: grayscale(1) contrast(1.05) brightness(0.9) !important;
+}

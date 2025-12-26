@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, cpSync, rmSync } from "node:fs";
 const root = process.cwd(); // App_Principal
 const app1 = `${root}/../App_1`;
 const app2 = `${root}/../App_2`;
+const mapa = `${root}/../Mapa`; // ✅ NUEVO
 
 const run = (cmd, cwd) => {
   console.log(`\n▶ ${cmd} (cwd=${cwd})`);
@@ -13,8 +14,12 @@ const run = (cmd, cwd) => {
 
 // Workaround cross-plataforma para optional deps (rollup) en embebidas
 const cleanInstall = (dir) => {
-  try { rmSync(`${dir}/node_modules`, { recursive: true, force: true }); } catch {}
-  try { rmSync(`${dir}/package-lock.json`, { force: true }); } catch {}
+  try {
+    rmSync(`${dir}/node_modules`, { recursive: true, force: true });
+  } catch {}
+  try {
+    rmSync(`${dir}/package-lock.json`, { force: true });
+  } catch {}
   run("npm install --no-audit --no-fund", dir);
 };
 
@@ -27,10 +32,17 @@ cpSync(`${app1}/dist`, `${root}/public/kpi`, { recursive: true });
 // ==== App_2 (Infraestructura) ====
 cleanInstall(app2);
 run("npm run build", app2);
-if (!existsSync(`${root}/public/infraestructura`)) mkdirSync(`${root}/public/infraestructura`, { recursive: true });
+if (!existsSync(`${root}/public/infraestructura`))
+  mkdirSync(`${root}/public/infraestructura`, { recursive: true });
 cpSync(`${app2}/dist`, `${root}/public/infraestructura`, { recursive: true });
 
-console.log("\n✅ Embebidas copiadas a /public (kpi/ e infraestructura/)");
+// ==== Mapa (NUEVO, sin iframe) ====
+cleanInstall(mapa);
+run("npm run build", mapa);
+if (!existsSync(`${root}/public/mapa`)) mkdirSync(`${root}/public/mapa`, { recursive: true });
+cpSync(`${mapa}/dist`, `${root}/public/mapa`, { recursive: true });
+
+console.log("\n✅ Apps copiadas a /public (kpi/, infraestructura/ y mapa/)");
 
 // ==== Workaround rollup para la App_Principal (root) ====
 // Tras el `npm ci` de Vercel, ejecutamos un `npm install` en Linux
