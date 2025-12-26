@@ -11,6 +11,10 @@ from app.db import get_conn, close_pool
 # ===== Telegram reporter (30 min) =====
 from app.services.telegram_reporter import start_telegram_reporter, stop_telegram_reporter
 
+# ===== Telegram test router (lo pusiste en app/services/telegram_test.py) =====
+# Importante: si el archivo está en services, lo importamos desde services.
+from app.services.telegram_test import router as telegram_test_router
+
 # ===== Rutas base (operación / visualización) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
@@ -21,25 +25,21 @@ from app.routes.arduino_controler import router as arduino_router
 from app.routes.infraestructura import router as infraestructura_router
 
 # ✅ Infraestructura (edición: CRUD de edges + update_layout_many)
-# IMPORTANTE: esto publica DELETE /infraestructura/edges/{edge_id}
 from app.routes.infra_edit.edit import router as infra_edit_router
 
 # ===== PLC (consumo de comandos) =====
 from app.routes.plc import router as plc_router
 
 # ===== KPI (agregador) =====
-#   /kpi/* (dashboard + tanques)  y  /kpi/bombas/*  (bombas_live)
 from app.routes.kpi import router as kpi_router
 
 # ===== Dirac (operación) =====
 from app.routes.dirac.me import router as dirac_me_router
-# OJO: NO importamos app.routes.dirac.users (queda deshabilitado)
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
 
 # ===== Administración (CRUD abierto) =====
-# (asegurate de tener app/routes/dirac_admin/__init__.py vacío)
 from app.routes.dirac_admin.companies import router as admin_companies_router
 from app.routes.dirac_admin.users import router as admin_users_router
 from app.routes.dirac_admin.locations import router as admin_locations_router
@@ -88,6 +88,7 @@ def root():
         "docs": "/docs" if enable_docs else None,
         "health": "/health",
         "health_db": "/health/db",
+        "telegram_test": "/telegram/test",
     }
 
 
@@ -146,6 +147,9 @@ app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
 
+# ===== Telegram test =====
+# (archivo: app/services/telegram_test.py)
+app.include_router(telegram_test_router)
 
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
