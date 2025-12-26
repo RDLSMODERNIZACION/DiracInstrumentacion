@@ -106,7 +106,7 @@ export function OverviewGrid({
     const nid = t.tankId ?? t.id;
     const ws = lookupStatus("TK", nid);
     const derived = fallbackFromLatest(t?.latest?.ts);
-    let status = preferFresh(ws, derived);
+    const status = preferFresh(ws, derived);
 
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
@@ -117,7 +117,7 @@ export function OverviewGrid({
     const nid = p.pumpId ?? p.id;
     const ws = lookupStatus("PU", nid);
     const derived = fallbackFromLatest(p?.latest?.ts);
-    let status = preferFresh(ws, derived);
+    const status = preferFresh(ws, derived);
 
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
@@ -246,19 +246,21 @@ export function OverviewGrid({
   }, [groups, locFilter, showTank, showPump, showAll, isConnectedItem]);
 
   // ====== RENDER ======
-  // ✅ Mobile: 1 col (todo prolijo). Desde sm: tanques 2 col, bombas 1.
+  // ✅ Mobile (grid-cols-1): TODO ocupa 100% ancho.
+  // ✅ Forzamos stretch real en grid + items.
+  // ✅ Desde sm: tanques 2 columnas; bombas 1.
   const renderItemCard = (it: GroupItem) => {
     if (it.kind === "tank") {
       const t = it.obj;
       return (
-        <div key={`wrap-t-${t.id}`} className="col-span-1 sm:col-span-2 w-full">
+        <div key={`wrap-t-${t.id}`} className="col-span-1 sm:col-span-2 w-full justify-self-stretch">
           <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...tankCardProps(t)} />
         </div>
       );
     }
     const p = it.obj;
     return (
-      <div key={`wrap-p-${p.id}`} className="col-span-1 w-full">
+      <div key={`wrap-p-${p.id}`} className="col-span-1 w-full justify-self-stretch">
         <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...pumpCardProps(p)} />
       </div>
     );
@@ -268,7 +270,6 @@ export function OverviewGrid({
     <div className="space-y-4 sm:space-y-6">
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white/80 backdrop-blur shadow-sm">
-        {/* Top row: selector + (opcional) debug */}
         <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
           {/* Selector ubicación */}
           <div className="flex-1 min-w-0">
@@ -293,7 +294,7 @@ export function OverviewGrid({
           </div>
         </div>
 
-        {/* Bottom row: botones (mobile friendly) */}
+        {/* Botonera responsive */}
         <div className="flex items-center">
           <div className="inline-flex flex-wrap w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
             <button
@@ -343,8 +344,9 @@ export function OverviewGrid({
               className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-4"
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
-              {/* ✅ Mobile: 1 col. sm: 2 cols. md+: más columnas */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-2 sm:gap-3 items-stretch">
+              {/* ✅ Mobile: 1 columna => bombas y tanques full width */}
+              {/* ✅ Forzamos estirado horizontal de items */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2 sm:gap-3 items-stretch justify-items-stretch">
                 {g.items.map(renderItemCard)}
               </div>
             </div>

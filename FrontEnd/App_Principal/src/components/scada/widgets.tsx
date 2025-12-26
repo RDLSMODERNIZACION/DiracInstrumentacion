@@ -63,12 +63,12 @@ export function TankCard({
   // ---- Conexión: WS o fallback por timestamp de última lectura ----
   const fallbackAge = secSince(tank?.latest?.ts);
   const fallbackTone: ConnStatus["tone"] = fallbackAge < WARN_SEC ? "ok" : fallbackAge < CRIT_SEC ? "warn" : "bad";
-  const conn: ConnStatus =
-    status ?? { online: fallbackAge < CRIT_SEC, ageSec: fallbackAge, tone: fallbackTone };
+  const conn: ConnStatus = status ?? { online: fallbackAge < CRIT_SEC, ageSec: fallbackAge, tone: fallbackTone };
 
   // Dim por señal + status
   const tone = conn.tone ?? signal;
-  const dimClass = tone === "bad" ? "filter grayscale opacity-60" : tone === "warn" ? "filter saturate-50 opacity-90" : "";
+  const dimClass =
+    tone === "bad" ? "filter grayscale opacity-60" : tone === "warn" ? "filter saturate-50 opacity-90" : "";
 
   return (
     <button
@@ -141,7 +141,7 @@ export function TankCard({
 }
 
 /* =====================
-   PumpCard – Vertical Compact (FINITA + MISMO ALTO DEL TANQUE)
+   PumpCard – Vertical Compact
 ===================== */
 
 export function PumpCard({
@@ -155,12 +155,14 @@ export function PumpCard({
   signal?: "ok" | "warn" | "bad";
   status?: ConnStatus;
 }) {
-  const state: "run" | "stop" | undefined =
-    pump?.state === "run" || pump?.state === "stop" ? pump.state : undefined;
+  const state: "run" | "stop" | undefined = pump?.state === "run" || pump?.state === "stop" ? pump.state : undefined;
 
   const ageSecFromRow =
-    Number.isFinite(pump?.age_sec) ? Number(pump.age_sec) :
-    Number.isFinite(pump?.ageSec) ? Number(pump.ageSec) : undefined;
+    Number.isFinite(pump?.age_sec)
+      ? Number(pump.age_sec)
+      : Number.isFinite(pump?.ageSec)
+      ? Number(pump.ageSec)
+      : undefined;
 
   const onlineFromRow =
     typeof pump?.online === "boolean"
@@ -174,23 +176,21 @@ export function PumpCard({
   const derivedAge = Number.isFinite(ageSecFromRow) ? (ageSecFromRow as number) : secSince(ts);
   const derivedTone: ConnStatus["tone"] = onlineFromRow ? "ok" : derivedAge < WARN_SEC ? "warn" : "bad";
 
-  const conn: ConnStatus = status ?? {
-    online: onlineFromRow,
-    ageSec: derivedAge,
-    tone: derivedTone,
-  };
+  const conn: ConnStatus =
+    status ?? {
+      online: onlineFromRow,
+      ageSec: derivedAge,
+      tone: derivedTone,
+    };
 
   const isOn = state === "run";
   const canSpin = Boolean(conn.online && isOn);
   const tone = conn.tone ?? signal;
 
-  const ring =
-    tone === "ok" ? "ring-emerald-300" : tone === "warn" ? "ring-amber-300" : "ring-rose-300";
-  const dot =
-    conn.online ? "bg-emerald-500" : tone === "warn" ? "bg-amber-500" : "bg-rose-500";
+  const ring = tone === "ok" ? "ring-emerald-300" : tone === "warn" ? "ring-amber-300" : "ring-rose-300";
+  const dot = conn.online ? "bg-emerald-500" : tone === "warn" ? "bg-amber-500" : "bg-rose-500";
 
-  const dimClass =
-    tone === "bad" ? "grayscale opacity-60" : tone === "warn" ? "saturate-75" : "";
+  const dimClass = tone === "bad" ? "grayscale opacity-60" : tone === "warn" ? "saturate-75" : "";
 
   const title = (pump?.name ?? "—").toString();
 
@@ -198,10 +198,10 @@ export function PumpCard({
     <button
       onClick={onClick}
       className={[
-        // 🔻 finita + misma altura visual del tanque (que es grande)
-        // si tu grilla estira alturas por row, esto mantiene proporción y no se ve "gigante"
-        "group relative w-full max-w-[150px] min-w-[140px]",
-        "h-full", // deja que la grilla defina el alto (para igualarlo al tanque)
+        // ✅ MOBILE: full width real (sin max/min que la achiquen)
+        // ✅ DESKTOP: vuelve a ser "finita" como antes
+        "group relative block w-full max-w-none min-w-0 sm:max-w-[150px] sm:min-w-[140px]",
+        "h-full",
         "rounded-2xl border border-slate-200 bg-white",
         "px-2.5 py-2 text-left transition",
         "hover:shadow-md active:scale-[0.99]",
@@ -223,13 +223,11 @@ export function PumpCard({
         <div className="mb-2">
           <div className="flex items-center gap-1">
             <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
-            <div className="truncate text-[12px] font-semibold text-slate-900 leading-tight">
-              {title}
-            </div>
+            <div className="truncate text-[12px] font-semibold text-slate-900 leading-tight">{title}</div>
           </div>
         </div>
 
-        {/* Centro: Impeller más protagonista */}
+        {/* Centro: Impeller */}
         <div className="flex flex-1 items-center justify-center">
           <div className="relative grid h-14 w-14 place-items-center">
             <div className={`absolute inset-0 rounded-full ring-2 ${ring}`} />
@@ -273,7 +271,6 @@ export function PumpCard({
           </span>
         </div>
 
-        {/* Mini label opcional, muy discreto (no última conexión) */}
         <div className="mt-1 text-[10px] text-slate-500 text-right">
           {canSpin ? "Lista" : !conn.online ? "Sin conexión" : "Apagada"}
         </div>
