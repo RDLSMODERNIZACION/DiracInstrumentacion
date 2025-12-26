@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -55,6 +55,7 @@ type LocationGroup = {
 
 export default function InfraDiagram() {
   const navigate = useNavigate();
+  const location = useLocation(); // ✅ para leer y preservar querystring
 
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
@@ -71,16 +72,17 @@ export default function InfraDiagram() {
 
   // === DEBUG TOOLS ===
   const DEBUG = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search);
+    const qs = new URLSearchParams(location.search); // ✅ usar location.search
     return qs.get("debug") === "1" || import.meta.env.DEV;
-  }, []);
+  }, [location.search]);
+
   const log = (...args: any[]) => {
     if (DEBUG) console.log("[InfraDiagram]", ...args);
   };
 
-  // Company scope leído del querystring (?company_id=XX)
+  // ✅ Company scope leído del querystring (?company_id=XX) - REACTIVO
   const companyId = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search);
+    const qs = new URLSearchParams(location.search);
     const raw = qs.get("company_id");
     if (raw == null) return null;
     const trimmed = raw.trim();
@@ -88,13 +90,12 @@ export default function InfraDiagram() {
     const v = Number(trimmed);
     if (!Number.isFinite(v) || v <= 0) return null;
     return v;
-  }, []);
+  }, [location.search]);
 
   useEffect(() => {
     log("href:", window.location.href);
     log("companyId from query:", companyId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [companyId]); // ✅ loguea cuando cambie
 
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
@@ -523,9 +524,11 @@ export default function InfraDiagram() {
             {editMode ? "Salir edición" : "Editar"}
           </button>
 
-          {/* ✅ BOTÓN MAPA (AL LADO DE EDITAR) -> RUTA INTERNA /mapa */}
+          {/* ✅ BOTÓN MAPA preservando ?company_id=... */}
           <button
-            onClick={() => navigate("/mapa")}
+            onClick={() =>
+              navigate({ pathname: "/mapa", search: location.search })
+            }
             style={{
               padding: "4px 8px",
               borderRadius: 8,
