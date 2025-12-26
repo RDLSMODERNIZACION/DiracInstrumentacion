@@ -1,7 +1,7 @@
 // src/components/scada/ScadaApp.tsx
 import React from "react";
 import type { User } from "./types";
-import { Drawer, NavItem, KpiPill, Badge } from "./ui";
+import { Drawer, NavItem, Badge } from "./ui";
 import { OverviewGrid } from "./pages";
 import { sevMeta, severityOf } from "./utils";
 import { usePlant } from "./hooks/usePlant";
@@ -88,8 +88,12 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       const id = (t as any).id ?? (t as any).tank_id;
       if (id == null) continue;
 
-      const rawAge =
-        Number.isFinite((t as any).ageSec) ? (t as any).ageSec : Number.isFinite((t as any).age_sec) ? (t as any).age_sec : null;
+      const rawAge = Number.isFinite((t as any).ageSec)
+        ? (t as any).ageSec
+        : Number.isFinite((t as any).age_sec)
+        ? (t as any).age_sec
+        : null;
+
       const age = rawAge !== null ? Number(rawAge) : null;
       const online =
         typeof (t as any).online === "boolean" ? (t as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
@@ -104,8 +108,12 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       const id = (p as any).id ?? (p as any).pump_id;
       if (id == null) continue;
 
-      const rawAge =
-        Number.isFinite((p as any).ageSec) ? (p as any).ageSec : Number.isFinite((p as any).age_sec) ? (p as any).age_sec : null;
+      const rawAge = Number.isFinite((p as any).ageSec)
+        ? (p as any).ageSec
+        : Number.isFinite((p as any).age_sec)
+        ? (p as any).age_sec
+        : null;
+
       const age = rawAge !== null ? Number(rawAge) : null;
       const online =
         typeof (p as any).online === "boolean" ? (p as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
@@ -141,6 +149,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
         location: { id: locId, name: locName },
       });
     }
+
     for (const p of plant.pumps ?? []) {
       const id = Number((p as any).id ?? (p as any).pump_id);
       if (!Number.isFinite(id)) continue;
@@ -153,6 +162,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
         location: { id: locId, name: locName },
       });
     }
+
     return rows;
   }, [plant.tanks, plant.pumps]);
 
@@ -163,7 +173,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       onOpenPump={(id) => setDrawer({ type: "pump", id })}
       statusByKey={statusByKey}
       assetLocs={assetLocs}
-      /* debug */  // quitado para silenciar warnings/console
+      /* debug */ // quitado para silenciar warnings/console
     />
   );
 
@@ -224,18 +234,16 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     }
     if (view === "kpi") {
       if (!canSeeAdvanced) return noPermsBanner;
-      return <EmbeddedAppFrame key={app1Src} src={app1Src} title="KPIs" />; // key fuerza remount al cambiar empresa
+      return <EmbeddedAppFrame key={app1Src} src={app1Src} title="KPIs" />;
     }
     if (view === "infra") {
       if (!canSeeAdvanced) return noPermsBanner;
-      return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />; // key fuerza remount al cambiar empresa
+      return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />;
     }
-    // view === "admin" (solo owner)
     if (!canSeeAdmin) return ownerOnlyBanner;
-    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administración" />; // key por consistencia
+    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administración" />;
   })();
 
-  // Nombre de empresa mostrado en UI (preferí el que trae initialUser, y como backup el id seleccionado)
   const companyBadge = user.company?.name ?? (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");
 
   return (
@@ -256,7 +264,6 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <NavItem label="Operaciones" active={view === "operaciones"} onClick={() => setView("operaciones")} />
               <NavItem label="KPIs" active={view === "kpi"} onClick={() => setView("kpi")} />
               <NavItem label="Infraestructura" active={view === "infra"} onClick={() => setView("infra")} />
-              {/* Nueva pestaña Administración (embed app). Se puede mostrar siempre; el gating se hace en el body */}
               <NavItem label="Administración" active={view === "admin"} onClick={() => setView("admin")} />
             </nav>
           </div>
@@ -282,13 +289,10 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
                     ? "Infraestructura"
                     : "Administración"}
                 </div>
-                {view === "operaciones" && (
-                  <div className="hidden md:flex items-center gap-3 text-xs">
-                    <KpiPill label="Nivel promedio" value={loading && !plant.tanks.length ? "…" : `${kpis.avg}%`} tone="ok" />
-                    <KpiPill label="Críticos" value={loading && !plant.tanks.length ? "…" : `${kpis.crit}`} tone={kpis.crit ? "bad" : "ok"} />
-                  </div>
-                )}
+
+                {/* ✅ Eliminado: KpiPill de "Nivel promedio" y "Críticos" */}
               </div>
+
               <div className="flex items-center gap-3">
                 <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{companyBadge}</span>
                 <LogoutButton />
@@ -325,8 +329,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
             {drawer.type === "pump" && p && (
               <PumpFaceplate
                 pump={p}
-                // UI: solo owner/admin/operator ven habilitados los botones
-                canControlPumps={canControlPumps}
+                canControl={canControlPumps}
               />
             )}
           </Drawer>

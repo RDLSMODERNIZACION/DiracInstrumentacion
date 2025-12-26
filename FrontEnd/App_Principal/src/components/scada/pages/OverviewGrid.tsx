@@ -1,6 +1,5 @@
 // src/components/scada/pages/OverviewGrid.tsx
 import React from "react";
-import { SummaryCard } from "../ui";
 import { TankCard, PumpCard } from "../widgets";
 
 export type ConnStatus = { online: boolean; ageSec: number; tone: "ok" | "warn" | "bad" };
@@ -37,9 +36,7 @@ type AssetLocLink =
       location?: { id?: number | null; code?: string | null; name?: string | null } | null;
     };
 
-type GroupItem =
-  | { kind: "tank"; obj: any }
-  | { kind: "pump"; obj: any };
+type GroupItem = | { kind: "tank"; obj: any } | { kind: "pump"; obj: any };
 
 type Group = {
   key: string;
@@ -207,7 +204,6 @@ export function OverviewGrid({
       g.pumps++;
     });
 
-    // Ordenar items dentro del grupo por nombre
     for (const g of out.values()) {
       g.items.sort((a, b) => {
         const an = (a.obj?.name ?? a.obj?.display_name ?? a.obj?.code ?? "").toString();
@@ -216,7 +212,6 @@ export function OverviewGrid({
       });
     }
 
-    // Ordenar grupos: con localidad primero, “Sin localidad” al final
     const list = Array.from(out.values());
     list.sort((a, b) => {
       const an = a.locId == null;
@@ -251,81 +246,84 @@ export function OverviewGrid({
   }, [groups, locFilter, showTank, showPump, showAll, isConnectedItem]);
 
   // ====== RENDER ======
-  // ✅ Tanques ocupan 2 columnas, bombas 1 (mejor agrupación visual)
+  // ✅ Mobile: 1 col (todo prolijo). Desde sm: tanques 2 col, bombas 1.
   const renderItemCard = (it: GroupItem) => {
     if (it.kind === "tank") {
       const t = it.obj;
       return (
-        <div key={`wrap-t-${t.id}`} className="col-span-2">
+        <div key={`wrap-t-${t.id}`} className="col-span-1 sm:col-span-2 w-full">
           <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...tankCardProps(t)} />
         </div>
       );
     }
     const p = it.obj;
     return (
-      <div key={`wrap-p-${p.id}`} className="col-span-1">
+      <div key={`wrap-p-${p.id}`} className="col-span-1 w-full">
         <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...pumpCardProps(p)} />
       </div>
     );
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white/80 backdrop-blur shadow-sm">
-        {/* Selector ubicación */}
-        <div className="flex-1 min-w-[240px]">
-          <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>
-          <select
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            value={typeof locFilter === "number" ? String(locFilter) : locFilter}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "ALL" || v === "NONE") setLocFilter(v);
-              else setLocFilter(Number(v));
-            }}
-          >
-            <option value="ALL">Todas</option>
-            <option value="NONE">Sin localidad</option>
-            {groups.filter((g) => g.locId != null).map((g) => (
-              <option key={g.key} value={String(g.locId)}>
-                {g.groupName}
-              </option>
-            ))}
-          </select>
+      <div className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white/80 backdrop-blur shadow-sm">
+        {/* Top row: selector + (opcional) debug */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
+          {/* Selector ubicación */}
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>
+            <select
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={typeof locFilter === "number" ? String(locFilter) : locFilter}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "ALL" || v === "NONE") setLocFilter(v);
+                else setLocFilter(Number(v));
+              }}
+            >
+              <option value="ALL">Todas</option>
+              <option value="NONE">Sin localidad</option>
+              {groups.filter((g) => g.locId != null).map((g) => (
+                <option key={g.key} value={String(g.locId)}>
+                  {g.groupName}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {/* 🔥 CONTROL SEGMENTADO UNIFICADO */}
+        {/* Bottom row: botones (mobile friendly) */}
         <div className="flex items-center">
-          <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden shadow-sm">
+          <div className="inline-flex flex-wrap w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
             <button
               onClick={() => setShowTank((v) => !v)}
               className={[
-                "px-3 py-2 text-sm transition",
+                "flex-1 sm:flex-none px-3 py-2 text-sm transition",
                 showTank ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
               ].join(" ")}
             >
               Tanques
             </button>
 
-            <div className="w-px bg-slate-300" />
+            <div className="hidden sm:block w-px bg-slate-300" />
 
             <button
               onClick={() => setShowPump((v) => !v)}
               className={[
-                "px-3 py-2 text-sm transition",
+                "flex-1 sm:flex-none px-3 py-2 text-sm transition",
                 showPump ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
               ].join(" ")}
             >
               Bombas
             </button>
 
-            <div className="w-px bg-slate-300" />
+            <div className="hidden sm:block w-px bg-slate-300" />
 
             <button
               onClick={() => setShowAll((v) => !v)}
               className={[
-                "px-3 py-2 text-sm transition whitespace-nowrap",
+                "w-full sm:w-auto px-3 py-2 text-sm transition whitespace-nowrap border-t sm:border-t-0 border-slate-300 sm:border-0",
                 showAll ? "bg-white text-slate-700 hover:bg-slate-50" : "bg-slate-900 text-white",
               ].join(" ")}
             >
@@ -336,7 +334,7 @@ export function OverviewGrid({
       </div>
 
       {/* Grupos */}
-      <section className="space-y-4">
+      <section className="space-y-3 sm:space-y-4">
         {filteredGroups.map((g) => {
           const acc = accentForGroup(g.key);
           return (
@@ -345,8 +343,8 @@ export function OverviewGrid({
               className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-4"
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
-              {/* ✅ Grid compacto y con más columnas para agrupar mejor */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2 sm:gap-3 place-items-start">
+              {/* ✅ Mobile: 1 col. sm: 2 cols. md+: más columnas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7 gap-2 sm:gap-3 items-stretch">
                 {g.items.map(renderItemCard)}
               </div>
             </div>
