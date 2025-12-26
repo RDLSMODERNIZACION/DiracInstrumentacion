@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import { useNavigate } from "react-router-dom";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -31,7 +32,10 @@ import {
 } from "@/layout/layoutIO";
 
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
-import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
+import {
+  createEdge as apiCreateEdge,
+  deleteEdge as apiDeleteEdge,
+} from "./services/edges";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -50,6 +54,8 @@ type LocationGroup = {
 };
 
 export default function InfraDiagram() {
+  const navigate = useNavigate();
+
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
 
@@ -98,7 +104,9 @@ export default function InfraDiagram() {
   // Node-RED ports state
   type PortRef = { nodeId: string; side: "out" | "in"; x: number; y: number };
   const [connectFrom, setConnectFrom] = useState<PortRef | null>(null);
-  const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
+  const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   // Ops drawer (por nodo)
@@ -115,7 +123,10 @@ export default function InfraDiagram() {
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
-  const showTip = (e: React.MouseEvent, content: { title: string; lines: string[] }) => {
+  const showTip = (
+    e: React.MouseEvent,
+    content: { title: string; lines: string[] }
+  ) => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTip({
@@ -171,18 +182,26 @@ export default function InfraDiagram() {
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
-    const manifolds = uiNodes.filter((n) => n.type === "manifold") as ManifoldNode[];
+    const manifolds = uiNodes.filter(
+      (n) => n.type === "manifold"
+    ) as ManifoldNode[];
     const valves = uiNodes.filter((n) => n.type === "valve") as ValveNode[];
 
     const pumpsFixed = layoutRow(pumps, { startX: 140, startY: 380, gapX: 160 });
-    const manifoldsFixed = layoutRow(manifolds, { startX: 480, startY: 260, gapX: 180 });
+    const manifoldsFixed = layoutRow(manifolds, {
+      startX: 480,
+      startY: 260,
+      gapX: 180,
+    });
     const valvesFixed = layoutRow(valves, { startX: 640, startY: 260, gapX: 180 });
     const tanksFixed = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const fixedById: Record<string, UINode> = {};
-    [...pumpsFixed, ...manifoldsFixed, ...valvesFixed, ...tanksFixed].forEach((n) => {
-      fixedById[n.id] = n;
-    });
+    [...pumpsFixed, ...manifoldsFixed, ...valvesFixed, ...tanksFixed].forEach(
+      (n) => {
+        fixedById[n.id] = n;
+      }
+    );
 
     uiNodes = uiNodes.map((n) => {
       const f = fixedById[n.id];
@@ -200,8 +219,12 @@ export default function InfraDiagram() {
     }));
 
     const saved = loadLayoutFromStorage();
-    const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-    const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
+    const cleaned = (saved ?? []).filter(
+      (p) => Number.isFinite(p.x) && Number.isFinite(p.y)
+    );
+    const nodesWithSaved = cleaned.length
+      ? (importLayoutLS(uiNodes, cleaned) as UINode[])
+      : uiNodes;
 
     setNodes(nodesWithSaved);
     setEdges(uiEdges);
@@ -416,12 +439,18 @@ export default function InfraDiagram() {
     const valves = nodes.filter((n) => n.type === "valve") as ValveNode[];
 
     const newPumps = layoutRow(pumps, { startX: 140, startY: 380, gapX: 160 });
-    const newManifolds = layoutRow(manifolds, { startX: 480, startY: 260, gapX: 180 });
+    const newManifolds = layoutRow(manifolds, {
+      startX: 480,
+      startY: 260,
+      gapX: 180,
+    });
     const newValves = layoutRow(valves, { startX: 640, startY: 260, gapX: 180 });
     const newTanks = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const byId: Record<string, UINode> = {};
-    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach((n) => (byId[n.id] = n));
+    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach(
+      (n) => (byId[n.id] = n)
+    );
     const next = nodes.map((n) => byId[n.id] ?? n);
     setNodes(next);
 
@@ -494,11 +523,9 @@ export default function InfraDiagram() {
             {editMode ? "Salir edición" : "Editar"}
           </button>
 
-          {/* ✅ BOTÓN MAPA (AL LADO DE EDITAR) */}
+          {/* ✅ BOTÓN MAPA (AL LADO DE EDITAR) -> RUTA INTERNA /mapa */}
           <button
-            onClick={() => {
-              window.location.href = "https://TU-APP-MAPA.vercel.app";
-            }}
+            onClick={() => navigate("/mapa")}
             style={{
               padding: "4px 8px",
               borderRadius: 8,
@@ -620,14 +647,7 @@ export default function InfraDiagram() {
 
                 {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect
-                  x={vb.minx}
-                  y={vb.miny}
-                  width={vb.w}
-                  height={vb.h}
-                  fill="url(#grid)"
-                  opacity={0.6}
-                />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
                 {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
@@ -803,7 +823,12 @@ export default function InfraDiagram() {
         </div>
       )}
 
-      <OpsDrawer open={opsOpen} onClose={() => setOpsOpen(false)} node={opsNode} onCommandSent={() => {}} />
+      <OpsDrawer
+        open={opsOpen}
+        onClose={() => setOpsOpen(false)}
+        node={opsNode}
+        onCommandSent={() => {}}
+      />
 
       <LocationDrawer
         open={locationDrawerOpen}
