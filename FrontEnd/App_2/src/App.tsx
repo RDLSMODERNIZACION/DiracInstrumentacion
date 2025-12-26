@@ -1,18 +1,9 @@
-import { Routes, Route } from "react-router-dom";
+// src/App.tsx
 import InfraDiagram from "@/features/infra-diagram/InfraDiagram";
-import MapaPage from "@/pages/MapaPage";
 import { installNetDebug } from "@/lib/netdebug";
 
-installNetDebug();
+installNetDebug(); // activa logs si ?debug=net o ?debug=1
 
 export default function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<InfraDiagram />} />
-      <Route path="/mapa" element={<MapaPage />} />
-
-      {/* ✅ fallback: si cae en cualquier cosa, mostramos InfraDiagram sin tocar la URL */}
-      <Route path="*" element={<InfraDiagram />} />
-    </Routes>
-  );
+  return <InfraDiagram />;
 }

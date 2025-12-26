@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { useNavigate, useLocation } from "react-router-dom";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -51,9 +50,6 @@ type LocationGroup = {
 };
 
 export default function InfraDiagram() {
-  const navigate = useNavigate();
-  const location = useLocation(); // ✅ para leer y preservar querystring
-
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
 
@@ -69,17 +65,16 @@ export default function InfraDiagram() {
 
   // === DEBUG TOOLS ===
   const DEBUG = useMemo(() => {
-    const qs = new URLSearchParams(location.search);
+    const qs = new URLSearchParams(window.location.search);
     return qs.get("debug") === "1" || import.meta.env.DEV;
-  }, [location.search]);
-
+  }, []);
   const log = (...args: any[]) => {
     if (DEBUG) console.log("[InfraDiagram]", ...args);
   };
 
-  // ✅ Company scope leído del querystring (?company_id=XX) - REACTIVO
+  // Company scope leído del querystring (?company_id=XX)
   const companyId = useMemo(() => {
-    const qs = new URLSearchParams(location.search);
+    const qs = new URLSearchParams(window.location.search);
     const raw = qs.get("company_id");
     if (raw == null) return null;
     const trimmed = raw.trim();
@@ -87,16 +82,13 @@ export default function InfraDiagram() {
     const v = Number(trimmed);
     if (!Number.isFinite(v) || v <= 0) return null;
     return v;
-  }, [location.search]);
+  }, []);
 
-  // ✅ LOGS empresa / URL
   useEffect(() => {
-    const qs = new URLSearchParams(location.search);
-    console.log("[InfraDiagram] URL:", window.location.href);
-    console.log("[InfraDiagram] location.search:", location.search);
-    console.log("[InfraDiagram] company_id raw:", qs.get("company_id"));
-    console.log("[InfraDiagram] companyId parsed:", companyId);
-  }, [location.search, companyId]);
+    log("href:", window.location.href);
+    log("companyId from query:", companyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
@@ -135,54 +127,18 @@ export default function InfraDiagram() {
   };
   const hideTip = () => setTip(null);
 
-  // ✅ helper: arma querystring para scope
-  const scopeQS = useMemo(() => {
-    return companyId ? `?company_id=${encodeURIComponent(String(companyId))}` : "";
-  }, [companyId]);
-
   // Consulta viva
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
-      // ✅ ahora sí: manda company_id al backend
-      const urlNodes = `/infraestructura/get_layout_combined${scopeQS}`;
-      const urlEdges = `/infraestructura/get_layout_edges${scopeQS}`;
-
-      console.log("[InfraDiagram] FETCH urls:", { urlNodes, urlEdges });
+      const urlNodes = `/infraestructura/get_layout_combined`;
+      const urlEdges = `/infraestructura/get_layout_edges`;
       log("FETCH ->", urlNodes, "&&", urlEdges);
 
       const [nodesRaw, edgesRaw] = await Promise.all([
         fetchJSON<CombinedNodeDTO[]>(urlNodes, signal),
         fetchJSON<EdgeDTO[]>(urlEdges, signal),
       ]);
-
-      console.log(
-        "[InfraDiagram] RESP counts:",
-        "nodes:",
-        nodesRaw?.length ?? 0,
-        "edges:",
-        edgesRaw?.length ?? 0
-      );
-
-      const locStats = (nodesRaw ?? []).reduce(
-        (acc: any, n: any) => {
-          if (n.location_id != null) acc.withLocationId++;
-          if (n.location_name != null && String(n.location_name).trim()) acc.withLocationName++;
-          return acc;
-        },
-        { withLocationId: 0, withLocationName: 0 }
-      );
-
-      console.log("[InfraDiagram] location fields in response:", locStats);
-      console.log(
-        "[InfraDiagram] sample nodes:",
-        (nodesRaw ?? []).slice(0, 5).map((n: any) => ({
-          node_id: n.node_id,
-          type: n.type,
-          location_id: n.location_id,
-          location_name: n.location_name,
-        }))
-      );
 
       log("FETCH DONE", {
         nodes: nodesRaw?.length ?? 0,
@@ -212,17 +168,6 @@ export default function InfraDiagram() {
       location_id: n.location_id ?? null,
       location_name: n.location_name ?? null,
     })) as UINode[];
-
-    const uiLocStats = uiNodes.reduce(
-      (acc, n) => {
-        if ((n as any).location_id != null) acc.withLocationId++;
-        if ((n as any).location_name != null && String((n as any).location_name).trim())
-          acc.withLocationName++;
-        return acc;
-      },
-      { withLocationId: 0, withLocationName: 0 }
-    );
-    console.log("[InfraDiagram] UI location fields:", uiLocStats);
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
@@ -278,13 +223,14 @@ export default function InfraDiagram() {
     return m;
   }, [nodes]);
 
-  // viewBox y fondo dinámicos + CLAMP
+  // viewBox y fondo dinámicos + CLAMP (evita “zoom microscópico”)
   useEffect(() => {
     if (!nodes.length) return;
 
     const pad = 90;
     const bb = computeBBox(nodes, pad);
 
+    // clamp: si un nodo quedó lejísimo, no te destruye la vista
     const MAX_W = 6000;
     const MAX_H = 3500;
 
@@ -364,6 +310,7 @@ export default function InfraDiagram() {
     }
   };
 
+  // ====== Edit / Connect ======
   const toggleEdit = () => {
     const next = !editMode;
     setEditMode(next);
@@ -374,6 +321,7 @@ export default function InfraDiagram() {
     }
   };
 
+  // ====== Node-RED helpers ======
   function halfByType(t?: string) {
     const tt = (t || "").toLowerCase();
     if (tt === "tank") return 66;
@@ -423,6 +371,7 @@ export default function InfraDiagram() {
     }
   }
 
+  // Keyboard: Delete para borrar, Esc cancelar
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -478,11 +427,13 @@ export default function InfraDiagram() {
     }
   };
 
+  // preview path para cable fantasma
   function previewPath(sx: number, sy: number, ex: number, ey: number) {
     const mx = (sx + ex) / 2;
     return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ey} L ${ex} ${ey}`;
   }
 
+  // abrir operación por nodo
   function maybeOpenOps(n: UINode) {
     if (editMode || connectMode) return;
     if (n.online !== true) return;
@@ -490,6 +441,7 @@ export default function InfraDiagram() {
     setOpsOpen(true);
   }
 
+  // abrir drawer de localidad al hacer click en el fondo
   function handleLocationClick(g: LocationGroup) {
     setSelectedLocation({ id: g.location_id, name: g.name });
     setLocationDrawerOpen(true);
@@ -532,20 +484,6 @@ export default function InfraDiagram() {
             }}
           >
             {editMode ? "Salir edición" : "Editar"}
-          </button>
-
-          {/* ✅ BOTÓN MAPA preservando ?company_id=... */}
-          <button
-            onClick={() => navigate({ pathname: "/mapa", search: location.search })}
-            style={{
-              padding: "4px 8px",
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              background: "#ffffff",
-              color: "#0f172a",
-            }}
-          >
-            MAPA
           </button>
 
           <button
@@ -592,7 +530,13 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={ZOOM_MAX} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+          <TransformWrapper
+            initialScale={ZOOM_MAX}
+            minScale={0.6}
+            maxScale={ZOOM_MAX}
+            centerOnInit
+            wheel={{ step: 0.1 }}
+          >
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -612,7 +556,12 @@ export default function InfraDiagram() {
               >
                 <defs>
                   <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+                    <path
+                      d="M 24 0 L 0 0 0 24"
+                      fill="none"
+                      stroke="#e2e8f0"
+                      strokeWidth="1"
+                    />
                   </pattern>
 
                   <filter id="glow">
@@ -645,9 +594,11 @@ export default function InfraDiagram() {
                   </linearGradient>
                 </defs>
 
+                {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
+                {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
                   <g
                     key={`loc-bg-${g.key}`}
@@ -683,6 +634,7 @@ export default function InfraDiagram() {
                   </g>
                 ))}
 
+                {/* Aristas */}
                 {edges.map((e) =>
                   editMode ? (
                     <EditableEdge
@@ -700,6 +652,7 @@ export default function InfraDiagram() {
                   )
                 )}
 
+                {/* Nodos */}
                 {nodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -752,6 +705,7 @@ export default function InfraDiagram() {
                   ) : null
                 )}
 
+                {/* Puertos Node-RED */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
@@ -799,6 +753,7 @@ export default function InfraDiagram() {
                     );
                   })}
 
+                {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
                     d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
@@ -831,6 +786,7 @@ export default function InfraDiagram() {
   );
 }
 
+// util de debug para contar tipos
 function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
   const out: Record<string, number> = {};
   for (const r of rows || []) {
