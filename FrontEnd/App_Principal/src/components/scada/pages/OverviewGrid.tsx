@@ -110,6 +110,7 @@ export function OverviewGrid({
     const ws = lookupStatus("TK", nid);
     const derived = fallbackFromLatest(t?.latest?.ts);
     let status = preferFresh(ws, derived);
+
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
     return { status: { ...status, tone } };
@@ -120,6 +121,7 @@ export function OverviewGrid({
     const ws = lookupStatus("PU", nid);
     const derived = fallbackFromLatest(p?.latest?.ts);
     let status = preferFresh(ws, derived);
+
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
     return { status: { ...status, tone } };
@@ -205,6 +207,7 @@ export function OverviewGrid({
       g.pumps++;
     });
 
+    // Ordenar items dentro del grupo por nombre
     for (const g of out.values()) {
       g.items.sort((a, b) => {
         const an = (a.obj?.name ?? a.obj?.display_name ?? a.obj?.code ?? "").toString();
@@ -213,6 +216,7 @@ export function OverviewGrid({
       });
     }
 
+    // Ordenar grupos: con localidad primero, “Sin localidad” al final
     const list = Array.from(out.values());
     list.sort((a, b) => {
       const an = a.locId == null;
@@ -247,12 +251,23 @@ export function OverviewGrid({
   }, [groups, locFilter, showTank, showPump, showAll, isConnectedItem]);
 
   // ====== RENDER ======
-  const renderItemCard = (it: GroupItem) =>
-    it.kind === "tank" ? (
-      <TankCard key={`T-${it.obj.id}`} tank={it.obj} onClick={() => onOpenTank(it.obj.id)} {...tankCardProps(it.obj)} />
-    ) : (
-      <PumpCard key={`P-${it.obj.id}`} pump={it.obj} onClick={() => onOpenPump(it.obj.id)} {...pumpCardProps(it.obj)} />
+  // ✅ Tanques ocupan 2 columnas, bombas 1 (mejor agrupación visual)
+  const renderItemCard = (it: GroupItem) => {
+    if (it.kind === "tank") {
+      const t = it.obj;
+      return (
+        <div key={`wrap-t-${t.id}`} className="col-span-2">
+          <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...tankCardProps(t)} />
+        </div>
+      );
+    }
+    const p = it.obj;
+    return (
+      <div key={`wrap-p-${p.id}`} className="col-span-1">
+        <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...pumpCardProps(p)} />
+      </div>
     );
+  };
 
   return (
     <div className="space-y-6">
@@ -272,7 +287,7 @@ export function OverviewGrid({
           >
             <option value="ALL">Todas</option>
             <option value="NONE">Sin localidad</option>
-            {groups.filter(g => g.locId != null).map(g => (
+            {groups.filter((g) => g.locId != null).map((g) => (
               <option key={g.key} value={String(g.locId)}>
                 {g.groupName}
               </option>
@@ -284,7 +299,7 @@ export function OverviewGrid({
         <div className="flex items-center">
           <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden shadow-sm">
             <button
-              onClick={() => setShowTank(v => !v)}
+              onClick={() => setShowTank((v) => !v)}
               className={[
                 "px-3 py-2 text-sm transition",
                 showTank ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
@@ -296,7 +311,7 @@ export function OverviewGrid({
             <div className="w-px bg-slate-300" />
 
             <button
-              onClick={() => setShowPump(v => !v)}
+              onClick={() => setShowPump((v) => !v)}
               className={[
                 "px-3 py-2 text-sm transition",
                 showPump ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
@@ -308,7 +323,7 @@ export function OverviewGrid({
             <div className="w-px bg-slate-300" />
 
             <button
-              onClick={() => setShowAll(v => !v)}
+              onClick={() => setShowAll((v) => !v)}
               className={[
                 "px-3 py-2 text-sm transition whitespace-nowrap",
                 showAll ? "bg-white text-slate-700 hover:bg-slate-50" : "bg-slate-900 text-white",
@@ -330,7 +345,8 @@ export function OverviewGrid({
               className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-4"
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {/* ✅ Grid compacto y con más columnas para agrupar mejor */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2 sm:gap-3 place-items-start">
                 {g.items.map(renderItemCard)}
               </div>
             </div>

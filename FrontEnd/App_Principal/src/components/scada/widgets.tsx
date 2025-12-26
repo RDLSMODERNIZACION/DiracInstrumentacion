@@ -28,7 +28,7 @@ function secSince(ts?: string | null) {
 /**
  * TankCard (versión compacta 3D)
  * - Mantiene el mismo diseño visual
- * - NUEVO: prop `status`: { online, ageSec, tone }
+ * - prop `status`: { online, ageSec, tone }
  * - Si no viene `status`, se deriva de `tank.latest.ts` (igual que Faceplate)
  * - `signal`: "ok" | "warn" | "bad" (fallback visual adicional)
  */
@@ -47,10 +47,8 @@ export function TankCard({
   const meta = sevMeta(sev);
 
   // valores seguros
-  const level =
-    typeof tank.levelPct === "number" && isFinite(tank.levelPct) ? tank.levelPct : null;
-  const capacity =
-    typeof tank.capacityL === "number" && isFinite(tank.capacityL) ? tank.capacityL : null;
+  const level = typeof tank.levelPct === "number" && isFinite(tank.levelPct) ? tank.levelPct : null;
+  const capacity = typeof tank.capacityL === "number" && isFinite(tank.capacityL) ? tank.capacityL : null;
 
   // volumen mostrado: usa el de la API si existe; si no, lo calcula
   const volume =
@@ -64,18 +62,13 @@ export function TankCard({
 
   // ---- Conexión: WS o fallback por timestamp de última lectura ----
   const fallbackAge = secSince(tank?.latest?.ts);
-  const fallbackTone: ConnStatus["tone"] =
-    fallbackAge < WARN_SEC ? "ok" : fallbackAge < CRIT_SEC ? "warn" : "bad";
-  const conn: ConnStatus = status ?? { online: fallbackAge < CRIT_SEC, ageSec: fallbackAge, tone: fallbackTone };
+  const fallbackTone: ConnStatus["tone"] = fallbackAge < WARN_SEC ? "ok" : fallbackAge < CRIT_SEC ? "warn" : "bad";
+  const conn: ConnStatus =
+    status ?? { online: fallbackAge < CRIT_SEC, ageSec: fallbackAge, tone: fallbackTone };
 
   // Dim por señal + status
   const tone = conn.tone ?? signal;
-  const dimClass =
-    tone === "bad"
-      ? "filter grayscale opacity-60"
-      : tone === "warn"
-      ? "filter saturate-50 opacity-90"
-      : "";
+  const dimClass = tone === "bad" ? "filter grayscale opacity-60" : tone === "warn" ? "filter saturate-50 opacity-90" : "";
 
   return (
     <button
@@ -88,9 +81,7 @@ export function TankCard({
         <div className="flex items-center gap-2">
           {/* Pastilla de conexión (siempre, con WS o fallback) */}
           <Badge tone={conn.tone}>
-            {conn.online
-              ? `Online${Number.isFinite(conn.ageSec) ? ` · ${fmtAgoShort(conn.ageSec)}` : ""}`
-              : "Offline"}
+            {conn.online ? `Online${Number.isFinite(conn.ageSec) ? ` · ${fmtAgoShort(conn.ageSec)}` : ""}` : "Offline"}
           </Badge>
           {/* Severidad por nivel */}
           <Badge tone={meta.tone}>{meta.label}</Badge>
@@ -129,9 +120,7 @@ export function TankCard({
 
         {/* Lecturas a la derecha */}
         <div className="flex-1 min-w-0">
-          <div className="text-3xl font-semibold tabular-nums leading-none text-slate-800">
-            {Math.round(pct)}%
-          </div>
+          <div className="text-3xl font-semibold tabular-nums leading-none text-slate-800">{Math.round(pct)}%</div>
           <div className="text-xs text-slate-500 truncate">
             {fmtLiters(volume)} / {fmtLiters(capacity)}
           </div>
@@ -152,11 +141,8 @@ export function TankCard({
 }
 
 /* =====================
-   PumpCard (mejorada)
+   PumpCard – Vertical Compact (FINITA + MISMO ALTO DEL TANQUE)
 ===================== */
-
-const safeDate = (iso?: string | null) =>
-  iso ? new Date(iso).toLocaleString("es-AR", { hour12: false }) : "—";
 
 export function PumpCard({
   pump,
@@ -169,9 +155,6 @@ export function PumpCard({
   signal?: "ok" | "warn" | "bad";
   status?: ConnStatus;
 }) {
-  // ====== Normalización desde backend ======
-  // v_pumps_with_status devuelve: state ("run"/"stop"), online (bool), age_sec (num),
-  // event_ts (último cambio de estado), hb_ts (último heartbeat).
   const state: "run" | "stop" | undefined =
     pump?.state === "run" || pump?.state === "stop" ? pump.state : undefined;
 
@@ -179,19 +162,17 @@ export function PumpCard({
     Number.isFinite(pump?.age_sec) ? Number(pump.age_sec) :
     Number.isFinite(pump?.ageSec) ? Number(pump.ageSec) : undefined;
 
-  // Online directo del backend; si no viene, infiere por age_sec
   const onlineFromRow =
     typeof pump?.online === "boolean"
       ? pump.online
-      : (Number.isFinite(ageSecFromRow) ? (ageSecFromRow as number) < CRIT_SEC : false);
+      : Number.isFinite(ageSecFromRow)
+      ? (ageSecFromRow as number) < CRIT_SEC
+      : false;
 
-  // Timestamp a mostrar: preferimos hb_ts; si no, event_ts
   const ts: string | null = pump?.hb_ts ?? pump?.event_ts ?? pump?.latest?.ts ?? null;
 
-  // ====== Conexión: usar props.status si viene de OverviewGrid; sino derivar de backend ======
   const derivedAge = Number.isFinite(ageSecFromRow) ? (ageSecFromRow as number) : secSince(ts);
-  const derivedTone: ConnStatus["tone"] =
-    onlineFromRow ? "ok" : derivedAge < WARN_SEC ? "warn" : "bad";
+  const derivedTone: ConnStatus["tone"] = onlineFromRow ? "ok" : derivedAge < WARN_SEC ? "warn" : "bad";
 
   const conn: ConnStatus = status ?? {
     online: onlineFromRow,
@@ -199,143 +180,110 @@ export function PumpCard({
     tone: derivedTone,
   };
 
-  // Condición de giro: SOLO si hay conexión y está ON
   const isOn = state === "run";
   const canSpin = Boolean(conn.online && isOn);
-
-  // Combinar señal con status
   const tone = conn.tone ?? signal;
 
-  // Colores derivados del tono para detalles sutiles
-  const toneRing =
+  const ring =
     tone === "ok" ? "ring-emerald-300" : tone === "warn" ? "ring-amber-300" : "ring-rose-300";
-  const toneGlow =
-    tone === "ok" ? "from-emerald-200/40" : tone === "warn" ? "from-amber-200/40" : "from-rose-200/40";
+  const dot =
+    conn.online ? "bg-emerald-500" : tone === "warn" ? "bg-amber-500" : "bg-rose-500";
 
-  // Atenuación global por conectividad
   const dimClass =
-    tone === "bad"
-      ? "grayscale opacity-60"
-      : tone === "warn"
-      ? "saturate-75"
-      : "";
+    tone === "bad" ? "grayscale opacity-60" : tone === "warn" ? "saturate-75" : "";
+
+  const title = (pump?.name ?? "—").toString();
 
   return (
     <button
       onClick={onClick}
-      className={`group relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-white/80 p-4 text-left backdrop-blur transition hover:shadow-xl ${dimClass}`}
-      aria-label={`Bomba ${pump?.name ?? ""}`}
+      className={[
+        // 🔻 finita + misma altura visual del tanque (que es grande)
+        // si tu grilla estira alturas por row, esto mantiene proporción y no se ve "gigante"
+        "group relative w-full max-w-[150px] min-w-[140px]",
+        "h-full", // deja que la grilla defina el alto (para igualarlo al tanque)
+        "rounded-2xl border border-slate-200 bg-white",
+        "px-2.5 py-2 text-left transition",
+        "hover:shadow-md active:scale-[0.99]",
+        dimClass,
+      ].join(" ")}
+      aria-label={`Bomba ${title}`}
     >
-      {/* Glow decorativo según tono */}
+      {/* Glow sutil */}
       <div
-        className={`pointer-events-none absolute -top-16 -right-16 h-40 w-40 rounded-full bg-gradient-to-br ${toneGlow} to-transparent blur-2xl`}
+        className={[
+          "pointer-events-none absolute -top-8 -right-8 h-24 w-24 rounded-full blur-2xl",
+          tone === "ok" ? "bg-emerald-200/35" : tone === "warn" ? "bg-amber-200/35" : "bg-rose-200/30",
+        ].join(" ")}
       />
 
-      {/* Header: nombre + estado */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-semibold text-slate-900">{pump?.name ?? "—"}</div>
-          <div className="text-[11px] text-slate-500">
-            {conn.online ? "Conectada" : "Desconectada"}
-            {typeof conn.ageSec === "number" && isFinite(conn.ageSec) && conn.online
-              ? ` · ${fmtAgoShort(conn.ageSec)}`
-              : ""}
+      {/* Layout vertical compacto */}
+      <div className="relative z-10 flex h-full flex-col">
+        {/* Top: Nombre */}
+        <div className="mb-2">
+          <div className="flex items-center gap-1">
+            <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
+            <div className="truncate text-[12px] font-semibold text-slate-900 leading-tight">
+              {title}
+            </div>
           </div>
         </div>
 
-        {/* Conexión + ON/OFF */}
-        <div className="flex items-center gap-2">
-          <Badge tone={tone}>
-            {conn.online
-              ? `Online${Number.isFinite(conn.ageSec) ? ` · ${fmtAgoShort(conn.ageSec)}` : ""}`
-              : "Offline"}
-          </Badge>
+        {/* Centro: Impeller más protagonista */}
+        <div className="flex flex-1 items-center justify-center">
+          <div className="relative grid h-14 w-14 place-items-center">
+            <div className={`absolute inset-0 rounded-full ring-2 ${ring}`} />
+            <div className={`relative h-10 w-10 ${canSpin ? "text-emerald-500" : "text-slate-400"}`}>
+              <Impeller spinning={canSpin} />
+            </div>
 
-          {/* Luz de estado + chip ON/OFF */}
+            {!canSpin && (
+              <span
+                className="pointer-events-none absolute inset-0 grid place-items-center text-slate-400/70"
+                title={!conn.online ? "Sin conexión" : "Apagada"}
+              >
+                <LockIcon className="h-4 w-4" />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom: Chips */}
+        <div className="mt-2 flex items-center justify-between">
           <span
-            className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
-              isOn ? "bg-emerald-500" : "bg-slate-300"
-            }`}
-          >
-            {isOn && <span className="absolute inset-0 rounded-full animate-pulse-ring" />}
-          </span>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full border ${
-              isOn
+            className={[
+              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+              conn.online
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-slate-50 text-slate-600 border-slate-200"
-            }`}
+                : tone === "warn"
+                ? "bg-amber-50 text-amber-700 border-amber-200"
+                : "bg-rose-50 text-rose-700 border-rose-200",
+            ].join(" ")}
+          >
+            {conn.online ? "Online" : "Offline"}
+          </span>
+
+          <span
+            className={[
+              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+              isOn ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-600 border-slate-200",
+            ].join(" ")}
           >
             {isOn ? "ON" : "OFF"}
           </span>
         </div>
-      </div>
 
-      {/* Última lectura + Impeller */}
-      <div className="mt-3 flex items-center justify-between rounded-xl border bg-slate-50/70 p-3">
-        <div className="flex items-center gap-2 text-xs text-slate-600">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="opacity-70"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          <span>Última lectura</span>
+        {/* Mini label opcional, muy discreto (no última conexión) */}
+        <div className="mt-1 text-[10px] text-slate-500 text-right">
+          {canSpin ? "Lista" : !conn.online ? "Sin conexión" : "Apagada"}
         </div>
-
-        <div className="text-xs font-medium text-slate-700">{safeDate(ts)}</div>
-
-        {/* Impeller: gira solo si canSpin; si no, muestra candado sutil */}
-        <div className="ml-3 relative grid h-10 w-10 place-items-center">
-          <div
-            className={`absolute inset-0 rounded-full ring-2 ${toneRing} transition-transform group-hover:scale-105`}
-          />
-          <div className={`relative h-8 w-8 ${canSpin ? "text-emerald-500" : "text-slate-400"}`}>
-            <Impeller spinning={canSpin} />
-          </div>
-          {!canSpin && (
-            <span
-              className="pointer-events-none absolute inset-0 grid place-items-center text-slate-400/70"
-              title={!conn.online ? "Sin conexión" : "Apagada"}
-            >
-              <LockIcon className="h-3.5 w-3.5" />
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Etiqueta mini debajo del impulsor */}
-      <div className="mt-2 text-right text-[10px]">
-        {canSpin ? (
-          <span className="text-emerald-600">Listo Arrancar</span>
-        ) : !conn.online ? (
-          <span className="text-slate-500">Sin conexión</span>
-        ) : (
-          <span className="text-slate-500">Apagada</span>
-        )}
       </div>
 
       <style>
         {`
-        @keyframes rotate360 { to { transform: rotate(360deg); } }
-        .impeller-spin { animation: rotate360 1.1s linear infinite; }
-
-        @keyframes pulseRing {
-          0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); }
-          70% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
-          100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
-        }
-        .animate-pulse-ring { animation: pulseRing 1.6s ease-out infinite; }
-      `}
+          @keyframes rotate360 { to { transform: rotate(360deg); } }
+          .impeller-spin { animation: rotate360 1.05s linear infinite; }
+        `}
       </style>
     </button>
   );
