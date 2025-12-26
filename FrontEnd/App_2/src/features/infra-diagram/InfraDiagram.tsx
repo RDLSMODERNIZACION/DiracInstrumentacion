@@ -364,7 +364,11 @@ export default function InfraDiagram() {
         },
         ...prev,
       ]);
-      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
+      log("EDGE CREATED", {
+        id: created.edge_id,
+        src: created.src_node_id,
+        dst: created.dst_node_id,
+      });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
@@ -380,7 +384,11 @@ export default function InfraDiagram() {
         setOpsOpen(false);
         setLocationDrawerOpen(false);
         setSelectedLocation(null);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedEdgeId != null && editMode) {
+      } else if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedEdgeId != null &&
+        editMode
+      ) {
         e.preventDefault();
         handleDeleteEdge(selectedEdgeId);
       }
@@ -484,6 +492,22 @@ export default function InfraDiagram() {
             }}
           >
             {editMode ? "Salir edición" : "Editar"}
+          </button>
+
+          {/* ✅ BOTÓN MAPA (AL LADO DE EDITAR) */}
+          <button
+            onClick={() => {
+              window.location.href = "https://TU-APP-MAPA.vercel.app";
+            }}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
+            }}
+          >
+            MAPA
           </button>
 
           <button
@@ -596,7 +620,14 @@ export default function InfraDiagram() {
 
                 {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
+                <rect
+                  x={vb.minx}
+                  y={vb.miny}
+                  width={vb.w}
+                  height={vb.h}
+                  fill="url(#grid)"
+                  opacity={0.6}
+                />
 
                 {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
