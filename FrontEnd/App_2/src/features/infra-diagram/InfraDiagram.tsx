@@ -3,32 +3,11 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
-import {
-  computeBBox,
-  isSet,
-  layoutRow,
-  nodesByIdAsArray,
-  numberOr,
-  toNumber,
-} from "./layout";
+import { computeBBox, isSet, layoutRow, nodesByIdAsArray, numberOr, toNumber } from "./layout";
 
-import {
-  CombinedNodeDTO,
-  EdgeDTO,
-  Tip,
-  UINode,
-  UIEdge,
-  TankNode,
-  PumpNode,
-  ManifoldNode,
-  ValveNode,
-} from "./types";
+import { CombinedNodeDTO, EdgeDTO, Tip, UINode, UIEdge, TankNode, PumpNode, ManifoldNode, ValveNode } from "./types";
 
-import {
-  loadLayoutFromStorage,
-  saveLayoutToStorage,
-  importLayout as importLayoutLS,
-} from "@/layout/layoutIO";
+import { loadLayoutFromStorage, saveLayoutToStorage, importLayout as importLayoutLS } from "@/layout/layoutIO";
 
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
@@ -55,6 +34,9 @@ export default function InfraDiagram() {
 
   // ✅ Zoom máximo inicial (arranca “cerca”)
   const ZOOM_MAX = 2.5;
+
+  // ✅ URL del mapa (full page)
+  const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
 
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdge[]>([]);
@@ -90,6 +72,18 @@ export default function InfraDiagram() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ Ir a mapa saliendo del iframe si existe
+  const goToMapa = () => {
+    try {
+      const w: any = window;
+      const topWin = w.top || w;
+      topWin.location.href = MAPA_URL;
+    } catch {
+      // Si el navegador bloquea top-navigation por sandbox, al menos abrimos nueva pestaña
+      window.open(MAPA_URL, "_blank", "noopener,noreferrer");
+    }
+  };
+
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
@@ -107,10 +101,7 @@ export default function InfraDiagram() {
 
   // Drawer de localidad
   const [locationDrawerOpen, setLocationDrawerOpen] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<{
-    id: number | null;
-    name: string;
-  } | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<{ id: number | null; name: string } | null>(null);
 
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -249,10 +240,7 @@ export default function InfraDiagram() {
   const locationGroups: LocationGroup[] = useMemo(() => {
     if (!nodes.length) return [];
 
-    const groups: Record<
-      string,
-      { key: string; name: string; nodes: UINode[]; location_id: number | null }
-    > = {};
+    const groups: Record<string, { key: string; name: string; nodes: UINode[]; location_id: number | null }> = {};
 
     for (const n of nodes) {
       const key =
@@ -262,17 +250,10 @@ export default function InfraDiagram() {
           ? `name:${n.location_name}`
           : "unknown";
 
-      const locName =
-        n.location_name ||
-        (n.location_id != null ? `Ubicación ${n.location_id}` : "Sin ubicación");
+      const locName = n.location_name || (n.location_id != null ? `Ubicación ${n.location_id}` : "Sin ubicación");
 
       if (!groups[key]) {
-        groups[key] = {
-          key,
-          name: locName,
-          nodes: [],
-          location_id: n.location_id ?? null,
-        };
+        groups[key] = { key, name: locName, nodes: [], location_id: n.location_id ?? null };
       }
       groups[key].nodes.push(n);
     }
@@ -281,12 +262,7 @@ export default function InfraDiagram() {
       .filter((g) => g.nodes.length > 0)
       .map((g) => {
         const bbox = computeBBox(g.nodes, 80);
-        return {
-          key: g.key,
-          name: g.name,
-          bbox,
-          location_id: g.location_id,
-        };
+        return { key: g.key, name: g.name, bbox, location_id: g.location_id };
       });
   }, [nodes]);
 
@@ -355,13 +331,7 @@ export default function InfraDiagram() {
     try {
       const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
       setEdges((prev) => [
-        {
-          id: created.edge_id,
-          a: created.src_node_id,
-          b: created.dst_node_id,
-          relacion: created.relacion,
-          prioridad: created.prioridad,
-        },
+        { id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad },
         ...prev,
       ]);
       log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
@@ -473,6 +443,21 @@ export default function InfraDiagram() {
         )}
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {/* ✅ NUEVO: botón Mapa */}
+          <button
+            onClick={goToMapa}
+            title="Abrir Mapa"
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
+            }}
+          >
+            Mapa
+          </button>
+
           <button
             onClick={toggleEdit}
             style={{
@@ -530,13 +515,7 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper
-            initialScale={ZOOM_MAX}
-            minScale={0.6}
-            maxScale={ZOOM_MAX}
-            centerOnInit
-            wheel={{ step: 0.1 }}
-          >
+          <TransformWrapper initialScale={ZOOM_MAX} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -556,12 +535,7 @@ export default function InfraDiagram() {
               >
                 <defs>
                   <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path
-                      d="M 24 0 L 0 0 0 24"
-                      fill="none"
-                      stroke="#e2e8f0"
-                      strokeWidth="1"
-                    />
+                    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="1" />
                   </pattern>
 
                   <filter id="glow">
@@ -594,11 +568,9 @@ export default function InfraDiagram() {
                   </linearGradient>
                 </defs>
 
-                {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
-                {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
                   <g
                     key={`loc-bg-${g.key}`}
@@ -622,19 +594,13 @@ export default function InfraDiagram() {
                     <text
                       x={g.bbox.minx + 16}
                       y={g.bbox.miny + 24}
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        fill: "#64748b",
-                        pointerEvents: "none",
-                      }}
+                      style={{ fontSize: 12, fontWeight: 600, fill: "#64748b", pointerEvents: "none" }}
                     >
                       {g.name}
                     </text>
                   </g>
                 ))}
 
-                {/* Aristas */}
                 {edges.map((e) =>
                   editMode ? (
                     <EditableEdge
@@ -652,7 +618,6 @@ export default function InfraDiagram() {
                   )
                 )}
 
-                {/* Nodos */}
                 {nodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -705,7 +670,6 @@ export default function InfraDiagram() {
                   ) : null
                 )}
 
-                {/* Puertos Node-RED */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
@@ -739,12 +703,7 @@ export default function InfraDiagram() {
                             setSelectedEdgeId(null);
                             setOpsOpen(false);
                             setLocationDrawerOpen(false);
-                            setConnectFrom({
-                              nodeId: n.id,
-                              side: "out",
-                              x: P.out.x,
-                              y: P.out.y,
-                            });
+                            setConnectFrom({ nodeId: n.id, side: "out", x: P.out.x, y: P.out.y });
                             const p = clientToSvgPoint(e);
                             if (p) setMouseSvg(p);
                           }}
@@ -753,7 +712,6 @@ export default function InfraDiagram() {
                     );
                   })}
 
-                {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
                     d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
