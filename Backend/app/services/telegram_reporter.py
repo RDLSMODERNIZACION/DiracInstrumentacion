@@ -13,12 +13,18 @@ from app.services.telegram_client import send_telegram_message
 log = logging.getLogger("telegram-reporter")
 
 TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "1") == "1"
+
+# ✅ Intervalo real (Render ENV pisa esto). Default: 1800s = 30 min
 TELEGRAM_REPORT_EVERY_SEC = int(os.getenv("TELEGRAM_REPORT_EVERY_SEC", "1800"))
 
 TANK_OFFLINE_SEC = int(os.getenv("TELEGRAM_TANK_OFFLINE_SEC", "600"))  # 10 min
 PUMP_OFFLINE_SEC = int(os.getenv("TELEGRAM_PUMP_OFFLINE_SEC", "300"))  # 5 min
+
 TZ_NAME = os.getenv("TELEGRAM_TZ", "America/Argentina/Buenos_Aires")
 TZ = ZoneInfo(TZ_NAME)
+
+# ✅ Si querés que mande AL ARRANCAR: "1" (default). Si no: "0"
+TELEGRAM_SEND_ON_STARTUP = os.getenv("TELEGRAM_SEND_ON_STARTUP", "1") == "1"
 
 _stop = threading.Event()
 _thread: threading.Thread | None = None
@@ -37,6 +43,7 @@ def _build_report_like_test() -> tuple[str, int]:
     - Agrupado por localidad
     - SOLO localidades online
     - Hora en TELEGRAM_TZ (Argentina por defecto)
+    Retorna: (mensaje, locations_sent)
     """
     with get_conn() as conn, conn.cursor() as cur:
         # ---- TANQUES + localidad + último ingest ----
@@ -135,8 +142,8 @@ def _build_report_like_test() -> tuple[str, int]:
 
     lines = [f"📊 <b>REPORTE SCADA POR LOCALIDAD</b> <code>{now_txt}</code> <i>{tz_abbr}</i>", ""]
 
+    # requisito: NO enviar si no hay online
     if not online_locs:
-        # requisito: no enviar si no hay online -> devolvemos 0
         lines.append("⚠️ No hay localidades online (según staleness).")
         return "\n".join(lines), 0
 
@@ -156,8 +163,18 @@ def _build_report_like_test() -> tuple[str, int]:
 
 
 def _worker():
-    log.info("Telegram reporter started (%ss)", TELEGRAM_REPORT_EVERY_SEC)
-    next_run = 0  # manda 1 al iniciar
+    log.info(
+        "Telegram reporter started. enabled=%s interval=%ss (ENV TELEGRAM_REPORT_EVERY_SEC=%s) send_on_startup=%s tz=%s",
+        TELEGRAM_ENABLED,
+        TELEGRAM_REPORT_EVERY_SEC,
+        os.getenv("TELEGRAM_REPORT_EVERY_SEC"),
+        TELEGRAM_SEND_ON_STARTUP,
+        TZ_NAME,
+    )
+
+    # ✅ Si querés que mande al iniciar: next_run = now
+    # ✅ Si NO querés que mande al iniciar: next_run = now + intervalo
+    next_run = time.time() if TELEGRAM_SEND_ON_STARTUP else (time.time() + max(30, TELEGRAM_REPORT_EVERY_SEC))
 
     while not _stop.is_set():
         now = time.time()
@@ -166,6 +183,7 @@ def _worker():
             try:
                 msg, locations_sent = _build_report_like_test()
 
+                # NO enviar si no hay localidades online
                 if locations_sent > 0:
                     send_telegram_message(msg)
                 else:
