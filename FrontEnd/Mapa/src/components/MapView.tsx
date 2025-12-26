@@ -189,7 +189,9 @@ export function MapView(props: {
     viewMode === "PIPES" && viewSelectedId ? edges.filter((e) => e.id === viewSelectedId) : edges;
 
   const barriosToShowBase =
-    viewMode === "BARRIOS" && viewSelectedId ? barrios.filter((b) => b.id === viewSelectedId) : barrios;
+    viewMode === "BARRIOS" && viewSelectedId
+      ? barrios.filter((b) => b.id === viewSelectedId)
+      : barrios;
 
   /**
    * ✅ FIX: Barrios antes se dibujaban solo con zoom>=15 o zona seleccionada.
@@ -206,6 +208,28 @@ export function MapView(props: {
     mode === "ZONE" && selectedZoneId
       ? barriosToShowBase.filter((b) => b.locationId === selectedZoneId)
       : barriosToShowBase;
+
+  /**
+   * ✅ Estilo base de barrios (para que resalten)
+   * - Antes era blanco casi invisible
+   * - Ahora: borde + relleno en cian (como el resto de la UI), y highlight fuerte
+   */
+  const barrioStyle = (hl: boolean, hlByValve: boolean) => {
+    // borde
+    const stroke = hlByValve ? "rgba(34,211,238,0.95)" : hl ? "rgba(34,211,238,0.75)" : "rgba(34,211,238,0.35)";
+    // relleno
+    const fill = hlByValve ? "rgba(34,211,238,0.40)" : hl ? "rgba(34,211,238,0.24)" : "rgba(34,211,238,0.14)";
+    // opacidad del relleno (Leaflet usa fillOpacity separado; fillColor se mantiene)
+    const fillOpacity = hlByValve ? 0.42 : hl ? 0.28 : 0.16;
+
+    return {
+      color: stroke,
+      fillColor: fill,
+      weight: hlByValve ? 4 : hl ? 3 : 1.8,
+      fillOpacity,
+      dashArray: hl ? undefined : "10 14",
+    } as const;
+  };
 
   return (
     <MapContainer
@@ -266,18 +290,7 @@ export function MapView(props: {
           const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
           const hl = hlBase || hlByValve;
 
-          return (
-            <Polygon
-              key={b.id}
-              positions={b.polygon}
-              pathOptions={{
-                color: hl ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.18)",
-                weight: hlByValve ? 4 : hl ? 3 : 1.2,
-                fillOpacity: hlByValve ? 0.22 : hl ? 0.12 : 0.05,
-                dashArray: hl ? undefined : "10 14",
-              }}
-            />
-          );
+          return <Polygon key={b.id} positions={b.polygon} pathOptions={barrioStyle(hl, hlByValve)} />;
         })}
 
       {/* Cañerías */}

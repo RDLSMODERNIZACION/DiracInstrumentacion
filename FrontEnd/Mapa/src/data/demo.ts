@@ -157,18 +157,6 @@ export const zones: Zone[] = [
     ],
     meta: { tipo: "localidad" },
   },
-
-  {
-    id: "tanques_norte",
-    name: "tanques_norte",
-    polygon: [
-      [-37.4047, -68.93755],
-      [-37.4047, -68.93695],
-      [-37.4041, -68.93695],
-      [-37.4041, -68.93755],
-    ],
-    meta: { tipo: "localidad" },
-  },
 ];
 
 // =========================
@@ -238,48 +226,6 @@ export const assets: Asset[] = [
     lng: -68.91152103686728,
     status: "OK",
     meta: {},
-  },
-
-  // TANQUES NORTE
-  {
-    id: "mf_tanques_norte",
-    locationId: "tanques_norte",
-    type: "MANIFOLD",
-    name: "Manifold (Tanques)",
-    lat: -37.40415,
-    lng: -68.93698,
-    status: "OK",
-    meta: {},
-  },
-  {
-    id: "tk_norte_1",
-    locationId: "tanques_norte",
-    type: "TANK",
-    name: "Tanque Norte #1",
-    lat: -37.40428,
-    lng: -68.9371,
-    status: "OK",
-    meta: { nivel_pct: 64, volumen_m3: 800, autonomia_h: 5.4 },
-  },
-  {
-    id: "tk_norte_2",
-    locationId: "tanques_norte",
-    type: "TANK",
-    name: "Tanque Norte #2",
-    lat: -37.40436,
-    lng: -68.93722,
-    status: "OK",
-    meta: { nivel_pct: 58, volumen_m3: 800, autonomia_h: 4.9 },
-  },
-  {
-    id: "tk_norte_3",
-    locationId: "tanques_norte",
-    type: "TANK",
-    name: "Tanque Norte #3",
-    lat: -37.40444,
-    lng: -68.93734,
-    status: "WARN",
-    meta: { nivel_pct: 41, volumen_m3: 800, autonomia_h: 3.6 },
   },
 
   // PLANTA OESTE
@@ -501,16 +447,6 @@ const path_oeste_a_pulmon: [number, number][] = [
   [-37.40231265305935, -68.93544912606455],
 ];
 
-// Pulmón -> Tanques
-const path_pulmon_a_tanques: [number, number][] = [
-  [-37.40238033923917, -68.93549416394411],
-  [-37.40280796558363, -68.93599951596966],
-  [-37.40315704650512, -68.93615331876046],
-  [-37.403637030117764, -68.9362631778965],
-  [-37.403890111147135, -68.93630712155122],
-  [-37.40441372435749, -68.93731782560307],
-];
-
 // IIITK -> Hormigón
 const path_iiitk_a_hormigon: [number, number][] = [
   [-37.40435272881349, -68.93734107352347],
@@ -581,16 +517,6 @@ export const edges: Edge[] = [
     meta: { name: "Acueducto 8” Oeste → Pulmón", diameter_in: 8, requiresOpen: ["valv_oeste_8"] },
   },
 
-  // Pulmón -> Tanques
-  {
-    id: "pipe_pulmon_tanques",
-    from: "valv_pulmon_salida",
-    to: "mf_tanques_norte",
-    type: "WATER",
-    path: path_pulmon_a_tanques,
-    meta: { name: "Impulsión Pulmón → Tanques", diameter_in: 10, requiresOpen: ["valv_pulmon_salida"] },
-  },
-
   // IIITK -> Hormigón
   {
     id: "pipe_iiitk_hormigon",
@@ -641,15 +567,6 @@ export const valveRouting: Record<string, ValveRouting> = {
       { kind: "ASSET", assetId: "mf_pulmon" },
     ],
     note: "Habilita envío por acueducto 8” hacia Pulmón",
-  },
-
-  // Pulmón -> Tanques
-  valv_pulmon_salida: {
-    targets: [
-      { kind: "LOCATION", locationId: "tanques_norte" },
-      { kind: "ASSET", assetId: "mf_tanques_norte" },
-    ],
-    note: "Habilita impulsión desde Pulmón hacia Tanques (recorrido completo)",
   },
 
   // IIITK -> Hormigón

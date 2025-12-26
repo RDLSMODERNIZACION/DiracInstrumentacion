@@ -238,8 +238,37 @@ export default function App() {
     return null;
   }, [mode, selectedAsset, selectedZoneId, assets]);
 
-  // ✅ FIX: mapa gris cuando seleccionás algo O cuando filtrás vista
-  const mapGrey = mode !== "NONE" || viewMode !== "ALL";
+  /**
+   * ✅ FIX: mapa gris
+   * - Antes: solo se ponía gris si había selección o si viewMode != ALL
+   * - Ahora: también se pone gris cuando los barrios están visibles (ALL incluye barrios, o BARRIOS)
+   */
+  const showBarrios = viewMode === "ALL" || viewMode === "BARRIOS";
+  const mapGrey = mode !== "NONE" || viewMode !== "ALL" || showBarrios;
+
+  // =========================
+  // DEBUG LOGS (App)
+  // =========================
+  useEffect(() => {
+    console.log("[DEBUG][App] mapGrey calc", {
+      mode,
+      viewMode,
+      showBarrios,
+      selectedZoneId,
+      selectedAssetId,
+      zoom,
+      mapGrey,
+    });
+  }, [mode, viewMode, showBarrios, selectedZoneId, selectedAssetId, zoom, mapGrey]);
+
+  useEffect(() => {
+    console.log("[DEBUG][App] selection snapshot", {
+      selectedZone: selectedZone?.id ?? null,
+      selectedAsset: selectedAsset?.id ?? null,
+      activeValveId,
+      viewSelectedId,
+    });
+  }, [selectedZone?.id, selectedAsset?.id, activeValveId, viewSelectedId]);
 
   return (
     <div className="app">
