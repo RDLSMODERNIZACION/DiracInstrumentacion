@@ -21,17 +21,12 @@ function secSince(ts?: string | null) {
   return Math.max(0, Math.round((Date.now() - t) / 1000));
 }
 
+
+
 /* =====================
    TankCard
 ===================== */
 
-/**
- * TankCard (versión compacta 3D)
- * - Mantiene el mismo diseño visual
- * - prop `status`: { online, ageSec, tone }
- * - Si no viene `status`, se deriva de `tank.latest.ts` (igual que Faceplate)
- * - `signal`: "ok" | "warn" | "bad" (fallback visual adicional)
- */
 export function TankCard({
   tank,
   onClick,
@@ -48,16 +43,6 @@ export function TankCard({
 
   // valores seguros
   const level = typeof tank.levelPct === "number" && isFinite(tank.levelPct) ? tank.levelPct : null;
-  const capacity = typeof tank.capacityL === "number" && isFinite(tank.capacityL) ? tank.capacityL : null;
-
-  // volumen mostrado: usa el de la API si existe; si no, lo calcula
-  const volume =
-    typeof tank.volumeL === "number" && isFinite(tank.volumeL)
-      ? tank.volumeL
-      : level != null && capacity != null
-      ? Math.round((capacity * level) / 100)
-      : null;
-
   const pct = clampPct(level ?? 0);
 
   // ---- Conexión: WS o fallback por timestamp de última lectura ----
@@ -74,7 +59,7 @@ export function TankCard({
     <button
       onClick={onClick}
       className={`text-left p-4 bg-white border border-slate-200 rounded-2xl hover:shadow-lg transition w-full ${dimClass}`}
-      aria-label={`Tanque ${tank.name}, nivel ${Math.round(pct)}% · ${fmtLiters(volume)} / ${fmtLiters(capacity)}`}
+      aria-label={`Tanque ${tank.name}, nivel ${Math.round(pct)}%`}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="font-medium text-slate-800">{tank.name}</div>
@@ -121,9 +106,8 @@ export function TankCard({
         {/* Lecturas a la derecha */}
         <div className="flex-1 min-w-0">
           <div className="text-3xl font-semibold tabular-nums leading-none text-slate-800">{Math.round(pct)}%</div>
-          <div className="text-xs text-slate-500 truncate">
-            {fmtLiters(volume)} / {fmtLiters(capacity)}
-          </div>
+          {/* ✅ Quitado: litros */}
+          {/* <div className="text-xs text-slate-500 truncate">{fmtLiters(volume)} / {fmtLiters(capacity)}</div> */}
         </div>
       </div>
 
@@ -139,6 +123,12 @@ export function TankCard({
     </button>
   );
 }
+
+
+
+
+
+
 
 /* =====================
    PumpCard – Vertical Compact
