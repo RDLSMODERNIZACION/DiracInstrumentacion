@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { useNavigate, useLocation } from "react-router-dom";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -51,9 +50,6 @@ type LocationGroup = {
 };
 
 export default function InfraDiagram() {
-  const navigate = useNavigate();
-  const location = useLocation();
-
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
 
@@ -69,17 +65,16 @@ export default function InfraDiagram() {
 
   // === DEBUG TOOLS ===
   const DEBUG = useMemo(() => {
-    const qs = new URLSearchParams(location.search);
+    const qs = new URLSearchParams(window.location.search);
     return qs.get("debug") === "1" || import.meta.env.DEV;
-  }, [location.search]);
-
+  }, []);
   const log = (...args: any[]) => {
     if (DEBUG) console.log("[InfraDiagram]", ...args);
   };
 
-  // ✅ Company scope leído del querystring (?company_id=XX) - REACTIVO
+  // Company scope leído del querystring (?company_id=XX)
   const companyId = useMemo(() => {
-    const qs = new URLSearchParams(location.search);
+    const qs = new URLSearchParams(window.location.search);
     const raw = qs.get("company_id");
     if (raw == null) return null;
     const trimmed = raw.trim();
@@ -87,18 +82,13 @@ export default function InfraDiagram() {
     const v = Number(trimmed);
     if (!Number.isFinite(v) || v <= 0) return null;
     return v;
-  }, [location.search]);
-
-  // ✅ helper: arma querystring para scope
-  const scopeQS = useMemo(() => {
-    return companyId ? `?company_id=${encodeURIComponent(String(companyId))}` : "";
-  }, [companyId]);
+  }, []);
 
   useEffect(() => {
     log("href:", window.location.href);
-    log("location.search:", location.search);
     log("companyId from query:", companyId);
-  }, [companyId, location.search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
@@ -141,9 +131,8 @@ export default function InfraDiagram() {
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
-      // ✅ endpoints scopeados por company_id (si existe)
-      const urlNodes = `/infraestructura/get_layout_combined${scopeQS}`;
-      const urlEdges = `/infraestructura/get_layout_edges${scopeQS}`;
+      const urlNodes = `/infraestructura/get_layout_combined`;
+      const urlEdges = `/infraestructura/get_layout_edges`;
       log("FETCH ->", urlNodes, "&&", urlEdges);
 
       const [nodesRaw, edgesRaw] = await Promise.all([
@@ -497,20 +486,6 @@ export default function InfraDiagram() {
             {editMode ? "Salir edición" : "Editar"}
           </button>
 
-          {/* ✅ BOTÓN MAPA: navega a /infraestructura/mapa (por basename) y preserva query */}
-          <button
-            onClick={() => navigate({ pathname: "mapa", search: location.search })}
-            style={{
-              padding: "4px 8px",
-              borderRadius: 8,
-              border: "1px solid #cbd5e1",
-              background: "#ffffff",
-              color: "#0f172a",
-            }}
-          >
-            MAPA
-          </button>
-
           <button
             onClick={applyAutoLayout}
             disabled={!editMode}
@@ -555,7 +530,13 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={ZOOM_MAX} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+          <TransformWrapper
+            initialScale={ZOOM_MAX}
+            minScale={0.6}
+            maxScale={ZOOM_MAX}
+            centerOnInit
+            wheel={{ step: 0.1 }}
+          >
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -575,7 +556,12 @@ export default function InfraDiagram() {
               >
                 <defs>
                   <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+                    <path
+                      d="M 24 0 L 0 0 0 24"
+                      fill="none"
+                      stroke="#e2e8f0"
+                      strokeWidth="1"
+                    />
                   </pattern>
 
                   <filter id="glow">
