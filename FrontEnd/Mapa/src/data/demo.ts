@@ -27,6 +27,15 @@ export type Edge = {
   meta?: Record<string, string | number | boolean>;
 };
 
+/**
+ * ✅ ACTUALIZADO:
+ * - Mantiene alimentado_por
+ * - Agrega (opcional) presión por barrio para tooltip (buena/media/mala)
+ *   Podés cargar UNO de estos:
+ *   - presion_bar (recomendado)
+ *   - presion_kpa
+ *   - presion_pct
+ */
 export type Barrio = {
   id: string;
   name: string;
@@ -34,14 +43,23 @@ export type Barrio = {
   locationId: string;
   meta: {
     alimentado_por: string; // id de válvula (Asset.id)
+    presion_bar?: number;
+    presion_kpa?: number;
+    presion_pct?: number;
   };
 };
 
+/**
+ * ✅ ACTUALIZADO:
+ * - meta puede incluir videoUrl para presentar la localidad desde el sidebar
+ */
 export type Zone = {
   id: string;
   name: string;
   polygon: [number, number][];
-  meta?: Record<string, string | number | boolean>;
+  meta?: Record<string, string | number | boolean> & {
+    videoUrl?: string; // ej: https://www.youtube.com/embed/ID  o  https://.../video.mp4
+  };
 };
 
 // =========================
@@ -78,7 +96,10 @@ export const zones: Zone[] = [
       [-37.40252997254986, -68.93535779422987],
       [-37.402272773164995, -68.9356737040204],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 
   {
@@ -91,7 +112,10 @@ export const zones: Zone[] = [
       [-37.3796117482376, -68.9115170162435],
       [-37.379316663280875, -68.91209295303372],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 
   {
@@ -104,7 +128,10 @@ export const zones: Zone[] = [
       [-37.40470090274962, -68.9373696890062],
       [-37.404454611264974, -68.93768168921828],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 
   {
@@ -117,7 +144,10 @@ export const zones: Zone[] = [
       [-37.39961028365111, -68.92921031222632],
       [-37.39950960518791, -68.92954185870887],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 
   {
@@ -130,7 +160,10 @@ export const zones: Zone[] = [
       [-37.40366160094916, -68.9350494909132],
       [-37.40350012117626, -68.9352813456266],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 
   {
@@ -143,7 +176,10 @@ export const zones: Zone[] = [
       [-37.37822210879288, -68.96438051277939],
       [-37.378299427880044, -68.96476960711031],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
   {
     id: "planta_oeste_2",
@@ -155,7 +191,10 @@ export const zones: Zone[] = [
       [-37.377315936370046, -68.9627133183814],
       [-37.377429034980665, -68.96299923258418],
     ],
-    meta: { tipo: "localidad" },
+    meta: {
+      tipo: "localidad",
+      // videoUrl: "https://www.youtube.com/embed/XXXXXXXX",
+    },
   },
 ];
 
@@ -382,7 +421,10 @@ export const barrios: Barrio[] = [
       [-37.402, -68.9348],
       [-37.402, -68.9362],
     ],
-    meta: { alimentado_por: "valv_oeste_10" },
+    meta: {
+      alimentado_por: "valv_oeste_10",
+      // presion_bar: 2.3,
+    },
   },
   {
     id: "b_oeste",
@@ -394,7 +436,10 @@ export const barrios: Barrio[] = [
       [-37.3775, -68.9641],
       [-37.3775, -68.9653],
     ],
-    meta: { alimentado_por: "valv_oeste_10" },
+    meta: {
+      alimentado_por: "valv_oeste_10",
+      // presion_bar: 1.9,
+    },
   },
   {
     id: "b_oeste_2",
@@ -406,10 +451,13 @@ export const barrios: Barrio[] = [
       [-37.3769, -68.9625],
       [-37.3769, -68.9636],
     ],
-    meta: { alimentado_por: "valv_planta_oeste_2" },
+    meta: {
+      alimentado_por: "valv_planta_oeste_2",
+      // presion_bar: 1.4,
+    },
   },
 
-  // ✅ NUEVO: Barrio Centro (GeoJSON LineString convertido a Polygon [lat,lng] y CERRADO)
+  // ✅ Barrio Centro (GeoJSON convertido a Polygon [lat,lng] y CERRADO)
   {
     id: "b_centro",
     locationId: "tanque_1000",
@@ -422,7 +470,10 @@ export const barrios: Barrio[] = [
       [-37.39182140495886, -68.93231676055726],
       [-37.3920108512506, -68.9322800763886], // cierre
     ],
-    meta: { alimentado_por: "valv_tk1000_centro" },
+    meta: {
+      alimentado_por: "valv_tk1000_centro",
+      // presion_bar: 2.1,
+    },
   },
 ];
 
@@ -470,7 +521,7 @@ const path_hormigon_a_tk1000: [number, number][] = [
   [-37.39950265761995, -68.9294017818881],
 ];
 
-// ✅ Planta Este -> Tanque 1000 (GeoJSON convertido a [lat,lng])
+// Planta Este -> Tanque 1000
 const path_planta_este_a_tk1000: [number, number][] = [
   [-37.37948144681106, -68.91152103686728],
   [-37.379926952153916, -68.91125628774319],
@@ -490,16 +541,13 @@ const path_planta_este_a_tk1000: [number, number][] = [
 ];
 
 export const edges: Edge[] = [
-  // Bombas -> manifold (planta oeste)
   { id: "e_o1_mfo", from: "pump_oeste_1", to: "mf_planta_oeste", type: "WATER" },
   { id: "e_o2_mfo", from: "pump_oeste_2", to: "mf_planta_oeste", type: "WATER" },
   { id: "e_o3_mfo", from: "pump_oeste_3", to: "mf_planta_oeste", type: "WATER" },
 
-  // Manifold oeste -> válvulas de salida
   { id: "e_mfo_v10", from: "mf_planta_oeste", to: "valv_oeste_10", type: "WATER" },
   { id: "e_mfo_v8", from: "mf_planta_oeste", to: "valv_oeste_8", type: "WATER" },
 
-  // Acueductos Oeste -> Pulmón
   {
     id: "aq_oeste_pulmon_10",
     from: "valv_oeste_10",
@@ -517,7 +565,6 @@ export const edges: Edge[] = [
     meta: { name: "Acueducto 8” Oeste → Pulmón", diameter_in: 8, requiresOpen: ["valv_oeste_8"] },
   },
 
-  // IIITK -> Hormigón
   {
     id: "pipe_iiitk_hormigon",
     from: "mf_iiitk",
@@ -527,7 +574,6 @@ export const edges: Edge[] = [
     meta: { name: "IIITK → Hormigón", diameter_in: 6, requiresOpen: ["valv_iiitk"] },
   },
 
-  // Hormigón -> Tanque 1000
   {
     id: "pipe_hormigon_tk1000",
     from: "tk_hormigon",
@@ -537,7 +583,6 @@ export const edges: Edge[] = [
     meta: { name: "Hormigón → Tanque 1000", diameter_in: 6 },
   },
 
-  // ✅ Planta Este -> Tanque 1000
   {
     id: "pipe_planta_este_tk1000",
     from: "mf_planta_este",
@@ -552,7 +597,6 @@ export const edges: Edge[] = [
 // ROUTING (destinos de válvulas)
 // =========================
 export const valveRouting: Record<string, ValveRouting> = {
-  // Salidas de acueducto
   valv_oeste_10: {
     targets: [
       { kind: "LOCATION", locationId: "pulmon" },
@@ -569,7 +613,6 @@ export const valveRouting: Record<string, ValveRouting> = {
     note: "Habilita envío por acueducto 8” hacia Pulmón",
   },
 
-  // IIITK -> Hormigón
   valv_iiitk: {
     targets: [
       { kind: "LOCATION", locationId: "hormigon" },
@@ -578,13 +621,11 @@ export const valveRouting: Record<string, ValveRouting> = {
     note: "Habilita envío desde IIITK hacia Hormigón",
   },
 
-  // Otros demo previos
   valv_planta_oeste_2: {
     targets: [{ kind: "BARRIO", barrioId: "b_oeste_2" }],
     note: "Distribución sector Planta Oeste 2",
   },
 
-  // ✅ NUEVO: Tanque 1000 -> Barrio Centro
   valv_tk1000_centro: {
     targets: [{ kind: "BARRIO", barrioId: "b_centro" }],
     note: "Habilita distribución hacia Barrio Centro (desde Tanque 1000)",

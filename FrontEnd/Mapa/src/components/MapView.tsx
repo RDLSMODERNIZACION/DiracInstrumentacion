@@ -300,12 +300,12 @@ export function MapView(props: {
 
           return (
             <React.Fragment key={z.id}>
-              <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }}>
-                <Popup>
-                  <div style={{ fontWeight: 900 }}>{z.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.85 }}>Click para abrir panel</div>
-                </Popup>
-              </Marker>
+              <Marker
+  position={c}
+  icon={icon}
+  eventHandlers={{ click: () => onSelectZone(z) }}
+/>
+
 
               {showPolygon && (
                 <Polygon
