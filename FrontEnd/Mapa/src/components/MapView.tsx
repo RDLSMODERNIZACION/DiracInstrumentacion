@@ -6,6 +6,7 @@ import {
   Polyline,
   Polygon,
   TileLayer,
+  Tooltip,
   ZoomControl,
   useMap,
   useMapEvents,
@@ -38,9 +39,37 @@ export type FocusPair =
     }
   | null;
 
+function pressureLabelForBarrio(b: any): { label: string; tone: "good" | "mid" | "bad" | "na" } {
+  const m = (b?.meta ?? {}) as any;
+
+  // Soportes posibles (si después los agregás al meta)
+  const kpa = typeof m.presion_kpa === "number" ? m.presion_kpa : null;
+  const bar = typeof m.presion_bar === "number" ? m.presion_bar : null;
+  const pct = typeof m.presion_pct === "number" ? m.presion_pct : null;
+
+  // Heurística simple (ajustable)
+  if (bar != null) {
+    // Ej: >2.2 buena, 1.6-2.2 media, <1.6 mala
+    if (bar >= 2.2) return { label: `Presión: Buena (${bar.toFixed(1)} bar)`, tone: "good" };
+    if (bar >= 1.6) return { label: `Presión: Media (${bar.toFixed(1)} bar)`, tone: "mid" };
+    return { label: `Presión: Mala (${bar.toFixed(1)} bar)`, tone: "bad" };
+  }
+  if (kpa != null) {
+    if (kpa >= 220) return { label: `Presión: Buena (${Math.round(kpa)} kPa)`, tone: "good" };
+    if (kpa >= 160) return { label: `Presión: Media (${Math.round(kpa)} kPa)`, tone: "mid" };
+    return { label: `Presión: Mala (${Math.round(kpa)} kPa)`, tone: "bad" };
+  }
+  if (pct != null) {
+    if (pct >= 75) return { label: `Presión: Buena (${Math.round(pct)}%)`, tone: "good" };
+    if (pct >= 45) return { label: `Presión: Media (${Math.round(pct)}%)`, tone: "mid" };
+    return { label: `Presión: Mala (${Math.round(pct)}%)`, tone: "bad" };
+  }
+
+  return { label: "Presión: N/D", tone: "na" };
+}
+
 /**
  * ✅ Cuando hay recorrido (dashedEdgeIdsExtra), encuadra TODO el recorrido.
- * Usa edge.path si existe, si no usa endpoints (assets).
  */
 function FitToRoute({
   dashedEdgeIdsExtra,
@@ -83,15 +112,16 @@ function FitToRoute({
 }
 
 /**
- * ✅ cuando una válvula impacta barrios (highlightedBarrioIdsExtra),
- * encuadra los polígonos para que SIEMPRE se vean.
+ * ✅ encuadra barrios impactados, e INCLUYE además el punto de la válvula (para que se vea la localización).
  */
 function FitToBarrios({
   enabled,
   barrioIds,
+  includePoint,
 }: {
   enabled: boolean;
   barrioIds?: Set<string>;
+  includePoint?: LatLng | null;
 }) {
   const map = useMap();
 
@@ -100,16 +130,19 @@ function FitToBarrios({
     if (!barrioIds || barrioIds.size === 0) return;
 
     const pts: [number, number][] = [];
+
     for (const b of barrios) {
       if (!barrioIds.has(b.id)) continue;
       for (const p of b.polygon) pts.push(p); // [lat,lng]
     }
 
+    if (includePoint) pts.push(includePoint);
+
     if (pts.length < 2) return;
 
     const bounds = L.latLngBounds(pts as any);
-    map.fitBounds(bounds, { padding: [90, 90] });
-  }, [enabled, barrioIds, map]);
+    map.fitBounds(bounds, { padding: [110, 110] });
+  }, [enabled, barrioIds, includePoint, map]);
 
   return null;
 }
@@ -128,24 +161,25 @@ export function MapView(props: {
   highlightedBarrioIds: Set<string>;
   highlightedEdgeIds: Set<string>;
 
-  // ✅ extras por impacto de válvula (barrios + cañerías punteadas)
   highlightedBarrioIdsExtra?: Set<string>;
   dashedEdgeIdsExtra?: Set<string>;
 
-  // acciones
   onSelectZone: (z: Zone) => void;
   onSelectAsset: (id: string) => void;
 
-  // mejoras
   shrinkOthers: boolean;
   focusPair: FocusPair;
-
   focusTarget: LatLng | null;
 
-  // ✅ filtro/vista
   viewMode: ViewMode;
   viewSelectedId: string | null;
   mapGrey: boolean;
+
+  // ✅ NUEVO: para encuadrar también la ubicación donde abriste la válvula
+  activeValvePos?: LatLng | null;
+
+  // ✅ NUEVO: forzar que se muestre el marker aunque el zoom sea bajo
+  forceShowAssetIds?: Set<string>;
 }) {
   const {
     zoom,
@@ -167,17 +201,15 @@ export function MapView(props: {
     viewMode,
     viewSelectedId,
     mapGrey,
+    activeValvePos,
+    forceShowAssetIds,
   } = props;
 
   const showAssets = zoom >= 14.5 || (mode === "ZONE" && selectedZoneId);
 
-  // ✅ si hay recorrido punteado, NO hacemos FlyTo a un punto, sino fitBounds al recorrido completo
   const hasRoute = (dashedEdgeIdsExtra?.size ?? 0) > 0;
-
-  // ✅ si la válvula impacta barrios, encuadrar esos barrios (si no hay route)
   const hasBarrioImpact = (highlightedBarrioIdsExtra?.size ?? 0) > 0;
 
-  // ✅ qué se muestra según modo + selección
   const showZones = viewMode === "ALL" || viewMode === "ZONES";
   const showPipes = viewMode === "ALL" || viewMode === "PIPES";
   const showBarrios = viewMode === "ALL" || viewMode === "BARRIOS";
@@ -193,41 +225,50 @@ export function MapView(props: {
       ? barrios.filter((b) => b.id === viewSelectedId)
       : barrios;
 
-  /**
-   * ✅ FIX: Barrios antes se dibujaban solo con zoom>=15 o zona seleccionada.
-   * Eso hace que NO se vean al arrancar (zoom 13.8).
-   * Ahora: se dibujan desde zoom>=13.2 (ajustable) o si estás dentro de una zona.
-   */
   const BARRIOS_MIN_ZOOM = 13.2;
   const canDrawBarrios = zoom >= BARRIOS_MIN_ZOOM || (mode === "ZONE" && selectedZoneId);
 
-  /**
-   * ✅ (Opcional): si estás en modo ZONE, mostrás solo barrios de esa localidad
-   */
   const barriosToShow =
     mode === "ZONE" && selectedZoneId
       ? barriosToShowBase.filter((b) => b.locationId === selectedZoneId)
       : barriosToShowBase;
 
-  /**
-   * ✅ Estilo base de barrios (para que resalten)
-   * - Antes era blanco casi invisible
-   * - Ahora: borde + relleno en cian (como el resto de la UI), y highlight fuerte
-   */
-  const barrioStyle = (hl: boolean, hlByValve: boolean) => {
-    // borde
-    const stroke = hlByValve ? "rgba(34,211,238,0.95)" : hl ? "rgba(34,211,238,0.75)" : "rgba(34,211,238,0.35)";
-    // relleno
-    const fill = hlByValve ? "rgba(34,211,238,0.40)" : hl ? "rgba(34,211,238,0.24)" : "rgba(34,211,238,0.14)";
-    // opacidad del relleno (Leaflet usa fillOpacity separado; fillColor se mantiene)
-    const fillOpacity = hlByValve ? 0.42 : hl ? 0.28 : 0.16;
+  // 🎨 Estilo “blanco lindo” + bordes suaves + hover
+  const barrioBaseStyle = (hl: boolean, hlByValve: boolean) => {
+    // Borde
+    const stroke = hlByValve
+      ? "rgba(255,255,255,0.95)"
+      : hl
+      ? "rgba(255,255,255,0.80)"
+      : "rgba(255,255,255,0.55)";
+
+    // Relleno blanco “glass”
+    const fillColor = hlByValve
+      ? "rgba(255,255,255,0.28)"
+      : hl
+      ? "rgba(255,255,255,0.22)"
+      : "rgba(255,255,255,0.14)";
+
+    const fillOpacity = hlByValve ? 0.55 : hl ? 0.42 : 0.30;
 
     return {
       color: stroke,
-      fillColor: fill,
-      weight: hlByValve ? 4 : hl ? 3 : 1.8,
+      fillColor,
       fillOpacity,
-      dashArray: hl ? undefined : "10 14",
+      weight: hlByValve ? 4 : hl ? 3 : 2,
+      lineCap: "round",
+      lineJoin: "round",
+      dashArray: undefined,
+    } as const;
+  };
+
+  const barrioHoverStyle = (hl: boolean, hlByValve: boolean) => {
+    // un poquito más marcado al hover
+    const base = barrioBaseStyle(hl, hlByValve);
+    return {
+      ...base,
+      fillOpacity: Math.min(0.68, (base.fillOpacity ?? 0.45) + 0.12),
+      weight: (base.weight ?? 2) + 1,
     } as const;
   };
 
@@ -270,10 +311,12 @@ export function MapView(props: {
                 <Polygon
                   positions={z.polygon}
                   pathOptions={{
-                    color: "rgba(34,211,238,0.35)",
+                    color: "rgba(255,255,255,0.35)",
                     weight: sel ? 3 : 1.5,
-                    fillOpacity: sel ? 0.08 : 0.03,
+                    fillOpacity: sel ? 0.07 : 0.03,
                     dashArray: sel ? undefined : "8 12",
+                    lineCap: "round",
+                    lineJoin: "round",
                   }}
                   eventHandlers={{ click: () => onSelectZone(z) }}
                 />
@@ -290,7 +333,35 @@ export function MapView(props: {
           const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
           const hl = hlBase || hlByValve;
 
-          return <Polygon key={b.id} positions={b.polygon} pathOptions={barrioStyle(hl, hlByValve)} />;
+          const pres = pressureLabelForBarrio(b);
+
+          return (
+            <Polygon
+              key={b.id}
+              positions={b.polygon}
+              pathOptions={barrioBaseStyle(hl, hlByValve)}
+              eventHandlers={{
+                mouseover: (ev) => {
+                  const layer = ev.target as any;
+                  if (layer?.setStyle) layer.setStyle(barrioHoverStyle(hl, hlByValve));
+                },
+                mouseout: (ev) => {
+                  const layer = ev.target as any;
+                  if (layer?.setStyle) layer.setStyle(barrioBaseStyle(hl, hlByValve));
+                },
+              }}
+            >
+              <Tooltip
+                sticky
+                direction="top"
+                opacity={0.98}
+                className={`barrioTooltip tone-${pres.tone}`}
+              >
+                <div style={{ fontWeight: 900 }}>{b.name}</div>
+                <div style={{ fontSize: 12, opacity: 0.9 }}>{pres.label}</div>
+              </Tooltip>
+            </Polygon>
+          );
         })}
 
       {/* Cañerías */}
@@ -334,24 +405,29 @@ export function MapView(props: {
           );
         })}
 
-      {/* Assets (solo en ALL/ZONES para no ensuciar cuando filtrás PIPES/BARRIOS) */}
+      {/* Assets: mostrar en ALL/ZONES, y además forzar el marker de la válvula activa aunque el zoom sea bajo */}
       {(viewMode === "ALL" || viewMode === "ZONES") &&
-        showAssets &&
+        (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
         assets
           .filter((a) => {
             if (mode === "ZONE" && selectedZoneId) return a.locationId === selectedZoneId;
             return true;
           })
+          .filter((a) => showAssets || (forceShowAssetIds?.has(a.id) ?? false))
           .map((a) => {
             const isValve = a.type === "VALVE";
             const on = !isValve || valveEnabled[a.id] !== false;
             const alpha = on ? 1.0 : 0.35;
 
-            const size = 12;
+            const isForced = forceShowAssetIds?.has(a.id) ?? false;
+
+            const size = isForced ? 16 : 12;
             const html = `
               <div class="pulse" style="
                 width:${size}px;height:${size}px;
-                background:${on ? "rgba(34,211,238,0.95)" : "rgba(255,255,255,0.7)"};
+                border-radius:999px;
+                background:${on ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)"};
+                box-shadow:${isForced ? "0 0 0 6px rgba(255,255,255,0.18)" : "none"};
                 opacity:${alpha};
               "></div>
             `;
@@ -389,8 +465,14 @@ export function MapView(props: {
       {/* Si hay recorrido punteado, encuadrarlo */}
       <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
 
-      {/* Si NO hay recorrido, pero hay impacto a barrios, encuadrar barrios */}
-      {!hasRoute && <FitToBarrios enabled={hasBarrioImpact} barrioIds={highlightedBarrioIdsExtra} />}
+      {/* Si NO hay recorrido, pero hay impacto a barrios, encuadrar barrios + incluir punto de válvula */}
+      {!hasRoute && (
+        <FitToBarrios
+          enabled={hasBarrioImpact}
+          barrioIds={highlightedBarrioIdsExtra}
+          includePoint={activeValvePos ?? null}
+        />
+      )}
 
       {/* Si NO hay recorrido NI barrio impacto, mantenemos centrar */}
       {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}

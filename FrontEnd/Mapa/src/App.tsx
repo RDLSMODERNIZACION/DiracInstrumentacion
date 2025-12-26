@@ -246,6 +246,21 @@ export default function App() {
   const showBarrios = viewMode === "ALL" || viewMode === "BARRIOS";
   const mapGrey = mode !== "NONE" || viewMode !== "ALL" || showBarrios;
 
+  // ✅ NUEVO: posición de la válvula activa (para encuadrar junto a barrios)
+  const activeValvePos = useMemo<LatLng | null>(() => {
+    if (!activeValveId) return null;
+    const a = assetsById.get(activeValveId);
+    if (!a) return null;
+    return [a.lat, a.lng];
+  }, [activeValveId, assetsById]);
+
+  // ✅ NUEVO: forzar mostrar marcador de esa válvula aunque el zoom sea bajo
+  const forceShowAssetIds = useMemo(() => {
+    const s = new Set<string>();
+    if (activeValveId) s.add(activeValveId);
+    return s;
+  }, [activeValveId]);
+
   // =========================
   // DEBUG LOGS (App)
   // =========================
@@ -266,9 +281,10 @@ export default function App() {
       selectedZone: selectedZone?.id ?? null,
       selectedAsset: selectedAsset?.id ?? null,
       activeValveId,
+      activeValvePos,
       viewSelectedId,
     });
-  }, [selectedZone?.id, selectedAsset?.id, activeValveId, viewSelectedId]);
+  }, [selectedZone?.id, selectedAsset?.id, activeValveId, activeValvePos, viewSelectedId]);
 
   return (
     <div className="app">
@@ -347,6 +363,9 @@ export default function App() {
           viewMode={viewMode}
           viewSelectedId={viewSelectedId}
           mapGrey={mapGrey}
+          // ✅ NUEVO: encuadre + marker de válvula activa
+          activeValvePos={activeValvePos}
+          forceShowAssetIds={forceShowAssetIds}
         />
       </div>
     </div>

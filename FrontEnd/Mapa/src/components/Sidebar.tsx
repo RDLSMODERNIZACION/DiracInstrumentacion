@@ -7,6 +7,7 @@ import {
   zones,
   valveRouting,
 } from "../data/demo";
+import { VideoModal } from "./VideoModal";
 
 export type SidebarMode = "NONE" | "ZONE" | "ASSET";
 export type ZoneTab =
@@ -186,6 +187,20 @@ export function Sidebar(props: {
     barriosAll,
     edgesAll,
   } = props;
+
+  // =========================
+  // VIDEO MODAL (por localidad)
+  // =========================
+  const [videoOpen, setVideoOpen] = React.useState(false);
+
+  const zoneVideoUrl = useMemo(() => {
+    const raw = (selectedZone as any)?.meta?.videoUrl;
+    if (!raw) return null;
+    return String(raw);
+  }, [selectedZone]);
+
+  const openZoneVideo = () => setVideoOpen(true);
+  const closeZoneVideo = () => setVideoOpen(false);
 
   const TabBtn = ({ id, label }: { id: ZoneTab; label: string }) => (
     <button
@@ -404,6 +419,23 @@ export function Sidebar(props: {
               <span className="dot" style={{ background: "var(--zone)" }} /> {selectedZone.id}
             </span>
             <div style={{ fontWeight: 900, fontSize: 14 }}>{selectedZone.name}</div>
+          </div>
+
+          {/* 🎥 Video de la localidad */}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button
+              className="btn"
+              onClick={openZoneVideo}
+              style={{
+                width: "100%",
+                fontWeight: 900,
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+              }}
+              title={zoneVideoUrl ? "Ver video de la localidad" : "Esta localidad no tiene video configurado"}
+            >
+              🎥 Ver video
+            </button>
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
@@ -762,6 +794,14 @@ export function Sidebar(props: {
           )}
         </div>
       )}
+
+      {/* 🎥 Modal centrado: video de la localidad */}
+      <VideoModal
+        open={videoOpen}
+        title={selectedZone ? `Video · ${selectedZone.name}` : "Video"}
+        url={zoneVideoUrl}
+        onClose={closeZoneVideo}
+      />
     </div>
   );
 }
