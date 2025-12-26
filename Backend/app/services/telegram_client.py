@@ -1,30 +1,32 @@
 # app/services/telegram_client.py
+import os
 import requests
 import logging
 
-TELEGRAM_BOT_TOKEN = "8409803233:AAHet0YhYyZGXWB4MeSZE_V88OKpUvw5arA"
-TELEGRAM_CHAT_ID = "-1002986243904"
-
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
 log = logging.getLogger("telegram")
 
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 def send_telegram_message(text: str):
+    if not TOKEN or not CHAT_ID:
+        log.warning("Telegram not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+        return
+
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
     try:
-        resp = requests.post(
-            TELEGRAM_API,
+        r = requests.post(
+            url,
             json={
-                "chat_id": TELEGRAM_CHAT_ID,
+                "chat_id": CHAT_ID,
                 "text": text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },
             timeout=10,
         )
-
-        if resp.status_code != 200:
-            log.error("Telegram error %s - %s", resp.status_code, resp.text)
-
-    except Exception as e:
-        log.exception("Telegram send failed: %s", e)
+        if r.status_code != 200:
+            log.error("Telegram error %s: %s", r.status_code, r.text)
+    except Exception:
+        log.exception("Telegram send failed")
