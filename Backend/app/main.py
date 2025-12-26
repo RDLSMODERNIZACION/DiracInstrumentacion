@@ -8,6 +8,9 @@ from fastapi.responses import JSONResponse
 
 from app.db import get_conn, close_pool
 
+# ===== Telegram reporter (30 min) =====
+from app.services.telegram_reporter import start_telegram_reporter, stop_telegram_reporter
+
 # ===== Rutas base (operación / visualización) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
@@ -64,17 +67,15 @@ app = FastAPI(
 )
 
 # ===== CORS y GZIP =====
-# CORS totalmente abierto para simplificar (front y back en dominios distintos)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # aceptar cualquier origen
-    allow_methods=["*"],      # aceptar cualquier método (GET, POST, etc.)
-    allow_headers=["*"],      # aceptar cualquier header
-    allow_credentials=False,  # usamos Basic Auth, no cookies
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
     expose_headers=["*"],
     max_age=3600,
 )
-
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # ===== Health =====
@@ -122,25 +123,21 @@ app.include_router(arduino_router)
 app.include_router(infraestructura_router)
 
 # ✅ Infraestructura (edición: edges + layout_many)
-# Esto es lo que te faltaba para que no dé 404 en DELETE /infraestructura/edges/{id}
 app.include_router(infra_edit_router)
 
 # Endpoints para PLC / Node-RED (lectura de comandos, ack, etc.)
 app.include_router(plc_router)
 
-# ===== KPI (agregador: dashboard + tanques + bombas_live) =====
+# ===== KPI =====
 app.include_router(kpi_router)
 
 # ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
-# No incluimos /dirac/users (queda deshabilitado para evitar confusiones)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
 # ===== Administración (CRUD abierto) =====
-# /dirac/admin/companies, /dirac/admin/users, /dirac/admin/locations,
-# /dirac/admin/tanks, /dirac/admin/pumps, /dirac/admin/valves, /dirac/admin/manifolds
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
@@ -149,7 +146,17 @@ app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
 
-# ===== Cierre ordenado del pool de DB =====
+
+# ===== Startup / Shutdown =====
+@app.on_event("startup")
+def _startup():
+    # Arranca reporter Telegram (cada 30 min)
+    start_telegram_reporter()
+
+
 @app.on_event("shutdown")
 def _shutdown():
+    # Detiene reporter Telegram
+    stop_telegram_reporter()
+    # Cierre ordenado del pool de DB
     close_pool()
