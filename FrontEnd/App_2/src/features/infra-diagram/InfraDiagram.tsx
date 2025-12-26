@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import { useNavigate, useLocation } from "react-router-dom";
 import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -32,10 +31,7 @@ import {
 } from "@/layout/layoutIO";
 
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
-import {
-  createEdge as apiCreateEdge,
-  deleteEdge as apiDeleteEdge,
-} from "./services/edges";
+import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -54,9 +50,6 @@ type LocationGroup = {
 };
 
 export default function InfraDiagram() {
-  const navigate = useNavigate();
-  const location = useLocation(); // ✅ para leer y preservar querystring
-
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
 
@@ -72,17 +65,16 @@ export default function InfraDiagram() {
 
   // === DEBUG TOOLS ===
   const DEBUG = useMemo(() => {
-    const qs = new URLSearchParams(location.search); // ✅ usar location.search
+    const qs = new URLSearchParams(window.location.search);
     return qs.get("debug") === "1" || import.meta.env.DEV;
-  }, [location.search]);
-
+  }, []);
   const log = (...args: any[]) => {
     if (DEBUG) console.log("[InfraDiagram]", ...args);
   };
 
-  // ✅ Company scope leído del querystring (?company_id=XX) - REACTIVO
+  // Company scope leído del querystring (?company_id=XX)
   const companyId = useMemo(() => {
-    const qs = new URLSearchParams(location.search);
+    const qs = new URLSearchParams(window.location.search);
     const raw = qs.get("company_id");
     if (raw == null) return null;
     const trimmed = raw.trim();
@@ -90,12 +82,13 @@ export default function InfraDiagram() {
     const v = Number(trimmed);
     if (!Number.isFinite(v) || v <= 0) return null;
     return v;
-  }, [location.search]);
+  }, []);
 
   useEffect(() => {
     log("href:", window.location.href);
     log("companyId from query:", companyId);
-  }, [companyId]); // ✅ loguea cuando cambie
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
@@ -105,9 +98,7 @@ export default function InfraDiagram() {
   // Node-RED ports state
   type PortRef = { nodeId: string; side: "out" | "in"; x: number; y: number };
   const [connectFrom, setConnectFrom] = useState<PortRef | null>(null);
-  const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(
-    null
-  );
+  const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   // Ops drawer (por nodo)
@@ -124,10 +115,7 @@ export default function InfraDiagram() {
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
-  const showTip = (
-    e: React.MouseEvent,
-    content: { title: string; lines: string[] }
-  ) => {
+  const showTip = (e: React.MouseEvent, content: { title: string; lines: string[] }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTip({
@@ -183,26 +171,18 @@ export default function InfraDiagram() {
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
-    const manifolds = uiNodes.filter(
-      (n) => n.type === "manifold"
-    ) as ManifoldNode[];
+    const manifolds = uiNodes.filter((n) => n.type === "manifold") as ManifoldNode[];
     const valves = uiNodes.filter((n) => n.type === "valve") as ValveNode[];
 
     const pumpsFixed = layoutRow(pumps, { startX: 140, startY: 380, gapX: 160 });
-    const manifoldsFixed = layoutRow(manifolds, {
-      startX: 480,
-      startY: 260,
-      gapX: 180,
-    });
+    const manifoldsFixed = layoutRow(manifolds, { startX: 480, startY: 260, gapX: 180 });
     const valvesFixed = layoutRow(valves, { startX: 640, startY: 260, gapX: 180 });
     const tanksFixed = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const fixedById: Record<string, UINode> = {};
-    [...pumpsFixed, ...manifoldsFixed, ...valvesFixed, ...tanksFixed].forEach(
-      (n) => {
-        fixedById[n.id] = n;
-      }
-    );
+    [...pumpsFixed, ...manifoldsFixed, ...valvesFixed, ...tanksFixed].forEach((n) => {
+      fixedById[n.id] = n;
+    });
 
     uiNodes = uiNodes.map((n) => {
       const f = fixedById[n.id];
@@ -220,12 +200,8 @@ export default function InfraDiagram() {
     }));
 
     const saved = loadLayoutFromStorage();
-    const cleaned = (saved ?? []).filter(
-      (p) => Number.isFinite(p.x) && Number.isFinite(p.y)
-    );
-    const nodesWithSaved = cleaned.length
-      ? (importLayoutLS(uiNodes, cleaned) as UINode[])
-      : uiNodes;
+    const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
 
     setNodes(nodesWithSaved);
     setEdges(uiEdges);
@@ -440,18 +416,12 @@ export default function InfraDiagram() {
     const valves = nodes.filter((n) => n.type === "valve") as ValveNode[];
 
     const newPumps = layoutRow(pumps, { startX: 140, startY: 380, gapX: 160 });
-    const newManifolds = layoutRow(manifolds, {
-      startX: 480,
-      startY: 260,
-      gapX: 180,
-    });
+    const newManifolds = layoutRow(manifolds, { startX: 480, startY: 260, gapX: 180 });
     const newValves = layoutRow(valves, { startX: 640, startY: 260, gapX: 180 });
     const newTanks = layoutRow(tanks, { startX: 820, startY: 260, gapX: 180 });
 
     const byId: Record<string, UINode> = {};
-    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach(
-      (n) => (byId[n.id] = n)
-    );
+    [...newPumps, ...newManifolds, ...newValves, ...newTanks].forEach((n) => (byId[n.id] = n));
     const next = nodes.map((n) => byId[n.id] ?? n);
     setNodes(next);
 
@@ -524,11 +494,11 @@ export default function InfraDiagram() {
             {editMode ? "Salir edición" : "Editar"}
           </button>
 
-          {/* ✅ BOTÓN MAPA preservando ?company_id=... */}
+          {/* ✅ BOTÓN MAPA (AL LADO DE EDITAR) */}
           <button
-            onClick={() =>
-              navigate({ pathname: "/mapa", search: location.search })
-            }
+            onClick={() => {
+              window.location.href = "https://TU-APP-MAPA.vercel.app";
+            }}
             style={{
               padding: "4px 8px",
               borderRadius: 8,
@@ -650,7 +620,14 @@ export default function InfraDiagram() {
 
                 {/* Fondo dinámico */}
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
+                <rect
+                  x={vb.minx}
+                  y={vb.miny}
+                  width={vb.w}
+                  height={vb.h}
+                  fill="url(#grid)"
+                  opacity={0.6}
+                />
 
                 {/* Fondos por ubicación (clickeables) */}
                 {locationGroups.map((g) => (
@@ -826,12 +803,7 @@ export default function InfraDiagram() {
         </div>
       )}
 
-      <OpsDrawer
-        open={opsOpen}
-        onClose={() => setOpsOpen(false)}
-        node={opsNode}
-        onCommandSent={() => {}}
-      />
+      <OpsDrawer open={opsOpen} onClose={() => setOpsOpen(false)} node={opsNode} onCommandSent={() => {}} />
 
       <LocationDrawer
         open={locationDrawerOpen}
