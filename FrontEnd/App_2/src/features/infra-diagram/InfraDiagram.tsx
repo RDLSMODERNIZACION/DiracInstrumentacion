@@ -89,10 +89,14 @@ export default function InfraDiagram() {
     return v;
   }, [location.search]);
 
+  // ✅ LOGS empresa / URL
   useEffect(() => {
-    log("href:", window.location.href);
-    log("companyId from query:", companyId);
-  }, [companyId]);
+    const qs = new URLSearchParams(location.search);
+    console.log("[InfraDiagram] URL:", window.location.href);
+    console.log("[InfraDiagram] location.search:", location.search);
+    console.log("[InfraDiagram] company_id raw:", qs.get("company_id"));
+    console.log("[InfraDiagram] companyId parsed:", companyId);
+  }, [location.search, companyId]);
 
   // Edit/Connect mode
   const [editMode, setEditMode] = useState(false);
@@ -143,12 +147,42 @@ export default function InfraDiagram() {
       // ✅ ahora sí: manda company_id al backend
       const urlNodes = `/infraestructura/get_layout_combined${scopeQS}`;
       const urlEdges = `/infraestructura/get_layout_edges${scopeQS}`;
+
+      console.log("[InfraDiagram] FETCH urls:", { urlNodes, urlEdges });
       log("FETCH ->", urlNodes, "&&", urlEdges);
 
       const [nodesRaw, edgesRaw] = await Promise.all([
         fetchJSON<CombinedNodeDTO[]>(urlNodes, signal),
         fetchJSON<EdgeDTO[]>(urlEdges, signal),
       ]);
+
+      console.log(
+        "[InfraDiagram] RESP counts:",
+        "nodes:",
+        nodesRaw?.length ?? 0,
+        "edges:",
+        edgesRaw?.length ?? 0
+      );
+
+      const locStats = (nodesRaw ?? []).reduce(
+        (acc: any, n: any) => {
+          if (n.location_id != null) acc.withLocationId++;
+          if (n.location_name != null && String(n.location_name).trim()) acc.withLocationName++;
+          return acc;
+        },
+        { withLocationId: 0, withLocationName: 0 }
+      );
+
+      console.log("[InfraDiagram] location fields in response:", locStats);
+      console.log(
+        "[InfraDiagram] sample nodes:",
+        (nodesRaw ?? []).slice(0, 5).map((n: any) => ({
+          node_id: n.node_id,
+          type: n.type,
+          location_id: n.location_id,
+          location_name: n.location_name,
+        }))
+      );
 
       log("FETCH DONE", {
         nodes: nodesRaw?.length ?? 0,
@@ -178,6 +212,17 @@ export default function InfraDiagram() {
       location_id: n.location_id ?? null,
       location_name: n.location_name ?? null,
     })) as UINode[];
+
+    const uiLocStats = uiNodes.reduce(
+      (acc, n) => {
+        if ((n as any).location_id != null) acc.withLocationId++;
+        if ((n as any).location_name != null && String((n as any).location_name).trim())
+          acc.withLocationName++;
+        return acc;
+      },
+      { withLocationId: 0, withLocationName: 0 }
+    );
+    console.log("[InfraDiagram] UI location fields:", uiLocStats);
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
