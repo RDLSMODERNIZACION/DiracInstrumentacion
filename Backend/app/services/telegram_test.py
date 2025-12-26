@@ -3,6 +3,7 @@ import os
 import traceback
 from datetime import datetime, timezone
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -14,13 +15,15 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 TANK_OFFLINE_SEC = int(os.getenv("TELEGRAM_TANK_OFFLINE_SEC", "600"))  # 10 min
 PUMP_OFFLINE_SEC = int(os.getenv("TELEGRAM_PUMP_OFFLINE_SEC", "300"))  # 5 min
+TZ = ZoneInfo(os.getenv("TELEGRAM_TZ", "America/Argentina/Buenos_Aires"))
 
 
 def _age_sec(ts):
     if ts is None:
         return None
-    now = datetime.now(timezone.utc)
-    return int((now - ts).total_seconds())
+    # ts viene con tz (UTC), comparamos en UTC
+    now_utc = datetime.now(timezone.utc)
+    return int((now_utc - ts).total_seconds())
 
 
 @router.post("/report-now")
@@ -120,7 +123,7 @@ def telegram_report_now():
         # ---- Construir mensaje SOLO con localidades online ----
         online_locs = [loc for loc in by_loc.values() if loc["loc_online"]]
 
-        now_txt = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        now_txt = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
         lines = [f"📊 <b>REPORTE SCADA POR LOCALIDAD</b> <code>{now_txt}</code>", ""]
 
         if not online_locs:
