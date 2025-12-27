@@ -10,6 +10,7 @@ import {
   ZoomControl,
   useMap,
   useMapEvents,
+  GeoJSON, // ✅ NUEVO
 } from "react-leaflet";
 import L from "leaflet";
 import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo/index";
@@ -43,14 +44,11 @@ export type FocusPair =
 function pressureLabelForBarrio(b: any): { label: string; tone: "good" | "mid" | "bad" | "na" } {
   const m = (b?.meta ?? {}) as any;
 
-  // Soportes posibles (si después los agregás al meta)
   const kpa = typeof m.presion_kpa === "number" ? m.presion_kpa : null;
   const bar = typeof m.presion_bar === "number" ? m.presion_bar : null;
   const pct = typeof m.presion_pct === "number" ? m.presion_pct : null;
 
-  // Heurística simple (ajustable)
   if (bar != null) {
-    // Ej: >2.2 buena, 1.6-2.2 media, <1.6 mala
     if (bar >= 2.2) return { label: `Presión: Buena (${bar.toFixed(1)} bar)`, tone: "good" };
     if (bar >= 1.6) return { label: `Presión: Media (${bar.toFixed(1)} bar)`, tone: "mid" };
     return { label: `Presión: Mala (${bar.toFixed(1)} bar)`, tone: "bad" };
@@ -134,7 +132,7 @@ function FitToBarrios({
 
     for (const b of barrios) {
       if (!barrioIds.has(b.id)) continue;
-      for (const p of b.polygon) pts.push(p); // [lat,lng]
+      for (const p of b.polygon) pts.push(p);
     }
 
     if (includePoint) pts.push(includePoint);
@@ -176,10 +174,7 @@ export function MapView(props: {
   viewSelectedId: string | null;
   mapGrey: boolean;
 
-  // ✅ NUEVO: para encuadrar también la ubicación donde abriste la válvula
   activeValvePos?: LatLng | null;
-
-  // ✅ NUEVO: forzar que se muestre el marker aunque el zoom sea bajo
   forceShowAssetIds?: Set<string>;
 }) {
   const {
@@ -234,16 +229,38 @@ export function MapView(props: {
       ? barriosToShowBase.filter((b) => b.locationId === selectedZoneId)
       : barriosToShowBase;
 
-  // 🎨 Estilo “blanco lindo” + bordes suaves + hover
+  // ✅ NUEVO: cargar GeoJSON base (desde src/data)
+  const [pipesGeoJSON, setPipesGeoJSON] = React.useState<any>(null);
+  React.useEffect(() => {
+    if (!showPipes) return;
+
+    let cancelled = false;
+    const url = new URL("../data/canerias.geojson", import.meta.url).toString();
+
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`No se pudo cargar canerias.geojson (${r.status})`);
+        return r.json();
+      })
+      .then((json) => {
+        if (!cancelled) setPipesGeoJSON(json);
+      })
+      .catch((e) => {
+        console.warn("GeoJSON cañerías:", e?.message ?? e);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showPipes]);
+
   const barrioBaseStyle = (hl: boolean, hlByValve: boolean) => {
-    // Borde
     const stroke = hlByValve
       ? "rgba(255,255,255,0.95)"
       : hl
       ? "rgba(255,255,255,0.80)"
       : "rgba(255,255,255,0.55)";
 
-    // Relleno blanco “glass”
     const fillColor = hlByValve
       ? "rgba(255,255,255,0.28)"
       : hl
@@ -264,7 +281,6 @@ export function MapView(props: {
   };
 
   const barrioHoverStyle = (hl: boolean, hlByValve: boolean) => {
-    // un poquito más marcado al hover
     const base = barrioBaseStyle(hl, hlByValve);
     return {
       ...base,
@@ -285,6 +301,23 @@ export function MapView(props: {
       <ZoomControl position="bottomright" />
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
+      {/* ✅ NUEVO: Cañerías base desde QGIS */}
+      {showPipes && pipesGeoJSON && (
+        <GeoJSON
+          data={pipesGeoJSON}
+          style={() => ({
+            color: "rgba(37, 99, 235, 0.85)",
+            weight: zoom < 14.5 ? 2 : 3,
+            opacity: zoom < 14.5 ? 0.35 : 0.65,
+          })}
+          onEachFeature={(feature, layer) => {
+            layer.on("click", () => {
+              console.log("PIPE (GeoJSON) props:", feature?.properties);
+            });
+          }}
+        />
+      )}
+
       {/* Localidades */}
       {showZones &&
         zonesToShow.map((z) => {
@@ -301,12 +334,7 @@ export function MapView(props: {
 
           return (
             <React.Fragment key={z.id}>
-              <Marker
-  position={c}
-  icon={icon}
-  eventHandlers={{ click: () => onSelectZone(z) }}
-/>
-
+              <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }} />
 
               {showPolygon && (
                 <Polygon
@@ -352,12 +380,7 @@ export function MapView(props: {
                 },
               }}
             >
-              <Tooltip
-                sticky
-                direction="top"
-                opacity={0.98}
-                className={`barrioTooltip tone-${pres.tone}`}
-              >
+              <Tooltip sticky direction="top" opacity={0.98} className={`barrioTooltip tone-${pres.tone}`}>
                 <div style={{ fontWeight: 900 }}>{b.name}</div>
                 <div style={{ fontSize: 12, opacity: 0.9 }}>{pres.label}</div>
               </Tooltip>
@@ -365,7 +388,7 @@ export function MapView(props: {
           );
         })}
 
-      {/* Cañerías */}
+      {/* Cañerías demo (edges) - queda como estaba */}
       {showPipes &&
         edgesToShow.map((e) => {
           const a = assetsById.get(e.from);
@@ -406,7 +429,7 @@ export function MapView(props: {
           );
         })}
 
-      {/* Assets: mostrar en ALL/ZONES, y además forzar el marker de la válvula activa aunque el zoom sea bajo */}
+      {/* Assets */}
       {(viewMode === "ALL" || viewMode === "ZONES") &&
         (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
         assets
@@ -455,7 +478,7 @@ export function MapView(props: {
             );
           })}
 
-      {/* 2 puntos A/B (NO interactivos) */}
+      {/* 2 puntos A/B */}
       {focusPair && (
         <>
           <Marker interactive={false} position={focusPair.a.pos} icon={focusPointIcon(focusPair.a.label)} />
@@ -463,19 +486,12 @@ export function MapView(props: {
         </>
       )}
 
-      {/* Si hay recorrido punteado, encuadrarlo */}
       <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
 
-      {/* Si NO hay recorrido, pero hay impacto a barrios, encuadrar barrios + incluir punto de válvula */}
       {!hasRoute && (
-        <FitToBarrios
-          enabled={hasBarrioImpact}
-          barrioIds={highlightedBarrioIdsExtra}
-          includePoint={activeValvePos ?? null}
-        />
+        <FitToBarrios enabled={hasBarrioImpact} barrioIds={highlightedBarrioIdsExtra} includePoint={activeValvePos ?? null} />
       )}
 
-      {/* Si NO hay recorrido NI barrio impacto, mantenemos centrar */}
       {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
     </MapContainer>
   );
