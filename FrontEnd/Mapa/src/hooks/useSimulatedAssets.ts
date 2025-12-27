@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { clamp, round, seededNoise } from "../lib/sim";
-import { assets as baseAssets, type Asset } from "../data/demo";
+import { assets as baseAssets, type Asset } from "../data/demo/index";
 
 export function useSimulatedAssets(valveEnabled: Record<string, boolean>) {
   const [tick, setTick] = useState(0);

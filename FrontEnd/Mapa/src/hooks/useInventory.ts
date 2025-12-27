@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { barrios, edges, type Asset, type Edge } from "../data/demo";
+import { barrios, edges, type Asset, type Edge } from "../data/demo/index";
 
 export function useInventory(args: { selectedZoneId: string | null; assets: Asset[]; assetsById: Map<string, Asset> }) {
   const { selectedZoneId, assets, assetsById } = args;

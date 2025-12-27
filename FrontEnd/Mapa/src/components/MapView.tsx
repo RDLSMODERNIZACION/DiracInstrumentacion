@@ -12,7 +12,8 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo";
+import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo/index";
+
 import { type LatLng } from "../lib/geo";
 import { centroid } from "../lib/geoUtils";
 import { focusPointIcon, locationMarkerIcon } from "../lib/mapIcons";

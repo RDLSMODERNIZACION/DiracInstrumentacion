@@ -6,7 +6,7 @@ import {
   barrios,
   zones,
   valveRouting,
-} from "../data/demo";
+} from "../data/demo/index";
 import { VideoModal } from "./VideoModal";
 
 export type SidebarMode = "NONE" | "ZONE" | "ASSET";

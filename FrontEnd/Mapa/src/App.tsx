@@ -14,7 +14,8 @@ import {
   type Asset,
   type Edge,
   type Zone,
-} from "./data/demo";
+} from "./data/demo/index";
+
 
 import { useToasts } from "./hooks/useToasts";
 import { useSimulatedAssets } from "./hooks/useSimulatedAssets";
