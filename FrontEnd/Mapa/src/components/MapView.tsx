@@ -243,17 +243,20 @@ export function MapView(props: {
      Pipes selection + editor
      ✅ NUEVO FLUJO:
      - selectedPipeId: selecciona/highlight
+     - selectedPipeLabel: nombre lógico (props.Layer)
      - selectedPipeLayer: para geometry editor
      - selectedPipePos: donde mostrar el popup
      - editingPipeId: abre modal SOLO con botón "Editar"
   --------------------------- */
   const [selectedPipeId, setSelectedPipeId] = React.useState<string | null>(null);
+  const [selectedPipeLabel, setSelectedPipeLabel] = React.useState<string | null>(null);
   const [selectedPipeLayer, setSelectedPipeLayer] = React.useState<L.Layer | null>(null);
   const [selectedPipePos, setSelectedPipePos] = React.useState<[number, number] | null>(null);
   const [editingPipeId, setEditingPipeId] = React.useState<string | null>(null);
 
   function clearPipeSelection() {
     setSelectedPipeId(null);
+    setSelectedPipeLabel(null);
     setSelectedPipeLayer(null);
     setSelectedPipePos(null);
     setEditingPipeId(null);
@@ -281,8 +284,9 @@ export function MapView(props: {
           <PipesLayer
             visible={showPipes}
             selectedId={selectedPipeId}
-            onSelect={(id, layer) => {
+            onSelect={(id, layer, label) => {
               setSelectedPipeId(id);
+              setSelectedPipeLabel(label ?? null);
               setSelectedPipeLayer(layer);
 
               // si seleccionás otra cañería, cerramos edición
@@ -304,31 +308,31 @@ export function MapView(props: {
           />
         )}
 
-        {/* Popup de la cañería seleccionada */}
-        {selectedPipeId && selectedPipePos && (
-          <Popup position={selectedPipePos}>
-            <div className="text-sm" style={{ minWidth: 220 }}>
-              <div className="font-semibold">Cañería</div>
-              <div className="text-xs text-slate-600">ID: {selectedPipeId}</div>
+       {/* Popup de la cañería seleccionada */}
+{selectedPipeId && selectedPipePos && (
+  <Popup position={selectedPipePos} className="pipe-popup" closeButton={true} autoClose={false}>
+    <div className="pipePopup">
+      <div className="pipePopup__title" title={selectedPipeLabel ?? ""}>
+        {selectedPipeLabel ?? "Cañería"}
+      </div>
 
-              <div className="mt-2 flex gap-2">
-                <button
-                  className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm"
-                  onClick={() => setEditingPipeId(selectedPipeId)}
-                >
-                  Editar
-                </button>
+      <div className="pipePopup__actions">
+        <button
+          className="pipePopup__btn pipePopup__btn--primary"
+          onClick={() => setEditingPipeId(selectedPipeId)}
+        >
+          Editar
+        </button>
 
-                <button
-                  className="px-3 py-1.5 rounded border text-sm"
-                  onClick={clearPipeSelection}
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </Popup>
-        )}
+        <button className="pipePopup__btn" onClick={clearPipeSelection}>
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </Popup>
+)}
+
+
 
         {/* =====================
             ZONAS

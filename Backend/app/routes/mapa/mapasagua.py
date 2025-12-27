@@ -12,7 +12,8 @@ router = APIRouter(prefix="/mapasagua", tags=["mapasagua"])
 
 
 def _feature_from_row(row):
-    (pid, diam, material, typ, estado, style, props, geometry_json) = row
+    # ✅ agregado flow_func
+    (pid, diam, material, typ, estado, flow_func, style, props, geometry_json) = row
     if not geometry_json:
         return None
     geom = json.loads(geometry_json)
@@ -24,6 +25,7 @@ def _feature_from_row(row):
             "material": material,
             "type": typ,
             "estado": estado,
+            "flow_func": flow_func,  # ✅ nuevo
             "style": style or {},
             "props": props or {},
         },
@@ -58,6 +60,7 @@ def get_pipes(
         p.material,
         p.type,
         p.estado,
+        p.flow_func,               -- ✅ nuevo
         p.style,
         p.props,
         infraestructura.st_asgeojson(p.geom) as geometry_json
@@ -111,6 +114,7 @@ def get_pipe(pipe_id: str):
         p.material,
         p.type,
         p.estado,
+        p.flow_func,               -- ✅ nuevo
         p.style,
         p.props,
         infraestructura.st_asgeojson(p.geom) as geometry_json
@@ -147,11 +151,13 @@ def patch_pipe(
         "material": "PEAD",
         "type": "WATER",
         "estado": "OK",
-        "style": { ... },   # json/jsonb
-        "props": { ... }    # json/jsonb
+        "flow_func": "IMPULSION",  # ✅ nuevo
+        "style": { ... },          # json/jsonb
+        "props": { ... }           # json/jsonb
       }
     """
-    allowed = {"diametro_mm", "material", "type", "estado", "style", "props"}
+    # ✅ agregado flow_func
+    allowed = {"diametro_mm", "material", "type", "estado", "flow_func", "style", "props"}
 
     unknown = [k for k in body.keys() if k not in allowed]
     if unknown:
@@ -190,6 +196,7 @@ def patch_pipe(
         material,
         type,
         estado,
+        flow_func,                 -- ✅ nuevo
         style,
         props,
         infraestructura.st_asgeojson(geom) as geometry_json
@@ -250,6 +257,7 @@ def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
         material,
         type,
         estado,
+        flow_func,                 -- ✅ nuevo
         style,
         props,
         infraestructura.st_asgeojson(geom) as geometry_json
@@ -286,6 +294,7 @@ def create_pipe(body: dict[str, Any]):
           "material": "PVC",
           "type": "WATER",
           "estado": "OK",
+          "flow_func": "DISTRIBUCION",  # ✅ nuevo (opcional)
           "props": {...},
           "style": {...}
         }
@@ -305,23 +314,25 @@ def create_pipe(body: dict[str, Any]):
     material = props.get("material")
     typ = props.get("type") or "WATER"
     estado = props.get("estado") or "OK"
+    flow_func = props.get("flow_func") or "DISTRIBUCION"  # ✅ nuevo
 
     props_json = props.get("props") or {}
     style_json = props.get("style") or {}
 
     sql = """
       insert into "MapasAgua".pipes
-        (id, geom, diametro_mm, material, type, estado, props, style, active, created_at, updated_at)
+        (id, geom, diametro_mm, material, type, estado, flow_func, props, style, active, created_at, updated_at)
       values
         (gen_random_uuid(),
          infraestructura.st_setsrid(infraestructura.st_geomfromgeojson(%s), 4326),
-         %s, %s, %s, %s, %s::jsonb, %s::jsonb, true, now(), now())
+         %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, true, now(), now())
       returning
         id::text as id,
         diametro_mm,
         material,
         type,
         estado,
+        flow_func,
         style,
         props,
         infraestructura.st_asgeojson(geom) as geometry_json
@@ -336,6 +347,7 @@ def create_pipe(body: dict[str, Any]):
                 material,
                 typ,
                 estado,
+                flow_func,
                 json.dumps(props_json),
                 json.dumps(style_json),
             ],

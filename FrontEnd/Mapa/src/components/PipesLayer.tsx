@@ -10,8 +10,8 @@ type Props = {
   useBBox?: boolean;
   debounceMs?: number;
 
-  /** ✅ pasa también la layer clickeada */
-  onSelect?: (pipeId: string, layer: L.Layer) => void;
+  /** ✅ pasa id + layer + label (props.Layer) */
+  onSelect?: (pipeId: string, layer: L.Layer, label?: string | null) => void;
 
   onCount?: (n: number) => void;
 
@@ -20,6 +20,24 @@ type Props = {
 
   styleFn?: (feature: any) => L.PathOptions;
 };
+
+function pickLabel(feature: any): string | null {
+  // Tu caso: properties.props.Layer
+  const a = feature?.properties?.props?.Layer;
+  if (typeof a === "string" && a.trim()) return a.trim();
+
+  // Fallbacks comunes
+  const b = feature?.properties?.props?.layer;
+  if (typeof b === "string" && b.trim()) return b.trim();
+
+  const c = feature?.properties?.Layer;
+  if (typeof c === "string" && c.trim()) return c.trim();
+
+  const d = feature?.properties?.name;
+  if (typeof d === "string" && d.trim()) return d.trim();
+
+  return null;
+}
 
 export default function PipesLayer({
   visible = true,
@@ -106,16 +124,16 @@ export default function PipesLayer({
       style={styleFn ?? defaultStyle}
       onEachFeature={(feature, layer) => {
         const id = feature?.id != null ? String(feature.id) : null;
+        const label = pickLabel(feature);
 
         layer.on("click", (e: any) => {
-          // ✅ clave: no dejar que el click "burbujee" al mapa
-          // (si no, el MapClickClear del MapView te limpia la selección al instante)
+          // ✅ clave: no dejar que el click burbujee al mapa
           try {
             L.DomEvent.stopPropagation(e);
           } catch {}
 
           if (!id) return;
-          onSelect?.(id, layer);
+          onSelect?.(id, layer, label);
         });
       }}
     />

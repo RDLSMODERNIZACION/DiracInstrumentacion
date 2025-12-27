@@ -38,8 +38,10 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
     };
   }, [pipeId]);
 
-  if (!pipeId) return null;
-  if (!portalTarget) return null;
+  if (!pipeId || !portalTarget) return null;
+
+  const p = data?.properties ?? {};
+  const props = p.props ?? {};
 
   async function save() {
     if (!data) return;
@@ -48,13 +50,14 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
       setSaving(true);
       setError(null);
 
-      const p = data.properties ?? {};
-
       const updated = await patchPipe(pipeId, {
         diametro_mm: p.diametro_mm ?? null,
         material: p.material ?? null,
         estado: p.estado ?? null,
-        props: p.props ?? null,
+        props: {
+          ...props,
+          Layer: props.Layer ?? "",
+        },
       });
 
       onUpdated(updated);
@@ -66,34 +69,22 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
     }
   }
 
-  const p = data?.properties ?? {};
-
-  // ✅ Paleta fija (legible en cualquier theme)
   const C = {
-    overlay: "rgba(2, 6, 23, 0.55)", // slate-950 con alpha
+    overlay: "rgba(2,6,23,0.55)",
     surface: "#ffffff",
-    text: "#0f172a", // slate-900
-    muted: "rgba(15, 23, 42, 0.70)",
-    border: "rgba(15, 23, 42, 0.14)",
-    inputBg: "#ffffff",
-    inputText: "#0f172a",
-    inputPlaceholder: "rgba(15, 23, 42, 0.45)",
+    text: "#0f172a",
+    muted: "rgba(15,23,42,0.65)",
+    border: "rgba(15,23,42,0.14)",
     primary: "#2563eb",
-    primaryText: "#ffffff",
-    dangerBg: "#FEF2F2",
-    dangerBorder: "#FECACA",
-    dangerText: "#B91C1C",
   };
 
   const modal = (
     <div style={{ position: "fixed", inset: 0, zIndex: 999999 }}>
-      {/* Backdrop */}
       <div
         style={{ position: "absolute", inset: 0, background: C.overlay }}
         onClick={saving ? undefined : onClose}
       />
 
-      {/* Modal */}
       <div
         style={{
           position: "absolute",
@@ -105,16 +96,15 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
         }}
       >
         <div
-          // ✅ forzamos color base acá para no heredar blanco/oscuro del tema
           style={{
             width: "100%",
-            maxWidth: 440,
+            maxWidth: 460,
             background: C.surface,
             color: C.text,
             borderRadius: 14,
             overflow: "hidden",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
             border: `1px solid ${C.border}`,
+            boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
             fontFamily:
               'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial',
           }}
@@ -123,35 +113,32 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
           {/* Header */}
           <div
             style={{
+              padding: "14px 16px",
+              borderBottom: `1px solid ${C.border}`,
               display: "flex",
               justifyContent: "space-between",
               alignItems: "flex-start",
-              gap: 12,
-              padding: "12px 14px",
-              borderBottom: `1px solid ${C.border}`,
-              background: C.surface,
             }}
           >
             <div>
-              <div style={{ fontWeight: 800, letterSpacing: 0.2 }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
                 Editar cañería
               </div>
-              <div style={{ fontSize: 12, color: C.muted }}>ID: {pipeId}</div>
+              <div style={{ fontSize: 12, color: C.muted }}>
+                ID: {pipeId}
+              </div>
             </div>
 
             <button
-              onClick={saving ? undefined : onClose}
-              aria-label="Cerrar"
-              title="Cerrar"
+              onClick={onClose}
+              disabled={saving}
               style={{
                 width: 36,
                 height: 36,
                 borderRadius: 10,
                 border: `1px solid ${C.border}`,
                 background: "#fff",
-                color: C.text,
                 fontSize: 18,
-                lineHeight: "34px",
                 cursor: "pointer",
               }}
             >
@@ -160,30 +147,57 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
           </div>
 
           {/* Body */}
-          <div style={{ padding: 14, display: "grid", gap: 12 }}>
+          <div style={{ padding: 16, display: "grid", gap: 14 }}>
             {error && (
               <div
                 style={{
-                  fontSize: 13,
+                  background: "#FEF2F2",
+                  border: "1px solid #FECACA",
+                  color: "#B91C1C",
                   padding: 10,
-                  borderRadius: 12,
-                  background: C.dangerBg,
-                  border: `1px solid ${C.dangerBorder}`,
-                  color: C.dangerText,
+                  borderRadius: 10,
+                  fontSize: 13,
                 }}
               >
                 {error}
               </div>
             )}
 
-            {!data && !error && (
-              <div style={{ fontSize: 13, color: C.muted }}>Cargando…</div>
-            )}
+            {!data && <div style={{ color: C.muted }}>Cargando…</div>}
 
             {data && (
               <>
-                <label style={{ fontSize: 13 }}>
-                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+                {/* ✅ NOMBRE */}
+                <label>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                    Nombre / Identificador
+                  </div>
+                  <input
+                    value={props.Layer ?? ""}
+                    placeholder="Ej: RA_3TKS_Llanquihue_PVC_075"
+                    onChange={(e) =>
+                      setData({
+                        ...data,
+                        properties: {
+                          ...p,
+                          props: {
+                            ...props,
+                            Layer: e.target.value,
+                          },
+                        },
+                      })
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 12,
+                      border: `1px solid ${C.border}`,
+                    }}
+                  />
+                </label>
+
+                <label>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
                     Diámetro (mm)
                   </div>
                   <input
@@ -203,18 +217,15 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                     }
                     style={{
                       width: "100%",
-                      padding: "10px 10px",
+                      padding: "10px",
                       borderRadius: 12,
                       border: `1px solid ${C.border}`,
-                      background: C.inputBg,
-                      color: C.inputText,
-                      outline: "none",
                     }}
                   />
                 </label>
 
-                <label style={{ fontSize: 13 }}>
-                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+                <label>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
                     Material
                   </div>
                   <input
@@ -231,18 +242,15 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                     }
                     style={{
                       width: "100%",
-                      padding: "10px 10px",
+                      padding: "10px",
                       borderRadius: 12,
                       border: `1px solid ${C.border}`,
-                      background: C.inputBg,
-                      color: C.inputText,
-                      outline: "none",
                     }}
                   />
                 </label>
 
-                <label style={{ fontSize: 13 }}>
-                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+                <label>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
                     Estado
                   </div>
                   <select
@@ -258,12 +266,9 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                     }
                     style={{
                       width: "100%",
-                      padding: "10px 10px",
+                      padding: "10px",
                       borderRadius: 12,
                       border: `1px solid ${C.border}`,
-                      background: C.inputBg,
-                      color: C.inputText,
-                      outline: "none",
                     }}
                   >
                     <option value="OK">OK</option>
@@ -272,12 +277,6 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                     <option value="OFF">OFF</option>
                   </select>
                 </label>
-
-                {/* hint: placeholder color para inputs (simple) */}
-                <div style={{ fontSize: 12, color: C.muted }}>
-                  Tip: si querés agregar más campos (clase, observaciones, etc.)
-                  los sumamos acá.
-                </div>
               </>
             )}
           </div>
@@ -289,21 +288,17 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
               borderTop: `1px solid ${C.border}`,
               display: "flex",
               justifyContent: "flex-end",
-              gap: 8,
-              background: C.surface,
+              gap: 10,
             }}
           >
             <button
               onClick={onClose}
               disabled={saving}
               style={{
-                padding: "10px 12px",
+                padding: "10px 14px",
                 borderRadius: 12,
                 border: `1px solid ${C.border}`,
                 background: "#fff",
-                color: C.text,
-                cursor: saving ? "not-allowed" : "pointer",
-                opacity: saving ? 0.6 : 1,
                 fontWeight: 600,
               }}
             >
@@ -314,14 +309,12 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
               onClick={save}
               disabled={saving || !data}
               style={{
-                padding: "10px 12px",
+                padding: "10px 16px",
                 borderRadius: 12,
-                border: `1px solid ${C.border}`,
                 background: C.primary,
-                color: C.primaryText,
-                cursor: saving || !data ? "not-allowed" : "pointer",
-                opacity: saving || !data ? 0.7 : 1,
+                color: "#fff",
                 fontWeight: 700,
+                opacity: saving || !data ? 0.7 : 1,
               }}
             >
               {saving ? "Guardando…" : "Guardar"}
@@ -329,14 +322,6 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
           </div>
         </div>
       </div>
-
-      {/* placeholder color (opcional): si tu CSS global lo pisa, esto ayuda */}
-      <style>
-        {`
-          /* scoped-ish: aplica a inputs dentro del portal */
-          input::placeholder { color: ${C.inputPlaceholder}; }
-        `}
-      </style>
     </div>
   );
 
