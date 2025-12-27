@@ -12,23 +12,37 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo/index";
+import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo";
 
 import { type LatLng } from "../lib/geo";
 import { centroid } from "../lib/geoUtils";
 import { focusPointIcon, locationMarkerIcon } from "../lib/mapIcons";
 import { FlyTo } from "./FlyTo";
 
-// ✅ NUEVO (API layer + editor)
-import PipesApiLayer from "./PipesApiLayer";
+// ✅ Pipes (backend + editor)
+import PipesLayer from "./PipesLayer";
 import PipeEditDrawer from "./PipeEditDrawer";
+import PipeGeometryEditor from "./PipeGeometryEditor";
 
 export type ViewMode = "ALL" | "ZONES" | "PIPES" | "BARRIOS";
 
+/* ---------------------------
+   Zoom watcher
+--------------------------- */
 function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
   useMapEvents({
     zoomend: (e) => onZoom(e.target.getZoom()),
     moveend: (e) => onZoom(e.target.getZoom()),
+  });
+  return null;
+}
+
+/* ---------------------------
+   Click en mapa (fondo) => limpiar selección/cerrar modal
+--------------------------- */
+function MapClickClear({ onClear }: { onClear: () => void }) {
+  useMapEvents({
+    click: () => onClear(),
   });
   return null;
 }
@@ -44,6 +58,9 @@ export type FocusPair =
     }
   | null;
 
+/* ---------------------------
+   Helpers barrios
+--------------------------- */
 function pressureLabelForBarrio(b: any): { label: string; tone: "good" | "mid" | "bad" | "na" } {
   const m = (b?.meta ?? {}) as any;
 
@@ -70,9 +87,9 @@ function pressureLabelForBarrio(b: any): { label: string; tone: "good" | "mid" |
   return { label: "Presión: N/D", tone: "na" };
 }
 
-/**
- * ✅ Cuando hay recorrido (dashedEdgeIdsExtra), encuadra TODO el recorrido.
- */
+/* ---------------------------
+   Fit helpers (sin cambios)
+--------------------------- */
 function FitToRoute({
   dashedEdgeIdsExtra,
   assetsById,
@@ -113,9 +130,6 @@ function FitToRoute({
   return null;
 }
 
-/**
- * ✅ encuadra barrios impactados, e INCLUYE además el punto de la válvula (para que se vea la localización).
- */
 function FitToBarrios({
   enabled,
   barrioIds,
@@ -149,6 +163,9 @@ function FitToBarrios({
   return null;
 }
 
+/* ===========================
+   MAP VIEW
+=========================== */
 export function MapView(props: {
   zoom: number;
   setZoom: (z: number) => void;
@@ -189,7 +206,6 @@ export function MapView(props: {
     assetsById,
     valveEnabled,
     highlightedBarrioIds,
-    highlightedEdgeIds,
     highlightedBarrioIdsExtra,
     dashedEdgeIdsExtra,
     onSelectZone,
@@ -205,7 +221,6 @@ export function MapView(props: {
   } = props;
 
   const showAssets = zoom >= 14.5 || (mode === "ZONE" && selectedZoneId);
-
   const hasRoute = (dashedEdgeIdsExtra?.size ?? 0) > 0;
   const hasBarrioImpact = (highlightedBarrioIdsExtra?.size ?? 0) > 0;
 
@@ -216,59 +231,33 @@ export function MapView(props: {
   const zonesToShow =
     viewMode === "ZONES" && viewSelectedId ? zones.filter((z) => z.id === viewSelectedId) : zones;
 
-  const edgesToShow =
-    viewMode === "PIPES" && viewSelectedId ? edges.filter((e) => e.id === viewSelectedId) : edges;
-
-  const barriosToShowBase =
-    viewMode === "BARRIOS" && viewSelectedId
-      ? barrios.filter((b) => b.id === viewSelectedId)
-      : barrios;
-
   const BARRIOS_MIN_ZOOM = 13.2;
   const canDrawBarrios = zoom >= BARRIOS_MIN_ZOOM || (mode === "ZONE" && selectedZoneId);
 
   const barriosToShow =
     mode === "ZONE" && selectedZoneId
-      ? barriosToShowBase.filter((b) => b.locationId === selectedZoneId)
-      : barriosToShowBase;
+      ? barrios.filter((b) => b.locationId === selectedZoneId)
+      : barrios;
 
-  // ✅ NUEVO: edición de cañerías desde backend
+  /* ---------------------------
+     Pipes selection + editor
+     ✅ NUEVO FLUJO:
+     - selectedPipeId: selecciona/highlight
+     - selectedPipeLayer: para geometry editor
+     - selectedPipePos: donde mostrar el popup
+     - editingPipeId: abre modal SOLO con botón "Editar"
+  --------------------------- */
   const [selectedPipeId, setSelectedPipeId] = React.useState<string | null>(null);
+  const [selectedPipeLayer, setSelectedPipeLayer] = React.useState<L.Layer | null>(null);
+  const [selectedPipePos, setSelectedPipePos] = React.useState<[number, number] | null>(null);
+  const [editingPipeId, setEditingPipeId] = React.useState<string | null>(null);
 
-  const barrioBaseStyle = (hl: boolean, hlByValve: boolean) => {
-    const stroke = hlByValve
-      ? "rgba(255,255,255,0.95)"
-      : hl
-      ? "rgba(255,255,255,0.80)"
-      : "rgba(255,255,255,0.55)";
-
-    const fillColor = hlByValve
-      ? "rgba(255,255,255,0.28)"
-      : hl
-      ? "rgba(255,255,255,0.22)"
-      : "rgba(255,255,255,0.14)";
-
-    const fillOpacity = hlByValve ? 0.55 : hl ? 0.42 : 0.30;
-
-    return {
-      color: stroke,
-      fillColor,
-      fillOpacity,
-      weight: hlByValve ? 4 : hl ? 3 : 2,
-      lineCap: "round",
-      lineJoin: "round",
-      dashArray: undefined,
-    } as const;
-  };
-
-  const barrioHoverStyle = (hl: boolean, hlByValve: boolean) => {
-    const base = barrioBaseStyle(hl, hlByValve);
-    return {
-      ...base,
-      fillOpacity: Math.min(0.68, (base.fillOpacity ?? 0.45) + 0.12),
-      weight: (base.weight ?? 2) + 1,
-    } as const;
-  };
+  function clearPipeSelection() {
+    setSelectedPipeId(null);
+    setSelectedPipeLayer(null);
+    setSelectedPipePos(null);
+    setEditingPipeId(null);
+  }
 
   return (
     <>
@@ -283,10 +272,67 @@ export function MapView(props: {
         <ZoomControl position="bottomright" />
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-        {/* ✅ NUEVO: Cañerías desde backend (sin hardcode geojson) */}
-        {showPipes && <PipesApiLayer onSelect={setSelectedPipeId} />}
+        <MapClickClear onClear={clearPipeSelection} />
 
-        {/* Localidades */}
+        {/* =====================
+            CAÑERÍAS (DB)
+        ===================== */}
+        {showPipes && (
+          <PipesLayer
+            visible={showPipes}
+            selectedId={selectedPipeId}
+            onSelect={(id, layer) => {
+              setSelectedPipeId(id);
+              setSelectedPipeLayer(layer);
+
+              // si seleccionás otra cañería, cerramos edición
+              setEditingPipeId(null);
+
+              // calculamos posición para el popup (centro del bounds o latlng)
+              try {
+                const anyLayer: any = layer as any;
+                const center = anyLayer?.getBounds?.().getCenter?.() ?? anyLayer?.getLatLng?.();
+                if (center && typeof center.lat === "number" && typeof center.lng === "number") {
+                  setSelectedPipePos([center.lat, center.lng]);
+                } else {
+                  setSelectedPipePos(null);
+                }
+              } catch {
+                setSelectedPipePos(null);
+              }
+            }}
+          />
+        )}
+
+        {/* Popup de la cañería seleccionada */}
+        {selectedPipeId && selectedPipePos && (
+          <Popup position={selectedPipePos}>
+            <div className="text-sm" style={{ minWidth: 220 }}>
+              <div className="font-semibold">Cañería</div>
+              <div className="text-xs text-slate-600">ID: {selectedPipeId}</div>
+
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm"
+                  onClick={() => setEditingPipeId(selectedPipeId)}
+                >
+                  Editar
+                </button>
+
+                <button
+                  className="px-3 py-1.5 rounded border text-sm"
+                  onClick={clearPipeSelection}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </Popup>
+        )}
+
+        {/* =====================
+            ZONAS
+        ===================== */}
         {showZones &&
           zonesToShow.map((z) => {
             const sel = mode === "ZONE" && selectedZoneId === z.id;
@@ -322,7 +368,9 @@ export function MapView(props: {
             );
           })}
 
-        {/* Barrios */}
+        {/* =====================
+            BARRIOS
+        ===================== */}
         {showBarrios &&
           canDrawBarrios &&
           barriosToShow.map((b) => {
@@ -336,68 +384,34 @@ export function MapView(props: {
               <Polygon
                 key={b.id}
                 positions={b.polygon}
-                pathOptions={barrioBaseStyle(hl, hlByValve)}
-                eventHandlers={{
-                  mouseover: (ev) => {
-                    const layer = ev.target as any;
-                    if (layer?.setStyle) layer.setStyle(barrioHoverStyle(hl, hlByValve));
-                  },
-                  mouseout: (ev) => {
-                    const layer = ev.target as any;
-                    if (layer?.setStyle) layer.setStyle(barrioBaseStyle(hl, hlByValve));
-                  },
+                pathOptions={{
+                  color: hl ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.55)",
+                  fillColor: hl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)",
+                  fillOpacity: hl ? 0.45 : 0.3,
+                  weight: hl ? 4 : 2,
                 }}
               >
-                <Tooltip sticky direction="top" opacity={0.98} className={`barrioTooltip tone-${pres.tone}`}>
+                <Tooltip sticky direction="top" opacity={0.98}>
                   <div style={{ fontWeight: 900 }}>{b.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.9 }}>{pres.label}</div>
+                  <div style={{ fontSize: 12 }}>{pres.label}</div>
                 </Tooltip>
               </Polygon>
             );
           })}
 
-        {/* Cañerías demo (edges) - queda como estaba */}
-        {showPipes &&
-          edgesToShow.map((e) => {
-            const a = assetsById.get(e.from);
-            const b = assetsById.get(e.to);
-            if (!a || !b) return null;
+        <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
 
-            const toAsset = assetsById.get(e.to);
-            const fromAsset = assetsById.get(e.from);
+        {!hasRoute && (
+          <FitToBarrios
+            enabled={hasBarrioImpact}
+            barrioIds={highlightedBarrioIdsExtra}
+            includePoint={activeValvePos ?? null}
+          />
+        )}
 
-            let disabled = false;
-            if (toAsset?.type === "VALVE" && valveEnabled[toAsset.id] === false) disabled = true;
-            if (fromAsset?.type === "VALVE" && valveEnabled[fromAsset.id] === false) disabled = true;
+        {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
 
-            const isHighlighted = highlightedEdgeIds.has(e.id);
-            const dashed = dashedEdgeIdsExtra?.has(e.id) ?? false;
-
-            const positions: [number, number][] = e.path ? e.path : [[a.lat, a.lng], [b.lat, b.lng]];
-
-            const baseOpacity = zoom < 14.5 ? 0.25 : 0.55;
-            const opacity = disabled ? 0.18 : isHighlighted || dashed ? 1.0 : baseOpacity;
-
-            const weight = disabled ? 3 : dashed ? 6 : isHighlighted ? 7 : zoom < 14.5 ? 3 : 4;
-
-            return (
-              <Polyline
-                key={e.id}
-                positions={positions}
-                pathOptions={{
-                  color: edgeColor(e.type),
-                  opacity,
-                  weight,
-                  dashArray: dashed ? "6 10" : undefined,
-                }}
-                eventHandlers={{
-                  click: () => onSelectAsset(e.to),
-                }}
-              />
-            );
-          })}
-
-        {/* Assets */}
+        {/* assets demo */}
         {(viewMode === "ALL" || viewMode === "ZONES") &&
           (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
           assets
@@ -453,28 +467,21 @@ export function MapView(props: {
             <Marker interactive={false} position={focusPair.b.pos} icon={focusPointIcon(focusPair.b.label)} />
           </>
         )}
-
-        <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
-
-        {!hasRoute && (
-          <FitToBarrios
-            enabled={hasBarrioImpact}
-            barrioIds={highlightedBarrioIdsExtra}
-            includePoint={activeValvePos ?? null}
-          />
-        )}
-
-        {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
       </MapContainer>
 
-      {/* ✅ Drawer de edición de cañerías */}
+      {/* =====================
+          EDITOR DE GEOMETRÍA (opcional)
+      ===================== */}
+      <PipeGeometryEditor pipeId={selectedPipeId} pipeLayer={selectedPipeLayer} />
+
+      {/* =====================
+          EDITOR DE PROPIEDADES (MODAL)
+          ✅ abre solo con "Editar"
+      ===================== */}
       <PipeEditDrawer
-        pipeId={selectedPipeId}
-        onClose={() => setSelectedPipeId(null)}
-        onUpdated={() => {
-          // por ahora no hacemos nada: el layer se refresca con move/zoom.
-          // Si querés, después optimizamos para actualizar solo 1 feature.
-        }}
+        pipeId={editingPipeId}
+        onClose={() => setEditingPipeId(null)}
+        onUpdated={() => {}}
       />
     </>
   );

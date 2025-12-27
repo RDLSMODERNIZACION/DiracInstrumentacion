@@ -1,29 +1,23 @@
 // src/components/PipesLayer.tsx
 import React from "react";
 import { GeoJSON, useMap } from "react-leaflet";
-import type L from "leaflet";
+import L from "leaflet";
 
 import { fetchPipesBBox, fetchPipesAll } from "../services/mapasagua";
 
 type Props = {
   visible?: boolean;
-
-  /** Si true, usa bbox del mapa (recomendado). Si false, trae todo (debug). */
   useBBox?: boolean;
-
-  /** ms de debounce para move/zoom */
   debounceMs?: number;
 
-  /** callback cuando el usuario clickea una cañería */
-  onSelect?: (pipeId: string) => void;
+  /** ✅ pasa también la layer clickeada */
+  onSelect?: (pipeId: string, layer: L.Layer) => void;
 
-  /** callback opcional con la cantidad de features cargadas */
   onCount?: (n: number) => void;
 
-  /**
-   * Si querés forzar estilo fijo, pasalo acá.
-   * Si no, usa properties.style si viene desde backend, o un default.
-   */
+  /** para resaltar */
+  selectedId?: string | null;
+
   styleFn?: (feature: any) => L.PathOptions;
 };
 
@@ -33,6 +27,7 @@ export default function PipesLayer({
   debounceMs = 300,
   onSelect,
   onCount,
+  selectedId = null,
   styleFn,
 }: Props) {
   const map = useMap();
@@ -70,15 +65,12 @@ export default function PipesLayer({
     };
 
     const debouncedLoad = () => {
-      if (!useBBox) return; // si es ALL, no recargar en move/zoom
+      if (!useBBox) return;
       if (t) clearTimeout(t);
       t = setTimeout(load, debounceMs);
     };
 
-    // carga inicial
     load();
-
-    // recargas por movimiento/zoom
     map.on("moveend", debouncedLoad);
     map.on("zoomend", debouncedLoad);
 
@@ -91,7 +83,6 @@ export default function PipesLayer({
   }, [visible, useBBox, debounceMs, map, onCount]);
 
   if (!visible) return null;
-
   if (error) {
     console.warn("PipesLayer error:", error);
     return null;
@@ -100,10 +91,12 @@ export default function PipesLayer({
 
   const defaultStyle: (feature: any) => L.PathOptions = (feature) => {
     const s = (feature?.properties as any)?.style ?? {};
+    const isSel = selectedId != null && String(feature?.id) === String(selectedId);
+
     return {
-      color: s.color ?? "#2563eb",
-      weight: s.weight ?? 3,
-      opacity: s.opacity ?? 0.85,
+      color: isSel ? "rgba(255,255,255,0.95)" : (s.color ?? "#2563eb"),
+      weight: isSel ? 6 : (s.weight ?? 3),
+      opacity: isSel ? 1.0 : (s.opacity ?? 0.85),
     };
   };
 
@@ -112,11 +105,17 @@ export default function PipesLayer({
       data={data}
       style={styleFn ?? defaultStyle}
       onEachFeature={(feature, layer) => {
-        layer.on("click", () => {
-          const id = feature?.id != null ? String(feature.id) : null;
-          // debug
-          // console.log("PIPE feature:", feature);
-          if (id && onSelect) onSelect(id);
+        const id = feature?.id != null ? String(feature.id) : null;
+
+        layer.on("click", (e: any) => {
+          // ✅ clave: no dejar que el click "burbujee" al mapa
+          // (si no, el MapClickClear del MapView te limpia la selección al instante)
+          try {
+            L.DomEvent.stopPropagation(e);
+          } catch {}
+
+          if (!id) return;
+          onSelect?.(id, layer);
         });
       }}
     />
