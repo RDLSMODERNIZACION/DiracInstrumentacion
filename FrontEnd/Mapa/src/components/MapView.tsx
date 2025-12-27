@@ -10,7 +10,6 @@ import {
   ZoomControl,
   useMap,
   useMapEvents,
-  GeoJSON, // ✅ NUEVO
 } from "react-leaflet";
 import L from "leaflet";
 import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo/index";
@@ -19,6 +18,10 @@ import { type LatLng } from "../lib/geo";
 import { centroid } from "../lib/geoUtils";
 import { focusPointIcon, locationMarkerIcon } from "../lib/mapIcons";
 import { FlyTo } from "./FlyTo";
+
+// ✅ NUEVO (API layer + editor)
+import PipesApiLayer from "./PipesApiLayer";
+import PipeEditDrawer from "./PipeEditDrawer";
 
 export type ViewMode = "ALL" | "ZONES" | "PIPES" | "BARRIOS";
 
@@ -229,30 +232,8 @@ export function MapView(props: {
       ? barriosToShowBase.filter((b) => b.locationId === selectedZoneId)
       : barriosToShowBase;
 
-  // ✅ NUEVO: cargar GeoJSON base (desde src/data)
-  const [pipesGeoJSON, setPipesGeoJSON] = React.useState<any>(null);
-  React.useEffect(() => {
-    if (!showPipes) return;
-
-    let cancelled = false;
-    const url = new URL("../data/canerias.geojson", import.meta.url).toString();
-
-    fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`No se pudo cargar canerias.geojson (${r.status})`);
-        return r.json();
-      })
-      .then((json) => {
-        if (!cancelled) setPipesGeoJSON(json);
-      })
-      .catch((e) => {
-        console.warn("GeoJSON cañerías:", e?.message ?? e);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [showPipes]);
+  // ✅ NUEVO: edición de cañerías desde backend
+  const [selectedPipeId, setSelectedPipeId] = React.useState<string | null>(null);
 
   const barrioBaseStyle = (hl: boolean, hlByValve: boolean) => {
     const stroke = hlByValve
@@ -290,209 +271,211 @@ export function MapView(props: {
   };
 
   return (
-    <MapContainer
-      className={mapGrey ? "mapGrey" : undefined}
-      center={CENTER}
-      zoom={13.8}
-      zoomControl={false}
-      style={{ height: "100%", width: "100%" }}
-    >
-      <ZoomWatcher onZoom={setZoom} />
-      <ZoomControl position="bottomright" />
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    <>
+      <MapContainer
+        className={mapGrey ? "mapGrey" : undefined}
+        center={CENTER}
+        zoom={13.8}
+        zoomControl={false}
+        style={{ height: "100%", width: "100%" }}
+      >
+        <ZoomWatcher onZoom={setZoom} />
+        <ZoomControl position="bottomright" />
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-      {/* ✅ NUEVO: Cañerías base desde QGIS */}
-      {showPipes && pipesGeoJSON && (
-        <GeoJSON
-          data={pipesGeoJSON}
-          style={() => ({
-            color: "rgba(37, 99, 235, 0.85)",
-            weight: zoom < 14.5 ? 2 : 3,
-            opacity: zoom < 14.5 ? 0.35 : 0.65,
-          })}
-          onEachFeature={(feature, layer) => {
-            layer.on("click", () => {
-              console.log("PIPE (GeoJSON) props:", feature?.properties);
-            });
-          }}
-        />
-      )}
+        {/* ✅ NUEVO: Cañerías desde backend (sin hardcode geojson) */}
+        {showPipes && <PipesApiLayer onSelect={setSelectedPipeId} />}
 
-      {/* Localidades */}
-      {showZones &&
-        zonesToShow.map((z) => {
-          const sel = mode === "ZONE" && selectedZoneId === z.id;
-          const c = centroid(z.polygon);
+        {/* Localidades */}
+        {showZones &&
+          zonesToShow.map((z) => {
+            const sel = mode === "ZONE" && selectedZoneId === z.id;
+            const c = centroid(z.polygon);
 
-          const icon = (() => {
-            if (!shrinkOthers) return locationMarkerIcon(z.name, sel, 1, 1);
-            if (sel) return locationMarkerIcon(z.name, true, 1, 1);
-            return locationMarkerIcon(z.name, false, 0.78, 0.55);
-          })();
+            const icon = (() => {
+              if (!shrinkOthers) return locationMarkerIcon(z.name, sel, 1, 1);
+              if (sel) return locationMarkerIcon(z.name, true, 1, 1);
+              return locationMarkerIcon(z.name, false, 0.78, 0.55);
+            })();
 
-          const showPolygon = sel || zoom >= 15;
-
-          return (
-            <React.Fragment key={z.id}>
-              <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }} />
-
-              {showPolygon && (
-                <Polygon
-                  positions={z.polygon}
-                  pathOptions={{
-                    color: "rgba(255,255,255,0.35)",
-                    weight: sel ? 3 : 1.5,
-                    fillOpacity: sel ? 0.07 : 0.03,
-                    dashArray: sel ? undefined : "8 12",
-                    lineCap: "round",
-                    lineJoin: "round",
-                  }}
-                  eventHandlers={{ click: () => onSelectZone(z) }}
-                />
-              )}
-            </React.Fragment>
-          );
-        })}
-
-      {/* Barrios */}
-      {showBarrios &&
-        canDrawBarrios &&
-        barriosToShow.map((b) => {
-          const hlBase = highlightedBarrioIds.has(b.id);
-          const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
-          const hl = hlBase || hlByValve;
-
-          const pres = pressureLabelForBarrio(b);
-
-          return (
-            <Polygon
-              key={b.id}
-              positions={b.polygon}
-              pathOptions={barrioBaseStyle(hl, hlByValve)}
-              eventHandlers={{
-                mouseover: (ev) => {
-                  const layer = ev.target as any;
-                  if (layer?.setStyle) layer.setStyle(barrioHoverStyle(hl, hlByValve));
-                },
-                mouseout: (ev) => {
-                  const layer = ev.target as any;
-                  if (layer?.setStyle) layer.setStyle(barrioBaseStyle(hl, hlByValve));
-                },
-              }}
-            >
-              <Tooltip sticky direction="top" opacity={0.98} className={`barrioTooltip tone-${pres.tone}`}>
-                <div style={{ fontWeight: 900 }}>{b.name}</div>
-                <div style={{ fontSize: 12, opacity: 0.9 }}>{pres.label}</div>
-              </Tooltip>
-            </Polygon>
-          );
-        })}
-
-      {/* Cañerías demo (edges) - queda como estaba */}
-      {showPipes &&
-        edgesToShow.map((e) => {
-          const a = assetsById.get(e.from);
-          const b = assetsById.get(e.to);
-          if (!a || !b) return null;
-
-          const toAsset = assetsById.get(e.to);
-          const fromAsset = assetsById.get(e.from);
-
-          let disabled = false;
-          if (toAsset?.type === "VALVE" && valveEnabled[toAsset.id] === false) disabled = true;
-          if (fromAsset?.type === "VALVE" && valveEnabled[fromAsset.id] === false) disabled = true;
-
-          const isHighlighted = highlightedEdgeIds.has(e.id);
-          const dashed = dashedEdgeIdsExtra?.has(e.id) ?? false;
-
-          const positions: [number, number][] = e.path ? e.path : [[a.lat, a.lng], [b.lat, b.lng]];
-
-          const baseOpacity = zoom < 14.5 ? 0.25 : 0.55;
-          const opacity = disabled ? 0.18 : isHighlighted || dashed ? 1.0 : baseOpacity;
-
-          const weight = disabled ? 3 : dashed ? 6 : isHighlighted ? 7 : zoom < 14.5 ? 3 : 4;
-
-          return (
-            <Polyline
-              key={e.id}
-              positions={positions}
-              pathOptions={{
-                color: edgeColor(e.type),
-                opacity,
-                weight,
-                dashArray: dashed ? "6 10" : undefined,
-              }}
-              eventHandlers={{
-                click: () => onSelectAsset(e.to),
-              }}
-            />
-          );
-        })}
-
-      {/* Assets */}
-      {(viewMode === "ALL" || viewMode === "ZONES") &&
-        (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
-        assets
-          .filter((a) => {
-            if (mode === "ZONE" && selectedZoneId) return a.locationId === selectedZoneId;
-            return true;
-          })
-          .filter((a) => showAssets || (forceShowAssetIds?.has(a.id) ?? false))
-          .map((a) => {
-            const isValve = a.type === "VALVE";
-            const on = !isValve || valveEnabled[a.id] !== false;
-            const alpha = on ? 1.0 : 0.35;
-
-            const isForced = forceShowAssetIds?.has(a.id) ?? false;
-
-            const size = isForced ? 16 : 12;
-            const html = `
-              <div class="pulse" style="
-                width:${size}px;height:${size}px;
-                border-radius:999px;
-                background:${on ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)"};
-                box-shadow:${isForced ? "0 0 0 6px rgba(255,255,255,0.18)" : "none"};
-                opacity:${alpha};
-              "></div>
-            `;
+            const showPolygon = sel || zoom >= 15;
 
             return (
-              <Marker
-                key={a.id}
-                position={[a.lat, a.lng]}
-                icon={new L.DivIcon({
-                  className: "",
-                  html,
-                  iconSize: [size, size],
-                  iconAnchor: [size / 2, size / 2],
-                })}
-                eventHandlers={{ click: () => onSelectAsset(a.id) }}
-              >
-                <Popup>
-                  <div style={{ fontWeight: 900 }}>{a.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.85 }}>
-                    {a.type} · {a.status} · {a.locationId}
-                  </div>
-                </Popup>
-              </Marker>
+              <React.Fragment key={z.id}>
+                <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }} />
+
+                {showPolygon && (
+                  <Polygon
+                    positions={z.polygon}
+                    pathOptions={{
+                      color: "rgba(255,255,255,0.35)",
+                      weight: sel ? 3 : 1.5,
+                      fillOpacity: sel ? 0.07 : 0.03,
+                      dashArray: sel ? undefined : "8 12",
+                      lineCap: "round",
+                      lineJoin: "round",
+                    }}
+                    eventHandlers={{ click: () => onSelectZone(z) }}
+                  />
+                )}
+              </React.Fragment>
             );
           })}
 
-      {/* 2 puntos A/B */}
-      {focusPair && (
-        <>
-          <Marker interactive={false} position={focusPair.a.pos} icon={focusPointIcon(focusPair.a.label)} />
-          <Marker interactive={false} position={focusPair.b.pos} icon={focusPointIcon(focusPair.b.label)} />
-        </>
-      )}
+        {/* Barrios */}
+        {showBarrios &&
+          canDrawBarrios &&
+          barriosToShow.map((b) => {
+            const hlBase = highlightedBarrioIds.has(b.id);
+            const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
+            const hl = hlBase || hlByValve;
 
-      <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
+            const pres = pressureLabelForBarrio(b);
 
-      {!hasRoute && (
-        <FitToBarrios enabled={hasBarrioImpact} barrioIds={highlightedBarrioIdsExtra} includePoint={activeValvePos ?? null} />
-      )}
+            return (
+              <Polygon
+                key={b.id}
+                positions={b.polygon}
+                pathOptions={barrioBaseStyle(hl, hlByValve)}
+                eventHandlers={{
+                  mouseover: (ev) => {
+                    const layer = ev.target as any;
+                    if (layer?.setStyle) layer.setStyle(barrioHoverStyle(hl, hlByValve));
+                  },
+                  mouseout: (ev) => {
+                    const layer = ev.target as any;
+                    if (layer?.setStyle) layer.setStyle(barrioBaseStyle(hl, hlByValve));
+                  },
+                }}
+              >
+                <Tooltip sticky direction="top" opacity={0.98} className={`barrioTooltip tone-${pres.tone}`}>
+                  <div style={{ fontWeight: 900 }}>{b.name}</div>
+                  <div style={{ fontSize: 12, opacity: 0.9 }}>{pres.label}</div>
+                </Tooltip>
+              </Polygon>
+            );
+          })}
 
-      {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
-    </MapContainer>
+        {/* Cañerías demo (edges) - queda como estaba */}
+        {showPipes &&
+          edgesToShow.map((e) => {
+            const a = assetsById.get(e.from);
+            const b = assetsById.get(e.to);
+            if (!a || !b) return null;
+
+            const toAsset = assetsById.get(e.to);
+            const fromAsset = assetsById.get(e.from);
+
+            let disabled = false;
+            if (toAsset?.type === "VALVE" && valveEnabled[toAsset.id] === false) disabled = true;
+            if (fromAsset?.type === "VALVE" && valveEnabled[fromAsset.id] === false) disabled = true;
+
+            const isHighlighted = highlightedEdgeIds.has(e.id);
+            const dashed = dashedEdgeIdsExtra?.has(e.id) ?? false;
+
+            const positions: [number, number][] = e.path ? e.path : [[a.lat, a.lng], [b.lat, b.lng]];
+
+            const baseOpacity = zoom < 14.5 ? 0.25 : 0.55;
+            const opacity = disabled ? 0.18 : isHighlighted || dashed ? 1.0 : baseOpacity;
+
+            const weight = disabled ? 3 : dashed ? 6 : isHighlighted ? 7 : zoom < 14.5 ? 3 : 4;
+
+            return (
+              <Polyline
+                key={e.id}
+                positions={positions}
+                pathOptions={{
+                  color: edgeColor(e.type),
+                  opacity,
+                  weight,
+                  dashArray: dashed ? "6 10" : undefined,
+                }}
+                eventHandlers={{
+                  click: () => onSelectAsset(e.to),
+                }}
+              />
+            );
+          })}
+
+        {/* Assets */}
+        {(viewMode === "ALL" || viewMode === "ZONES") &&
+          (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
+          assets
+            .filter((a) => {
+              if (mode === "ZONE" && selectedZoneId) return a.locationId === selectedZoneId;
+              return true;
+            })
+            .filter((a) => showAssets || (forceShowAssetIds?.has(a.id) ?? false))
+            .map((a) => {
+              const isValve = a.type === "VALVE";
+              const on = !isValve || valveEnabled[a.id] !== false;
+              const alpha = on ? 1.0 : 0.35;
+
+              const isForced = forceShowAssetIds?.has(a.id) ?? false;
+
+              const size = isForced ? 16 : 12;
+              const html = `
+                <div class="pulse" style="
+                  width:${size}px;height:${size}px;
+                  border-radius:999px;
+                  background:${on ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)"};
+                  box-shadow:${isForced ? "0 0 0 6px rgba(255,255,255,0.18)" : "none"};
+                  opacity:${alpha};
+                "></div>
+              `;
+
+              return (
+                <Marker
+                  key={a.id}
+                  position={[a.lat, a.lng]}
+                  icon={new L.DivIcon({
+                    className: "",
+                    html,
+                    iconSize: [size, size],
+                    iconAnchor: [size / 2, size / 2],
+                  })}
+                  eventHandlers={{ click: () => onSelectAsset(a.id) }}
+                >
+                  <Popup>
+                    <div style={{ fontWeight: 900 }}>{a.name}</div>
+                    <div style={{ fontSize: 12, opacity: 0.85 }}>
+                      {a.type} · {a.status} · {a.locationId}
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+
+        {/* 2 puntos A/B */}
+        {focusPair && (
+          <>
+            <Marker interactive={false} position={focusPair.a.pos} icon={focusPointIcon(focusPair.a.label)} />
+            <Marker interactive={false} position={focusPair.b.pos} icon={focusPointIcon(focusPair.b.label)} />
+          </>
+        )}
+
+        <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
+
+        {!hasRoute && (
+          <FitToBarrios
+            enabled={hasBarrioImpact}
+            barrioIds={highlightedBarrioIdsExtra}
+            includePoint={activeValvePos ?? null}
+          />
+        )}
+
+        {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
+      </MapContainer>
+
+      {/* ✅ Drawer de edición de cañerías */}
+      <PipeEditDrawer
+        pipeId={selectedPipeId}
+        onClose={() => setSelectedPipeId(null)}
+        onUpdated={() => {
+          // por ahora no hacemos nada: el layer se refresca con move/zoom.
+          // Si querés, después optimizamos para actualizar solo 1 feature.
+        }}
+      />
+    </>
   );
 }
