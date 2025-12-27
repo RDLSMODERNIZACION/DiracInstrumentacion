@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from app.db import get_conn
 
 router = APIRouter(prefix="/mapasagua", tags=["mapasagua"])
-s
+
 
 @router.get("/pipes")
 def get_pipes(
