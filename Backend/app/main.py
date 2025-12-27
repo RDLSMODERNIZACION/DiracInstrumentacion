@@ -11,7 +11,8 @@ from app.db import get_conn, close_pool
 # ===== Telegram reporter (30 min) =====
 from app.services.telegram_reporter import start_telegram_reporter, stop_telegram_reporter
 
-# ===== Telegram test router =====
+# ===== Telegram test router (lo pusiste en app/services/telegram_test.py) =====
+# Importante: si el archivo está en services, lo importamos desde services.
 from app.services.telegram_test import router as telegram_test_router
 
 # ===== Rutas base (operación / visualización) =====
@@ -20,14 +21,16 @@ from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
 from app.routes.arduino_controler import router as arduino_router
 
-# ===== Infraestructura =====
+# Infraestructura (lectura: layout + alarmas por localidad)
 from app.routes.infraestructura import router as infraestructura_router
+
+# ✅ Infraestructura (edición: CRUD de edges + update_layout_many)
 from app.routes.infra_edit.edit import router as infra_edit_router
 
-# ===== PLC =====
+# ===== PLC (consumo de comandos) =====
 from app.routes.plc import router as plc_router
 
-# ===== KPI =====
+# ===== KPI (agregador) =====
 from app.routes.kpi import router as kpi_router
 
 # ===== Dirac (operación) =====
@@ -36,7 +39,7 @@ from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
 
-# ===== Administración =====
+# ===== Administración (CRUD abierto) =====
 from app.routes.dirac_admin.companies import router as admin_companies_router
 from app.routes.dirac_admin.users import router as admin_users_router
 from app.routes.dirac_admin.locations import router as admin_locations_router
@@ -45,8 +48,11 @@ from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
-# ===== Mapa (MapasAgua) =====
+
 from app.routes.mapa.mapasagua import router as mapasagua_router
+
+# ===== Mapa =====
+app.include_router(mapasagua_router)
 
 
 # ===== Logging =====
@@ -58,7 +64,6 @@ logging.basicConfig(
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 
-
 # ===== App =====
 enable_docs = os.getenv("ENABLE_DOCS", "1") == "1"
 app = FastAPI(
@@ -67,7 +72,6 @@ app = FastAPI(
     docs_url="/docs" if enable_docs else None,
     openapi_url="/openapi.json" if enable_docs else None,
 )
-
 
 # ===== CORS y GZIP =====
 app.add_middleware(
@@ -80,7 +84,6 @@ app.add_middleware(
     max_age=3600,
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024)
-
 
 # ===== Health =====
 @app.get("/", tags=["health"])
@@ -124,23 +127,25 @@ app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
 
-# ===== Infraestructura =====
+# Infraestructura (lectura: diagramas + alarmas por localidad)
 app.include_router(infraestructura_router)
+
+# ✅ Infraestructura (edición: edges + layout_many)
 app.include_router(infra_edit_router)
 
-# ===== PLC =====
+# Endpoints para PLC / Node-RED (lectura de comandos, ack, etc.)
 app.include_router(plc_router)
 
 # ===== KPI =====
 app.include_router(kpi_router)
 
-# ===== Dirac =====
+# ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
-# ===== Administración =====
+# ===== Administración (CRUD abierto) =====
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
@@ -149,20 +154,20 @@ app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
 
-# ===== Mapa (MapasAgua) =====
-app.include_router(mapasagua_router)
-
 # ===== Telegram test =====
+# (archivo: app/services/telegram_test.py)
 app.include_router(telegram_test_router)
-
 
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():
+    # Arranca reporter Telegram (cada 30 min)
     start_telegram_reporter()
 
 
 @app.on_event("shutdown")
 def _shutdown():
+    # Detiene reporter Telegram
     stop_telegram_reporter()
+    # Cierre ordenado del pool de DB
     close_pool()
