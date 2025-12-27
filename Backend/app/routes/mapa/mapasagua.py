@@ -4,6 +4,8 @@ from typing import Any
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import JSONResponse
 
+from psycopg.types.json import Json  # ✅ para jsonb con psycopg3
+
 from app.db import get_conn
 
 router = APIRouter(prefix="/mapasagua", tags=["mapasagua"])
@@ -145,8 +147,8 @@ def patch_pipe(
         "material": "PEAD",
         "type": "WATER",
         "estado": "OK",
-        "style": { ... },   # json
-        "props": { ... }    # json
+        "style": { ... },   # json/jsonb
+        "props": { ... }    # json/jsonb
       }
     """
     allowed = {"diametro_mm", "material", "type", "estado", "style", "props"}
@@ -167,8 +169,14 @@ def patch_pipe(
     # armamos SET dinámico
     for k in allowed:
         if k in body:
+            val = body[k]
+
+            # ✅ jsonb: psycopg3 necesita Json() para dict/list
+            if k in ("style", "props") and isinstance(val, (dict, list)):
+                val = Json(val)
+
             sets.append(f"{k} = %s")
-            params.append(body[k])
+            params.append(val)
 
     params.append(pipe_id)
 
@@ -192,7 +200,6 @@ def patch_pipe(
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Pipe not found or inactive")
-        # si tu get_conn no hace autocommit, asegurate de commitear:
         try:
             conn.commit()
         except Exception:
