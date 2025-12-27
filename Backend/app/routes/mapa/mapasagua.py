@@ -133,7 +133,7 @@ def get_pipe(pipe_id: str):
 
 
 # ==========================
-# ✅ PATCH update por ID
+# ✅ PATCH update por ID (propiedades)
 # ==========================
 @router.patch("/pipes/{pipe_id}")
 def patch_pipe(
@@ -182,7 +182,7 @@ def patch_pipe(
 
     sql = f"""
       update "MapasAgua".pipes
-      set {", ".join(sets)}
+      set {", ".join(sets)}, updated_at = now()
       where active = true and id::text = %s
       returning
         id::text as id,
@@ -208,5 +208,146 @@ def patch_pipe(
     feat = _feature_from_row(row)
     if not feat:
         raise HTTPException(status_code=404, detail="Pipe geometry not found")
+
+    return JSONResponse(feat)
+
+
+# ==========================
+# ✅ PATCH geometry por ID (recorrido)
+# ==========================
+@router.patch("/pipes/{pipe_id}/geometry")
+def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
+    """
+    Acepta:
+      - GeoJSON geometry directo:
+          { "type": "LineString", "coordinates": [...] }
+      - o wrapper:
+          { "geometry": { ... } }
+
+    Guarda en SRID 4326.
+    """
+    geom = body.get("geometry") if isinstance(body, dict) and "geometry" in body else body
+
+    if not isinstance(geom, dict):
+        raise HTTPException(status_code=400, detail="geometry must be a GeoJSON object")
+
+    gtype = geom.get("type")
+    if gtype not in ("LineString", "MultiLineString"):
+        raise HTTPException(status_code=400, detail="geometry.type must be LineString or MultiLineString")
+
+    sql = """
+      update "MapasAgua".pipes
+      set
+        geom = infraestructura.st_setsrid(
+                infraestructura.st_geomfromgeojson(%s),
+                4326
+              ),
+        updated_at = now()
+      where active = true and id::text = %s
+      returning
+        id::text as id,
+        diametro_mm,
+        material,
+        type,
+        estado,
+        style,
+        props,
+        infraestructura.st_asgeojson(geom) as geometry_json
+    """
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, [json.dumps(geom), pipe_id])
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pipe not found or inactive")
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    feat = _feature_from_row(row)
+    if not feat:
+        raise HTTPException(status_code=404, detail="Pipe geometry not found")
+
+    return JSONResponse(feat)
+
+
+# ==========================
+# ✅ POST create pipe (dibujar nueva)
+# ==========================
+@router.post("/pipes")
+def create_pipe(body: dict[str, Any]):
+    """
+    Body:
+      {
+        "geometry": { GeoJSON LineString },
+        "properties": {
+          "diametro_mm": 75,
+          "material": "PVC",
+          "type": "WATER",
+          "estado": "OK",
+          "props": {...},
+          "style": {...}
+        }
+      }
+    """
+    geom = body.get("geometry")
+    props = body.get("properties") or {}
+
+    if not isinstance(geom, dict):
+        raise HTTPException(status_code=400, detail="geometry is required (GeoJSON object)")
+
+    gtype = geom.get("type")
+    if gtype not in ("LineString", "MultiLineString"):
+        raise HTTPException(status_code=400, detail="geometry.type must be LineString or MultiLineString")
+
+    diametro_mm = props.get("diametro_mm")
+    material = props.get("material")
+    typ = props.get("type") or "WATER"
+    estado = props.get("estado") or "OK"
+
+    props_json = props.get("props") or {}
+    style_json = props.get("style") or {}
+
+    sql = """
+      insert into "MapasAgua".pipes
+        (id, geom, diametro_mm, material, type, estado, props, style, active, created_at, updated_at)
+      values
+        (gen_random_uuid(),
+         infraestructura.st_setsrid(infraestructura.st_geomfromgeojson(%s), 4326),
+         %s, %s, %s, %s, %s::jsonb, %s::jsonb, true, now(), now())
+      returning
+        id::text as id,
+        diametro_mm,
+        material,
+        type,
+        estado,
+        style,
+        props,
+        infraestructura.st_asgeojson(geom) as geometry_json
+    """
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            [
+                json.dumps(geom),
+                diametro_mm,
+                material,
+                typ,
+                estado,
+                json.dumps(props_json),
+                json.dumps(style_json),
+            ],
+        )
+        row = cur.fetchone()
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+    feat = _feature_from_row(row)
+    if not feat:
+        raise HTTPException(status_code=500, detail="Pipe created but geometry could not be returned")
 
     return JSONResponse(feat)
