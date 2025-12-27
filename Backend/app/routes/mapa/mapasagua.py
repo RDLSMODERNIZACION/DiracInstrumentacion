@@ -67,4 +67,24 @@ def get_pipes(
         )
 
 
+        
+
+
     return JSONResponse({"type": "FeatureCollection", "features": features})
+
+
+@router.get("/pipes/extent")
+def pipes_extent():
+    sql = """
+      select
+        min(st_xmin(geom)) as min_lng,
+        min(st_ymin(geom)) as min_lat,
+        max(st_xmax(geom)) as max_lng,
+        max(st_ymax(geom)) as max_lat
+      from "MapasAgua".pipes
+      where active = true and geom is not null
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        row = cur.fetchone()
+    return {"min_lng": row[0], "min_lat": row[1], "max_lng": row[2], "max_lat": row[3]}
