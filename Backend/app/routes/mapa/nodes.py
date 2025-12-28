@@ -1,6 +1,7 @@
 # app/routes/mapa/nodes.py
 from __future__ import annotations
 
+import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional, Literal
@@ -8,11 +9,6 @@ from typing import Any, Dict, Optional, Literal
 from app.db import get_conn
 
 router = APIRouter(prefix="/nodes", tags=["mapa"])
-
-
-# ----------------------------
-# Models
-# ----------------------------
 
 NodeKind = Literal["JUNCTION", "VALVE", "SOURCE", "PUMP", "DEMAND"]
 
@@ -48,10 +44,6 @@ def _fetchone_dict(cur):
     return dict(zip(cols, row))
 
 
-# ----------------------------
-# Endpoints
-# ----------------------------
-
 @router.get("")
 def list_nodes(limit: int = 2000):
     limit = max(1, min(int(limit), 5000))
@@ -84,6 +76,8 @@ def create_node(body: NodeCreateBody):
         if body.label is not None and str(body.label).strip():
             props["label"] = str(body.label).strip()
 
+        props_json = json.dumps(props, ensure_ascii=False)
+
         cur.execute(
             """
             INSERT INTO "MapasAgua".nodes (geom, kind, elev_m, props)
@@ -103,7 +97,7 @@ def create_node(body: NodeCreateBody):
               ST_Y(geom)::double precision as lat,
               created_at
             """,
-            (body.lng, body.lat, body.kind, body.elev_m, props),
+            (body.lng, body.lat, body.kind, body.elev_m, props_json),
         )
         node = _fetchone_dict(cur)
         conn.commit()
@@ -116,7 +110,6 @@ def create_node(body: NodeCreateBody):
 @router.patch("/{node_id}")
 def update_node(node_id: str, body: NodeUpdateBody):
     with get_conn() as conn, conn.cursor() as cur:
-        # Traemos actual para merge de props
         cur.execute(
             """
             SELECT kind, elev_m, props,
@@ -134,7 +127,6 @@ def update_node(node_id: str, body: NodeUpdateBody):
         next_kind = body.kind or current.get("kind") or "JUNCTION"
         next_elev = body.elev_m if body.elev_m is not None else current.get("elev_m")
 
-        # Merge props
         curr_props = current.get("props") or {}
         if not isinstance(curr_props, dict):
             curr_props = {}
@@ -149,10 +141,10 @@ def update_node(node_id: str, body: NodeUpdateBody):
             if lab:
                 next_props["label"] = lab
             else:
-                # label vacío => eliminar
                 next_props.pop("label", None)
 
-        # Geom update si viene lat/lng
+        next_props_json = json.dumps(next_props, ensure_ascii=False)
+
         if body.lat is not None and body.lng is not None:
             cur.execute(
                 """
@@ -172,7 +164,7 @@ def update_node(node_id: str, body: NodeUpdateBody):
                   ST_Y(geom)::double precision as lat,
                   created_at
                 """,
-                (body.lng, body.lat, next_kind, next_elev, next_props, node_id),
+                (body.lng, body.lat, next_kind, next_elev, next_props_json, node_id),
             )
         else:
             cur.execute(
@@ -192,7 +184,7 @@ def update_node(node_id: str, body: NodeUpdateBody):
                   ST_Y(geom)::double precision as lat,
                   created_at
                 """,
-                (next_kind, next_elev, next_props, node_id),
+                (next_kind, next_elev, next_props_json, node_id),
             )
 
         node = _fetchone_dict(cur)
@@ -205,12 +197,7 @@ def update_node(node_id: str, body: NodeUpdateBody):
 
 @router.delete("/{node_id}")
 def delete_node(node_id: str):
-    """
-    Borra el nodo SOLO si no está referenciado por pipes.
-    (Si querés permitir borrar en cascada, lo hacemos después con lógica explícita).
-    """
     with get_conn() as conn, conn.cursor() as cur:
-        # Protecciones: si está conectado a pipes, no dejar borrar
         cur.execute(
             """
             SELECT count(*)::int
@@ -226,10 +213,7 @@ def delete_node(node_id: str):
                 f"No se puede borrar: el nodo está conectado a {used} cañería(s). Desconectá primero.",
             )
 
-        cur.execute(
-            """DELETE FROM "MapasAgua".nodes WHERE id = %s::uuid""",
-            (node_id,),
-        )
+        cur.execute("""DELETE FROM "MapasAgua".nodes WHERE id = %s::uuid""", (node_id,))
         if cur.rowcount == 0:
             raise HTTPException(404, "Nodo no encontrado")
         conn.commit()
