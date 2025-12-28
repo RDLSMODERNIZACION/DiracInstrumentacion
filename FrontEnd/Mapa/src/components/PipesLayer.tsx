@@ -10,23 +10,23 @@ type Props = {
   useBBox?: boolean;
   debounceMs?: number;
 
-  /** ✅ pasa id + layer + label (props.Layer) */
   onSelect?: (pipeId: string, layer: L.Layer, label?: string | null) => void;
-
   onCount?: (n: number) => void;
 
-  /** para resaltar */
   selectedId?: string | null;
-
   styleFn?: (feature: any) => L.PathOptions;
+
+  /** congela fetch/listeners mientras editás (pero mantiene líneas visibles) */
+  freeze?: boolean;
+
+  /** log SOLO click (si querés) */
+  debug?: boolean;
 };
 
 function pickLabel(feature: any): string | null {
-  // Tu caso: properties.props.Layer
   const a = feature?.properties?.props?.Layer;
   if (typeof a === "string" && a.trim()) return a.trim();
 
-  // Fallbacks comunes
   const b = feature?.properties?.props?.layer;
   if (typeof b === "string" && b.trim()) return b.trim();
 
@@ -47,13 +47,25 @@ export default function PipesLayer({
   onCount,
   selectedId = null,
   styleFn,
+  freeze = false,
+  debug = false,
 }: Props) {
   const map = useMap();
   const [data, setData] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
 
+  // ✅ “candado” para ignorar resultados si estamos congelados
+  const freezeRef = React.useRef<boolean>(freeze);
+  React.useEffect(() => {
+    freezeRef.current = freeze;
+  }, [freeze]);
+
   React.useEffect(() => {
     if (!visible) return;
+
+    // ✅ si estamos editando, NO enganchamos listeners NI hacemos fetch,
+    // pero dejamos la data existente para que las líneas sigan visibles.
+    if (freeze) return;
 
     let cancelled = false;
     let t: any = null;
@@ -71,13 +83,16 @@ export default function PipesLayer({
             })
           : await fetchPipesAll();
 
+        // ✅ si se canceló o justo entró freeze mientras esperaba, ignoramos
         if (cancelled) return;
+        if (freezeRef.current) return;
 
         setData(json);
         const n = Array.isArray(json?.features) ? json.features.length : 0;
         onCount?.(n);
       } catch (e: any) {
         if (cancelled) return;
+        if (freezeRef.current) return;
         setError(e?.message ?? String(e));
       }
     };
@@ -98,12 +113,13 @@ export default function PipesLayer({
       map.off("zoomend", debouncedLoad);
       if (t) clearTimeout(t);
     };
-  }, [visible, useBBox, debounceMs, map, onCount]);
+  }, [visible, useBBox, debounceMs, map, onCount, freeze]);
 
   if (!visible) return null;
   if (error) {
     console.warn("PipesLayer error:", error);
-    return null;
+    // devolvemos null solo si no hay data.
+    if (!data) return null;
   }
   if (!data) return null;
 
@@ -127,10 +143,18 @@ export default function PipesLayer({
         const label = pickLabel(feature);
 
         layer.on("click", (e: any) => {
-          // ✅ clave: no dejar que el click burbujee al mapa
           try {
             L.DomEvent.stopPropagation(e);
           } catch {}
+
+          if (debug) {
+            try {
+              const gtype = feature?.geometry?.type;
+              const layerType = (layer as any)?.constructor?.name ?? typeof layer;
+              const hasPm = !!(layer as any)?.pm;
+              console.log("[PIPE CLICK]", { id, label, geometryType: gtype, layerType, hasPm });
+            } catch {}
+          }
 
           if (!id) return;
           onSelect?.(id, layer, label);

@@ -1,7 +1,5 @@
 // src/services/mapasagua.ts
-const API_BASE =
-  import.meta.env.VITE_API_BASE ??
-  "https://diracinstrumentacion.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
 
 /* =========================
    Tipos
@@ -26,21 +24,15 @@ export type GeoJSONGeometry =
   | { type: "Point"; coordinates: any[] }
   | { type: string; coordinates?: any[] };
 
-function dbg(...args: any[]) {
-  // 🔧 podés apagar logs en producción si querés:
-  const enabled = (import.meta as any).env?.VITE_MAPASAGUA_DEBUG !== "0";
-  if (enabled) console.log(...args);
-}
-
+/* =========================
+   Fetch helper (sin logs)
+========================= */
 async function fetchJSON(url: string, init?: RequestInit) {
-  dbg("[mapasagua]", init?.method ?? "GET", url);
   const res = await fetch(url, init);
-  dbg("[mapasagua] status:", res.status);
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    dbg("[mapasagua] ERROR:", txt);
-    throw new Error(`HTTP ${res.status}`);
+    throw new Error(`HTTP ${res.status}${txt ? `: ${txt}` : ""}`);
   }
 
   return res.json();
@@ -50,8 +42,6 @@ async function fetchJSON(url: string, init?: RequestInit) {
    PIPES por BBOX (principal)
 ========================= */
 export async function fetchPipesBBox(bbox: BBox) {
-  dbg("[mapasagua] fetchPipesBBox bbox:", bbox);
-
   const qs = new URLSearchParams({
     min_lng: bbox.min_lng.toString(),
     min_lat: bbox.min_lat.toString(),
@@ -60,26 +50,15 @@ export async function fetchPipesBBox(bbox: BBox) {
   }).toString();
 
   const url = `${API_BASE}/mapa/mapasagua/pipes?${qs}`;
-  const json = await fetchJSON(url);
-
-  const count = Array.isArray((json as any)?.features) ? (json as any).features.length : 0;
-  dbg("[mapasagua] features:", count);
-  if (count > 0) dbg("[mapasagua] first feature id:", (json as any).features[0]?.id);
-
-  return json;
+  return fetchJSON(url);
 }
 
 /* =========================
-   PIPES SIN BBOX (DEBUG)
+   PIPES SIN BBOX (util)
 ========================= */
 export async function fetchPipesAll() {
   const url = `${API_BASE}/mapa/mapasagua/pipes`;
-  const json = await fetchJSON(url);
-
-  const count = Array.isArray((json as any)?.features) ? (json as any).features.length : 0;
-  dbg("[mapasagua] features (ALL):", count);
-
-  return json;
+  return fetchJSON(url);
 }
 
 /* =========================
@@ -88,7 +67,6 @@ export async function fetchPipesAll() {
 export async function fetchPipesExtent(): Promise<PipesExtent> {
   const url = `${API_BASE}/mapa/mapasagua/pipes/extent`;
   const json = await fetchJSON(url);
-  dbg("[mapasagua] extent:", json);
   return json as PipesExtent;
 }
 
@@ -105,7 +83,6 @@ export async function fetchPipeById(id: string) {
 ========================= */
 export async function patchPipe(id: string, payload: Record<string, any>) {
   const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
-  dbg("[mapasagua] PATCH props payload:", payload);
 
   return fetchJSON(url, {
     method: "PATCH",
@@ -115,12 +92,18 @@ export async function patchPipe(id: string, payload: Record<string, any>) {
 }
 
 /* =========================
+   DELETE PIPE (borrado lógico)
+   ✅ Requiere backend: patch_pipe permita "active"
+========================= */
+export async function deletePipe(id: string) {
+  return patchPipe(id, { active: false });
+}
+
+/* =========================
    PATCH PIPE GEOMETRY (recorrido)
-   ✅ Paso 1 editor visual
 ========================= */
 export async function patchPipeGeometry(id: string, geometry: GeoJSONGeometry) {
   const url = `${API_BASE}/mapa/mapasagua/pipes/${id}/geometry`;
-  dbg("[mapasagua] PATCH geometry:", geometry?.type);
 
   // backend acepta geometry directo (no wrapper)
   return fetchJSON(url, {
@@ -132,7 +115,6 @@ export async function patchPipeGeometry(id: string, geometry: GeoJSONGeometry) {
 
 /* =========================
    POST CREATE PIPE (dibujar nueva)
-   ✅ Paso 2
 ========================= */
 export async function createPipe(input: {
   geometry: GeoJSONGeometry;
@@ -141,12 +123,12 @@ export async function createPipe(input: {
     material?: string | null;
     type?: string | null;
     estado?: string | null;
+    flow_func?: string | null;
     props?: Record<string, any>;
     style?: Record<string, any>;
   };
 }) {
   const url = `${API_BASE}/mapa/mapasagua/pipes`;
-  dbg("[mapasagua] POST createPipe:", input?.geometry?.type);
 
   return fetchJSON(url, {
     method: "POST",

@@ -3,7 +3,6 @@ import {
   MapContainer,
   Marker,
   Popup,
-  Polyline,
   Polygon,
   TileLayer,
   Tooltip,
@@ -12,7 +11,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { barrios, edges, zones, CENTER, type Asset, type Edge, type Zone } from "../data/demo";
+import { barrios, edges, zones, CENTER, type Asset, type Zone } from "../data/demo";
 
 import { type LatLng } from "../lib/geo";
 import { centroid } from "../lib/geoUtils";
@@ -23,6 +22,9 @@ import { FlyTo } from "./FlyTo";
 import PipesLayer from "./PipesLayer";
 import PipeEditDrawer from "./PipeEditDrawer";
 import PipeGeometryEditor from "./PipeGeometryEditor";
+
+// ✅ Create / Delete
+import { createPipe, deletePipe } from "../services/mapasagua";
 
 export type ViewMode = "ALL" | "ZONES" | "PIPES" | "BARRIOS";
 
@@ -38,17 +40,41 @@ function ZoomWatcher({ onZoom }: { onZoom: (z: number) => void }) {
 }
 
 /* ---------------------------
-   Click en mapa (fondo) => limpiar selección/cerrar modal
+   Click en mapa (fondo) => limpiar selección/cerrar modales
 --------------------------- */
-function MapClickClear({ onClear }: { onClear: () => void }) {
+function MapClickClear({
+  onClear,
+  enabled = true,
+}: {
+  onClear: () => void;
+  enabled?: boolean;
+}) {
   useMapEvents({
-    click: () => onClear(),
+    click: (e: any) => {
+      if (!enabled) return;
+
+      const t = e?.originalEvent?.target as any;
+      if (!t) return;
+
+      // Si el click se originó dentro de un popup, no limpiamos
+      if (t.closest?.(".leaflet-popup")) return;
+
+      // ✅ Si el click es sobre markers/handles de Geoman, no limpiamos
+      if (
+        t.closest?.(".leaflet-pm-draggable") ||
+        t.closest?.(".leaflet-pm-marker") ||
+        t.closest?.(".leaflet-pm-icon-marker") ||
+        t.closest?.(".leaflet-pm-vertex") ||
+        t.closest?.(".leaflet-pm-middle-marker") ||
+        t.closest?.(".leaflet-pm-edit-marker")
+      ) {
+        return;
+      }
+
+      onClear();
+    },
   });
   return null;
-}
-
-function edgeColor(type: Edge["type"]) {
-  return type === "WATER" ? "var(--water)" : "var(--sludge)";
 }
 
 export type FocusPair =
@@ -163,6 +189,64 @@ function FitToBarrios({
   return null;
 }
 
+/* ---------------------------
+   Crear cañería dibujando (Leaflet-Geoman)
+   - No bloquea tu lógica actual
+   - Cuando terminás de dibujar, crea en backend y elimina el layer temporal
+--------------------------- */
+function PipeDrawController({
+  enabled,
+  onCreated,
+}: {
+  enabled: boolean;
+  onCreated: (geom: any) => void;
+}) {
+  const map = useMap();
+
+  React.useEffect(() => {
+    const m: any = map as any;
+    if (!m?.pm) return;
+
+    const handleCreate = (e: any) => {
+      try {
+        const gj = e?.layer?.toGeoJSON?.();
+        const geom = gj?.geometry;
+        if (geom) onCreated(geom);
+      } catch {}
+
+      // eliminamos el layer temporal (se recargará desde backend)
+      try {
+        map.removeLayer(e.layer);
+      } catch {}
+    };
+
+    map.on("pm:create", handleCreate);
+    return () => {
+      map.off("pm:create", handleCreate);
+    };
+  }, [map, onCreated]);
+
+  React.useEffect(() => {
+    const m: any = map as any;
+    if (!m?.pm) return;
+
+    if (enabled) {
+      try {
+        m.pm.enableDraw("Line", {
+          snappable: true,
+          snapDistance: 10,
+        });
+      } catch {}
+    } else {
+      try {
+        m.pm.disableDraw("Line");
+      } catch {}
+    }
+  }, [map, enabled]);
+
+  return null;
+}
+
 /* ===========================
    MAP VIEW
 =========================== */
@@ -239,20 +323,20 @@ export function MapView(props: {
       ? barrios.filter((b) => b.locationId === selectedZoneId)
       : barrios;
 
-  /* ---------------------------
-     Pipes selection + editor
-     ✅ NUEVO FLUJO:
-     - selectedPipeId: selecciona/highlight
-     - selectedPipeLabel: nombre lógico (props.Layer)
-     - selectedPipeLayer: para geometry editor
-     - selectedPipePos: donde mostrar el popup
-     - editingPipeId: abre modal SOLO con botón "Editar"
-  --------------------------- */
+  // Pipes state
   const [selectedPipeId, setSelectedPipeId] = React.useState<string | null>(null);
   const [selectedPipeLabel, setSelectedPipeLabel] = React.useState<string | null>(null);
   const [selectedPipeLayer, setSelectedPipeLayer] = React.useState<L.Layer | null>(null);
   const [selectedPipePos, setSelectedPipePos] = React.useState<[number, number] | null>(null);
+
   const [editingPipeId, setEditingPipeId] = React.useState<string | null>(null);
+  const [editingGeomOpen, setEditingGeomOpen] = React.useState(false);
+
+  // ✅ creación por dibujo
+  const [creatingPipe, setCreatingPipe] = React.useState(false);
+
+  // ✅ forzar recarga de pipes al crear/borrar
+  const [pipesReloadKey, setPipesReloadKey] = React.useState(0);
 
   function clearPipeSelection() {
     setSelectedPipeId(null);
@@ -260,232 +344,282 @@ export function MapView(props: {
     setSelectedPipeLayer(null);
     setSelectedPipePos(null);
     setEditingPipeId(null);
+    setEditingGeomOpen(false);
   }
 
   return (
     <>
-      <MapContainer
-        className={mapGrey ? "mapGrey" : undefined}
-        center={CENTER}
-        zoom={13.8}
-        zoomControl={false}
-        style={{ height: "100%", width: "100%" }}
-      >
-        <ZoomWatcher onZoom={setZoom} />
-        <ZoomControl position="bottomright" />
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {/* Botón flotante crear */}
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <button
+          onClick={() => setCreatingPipe((v) => !v)}
+          style={{
+            position: "absolute",
+            right: 16,
+            top: 16,
+            zIndex: 1000,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: creatingPipe ? "rgba(37,99,235,0.95)" : "rgba(15,23,42,0.75)",
+            color: "#fff",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          {creatingPipe ? "Cancelar dibujo" : "+ Cañería"}
+        </button>
 
-        <MapClickClear onClear={clearPipeSelection} />
+        <MapContainer
+          className={mapGrey ? "mapGrey" : undefined}
+          center={CENTER}
+          zoom={13.8}
+          zoomControl={false}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <ZoomWatcher onZoom={setZoom} />
+          <ZoomControl position="bottomright" />
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-        {/* =====================
-            CAÑERÍAS (DB)
-        ===================== */}
-        {showPipes && (
-          <PipesLayer
-            visible={showPipes}
-            selectedId={selectedPipeId}
-            onSelect={(id, layer, label) => {
-              setSelectedPipeId(id);
-              setSelectedPipeLabel(label ?? null);
-              setSelectedPipeLayer(layer);
+          {/* ✅ mientras haya un modal abierto, NO limpiamos por click en mapa */}
+          <MapClickClear onClear={clearPipeSelection} enabled={!editingPipeId && !editingGeomOpen} />
 
-              // si seleccionás otra cañería, cerramos edición
-              setEditingPipeId(null);
-
-              // calculamos posición para el popup (centro del bounds o latlng)
+          {/* ✅ Crear cañería (dibujar) */}
+          <PipeDrawController
+            enabled={creatingPipe}
+            onCreated={async (geom) => {
               try {
-                const anyLayer: any = layer as any;
-                const center = anyLayer?.getBounds?.().getCenter?.() ?? anyLayer?.getLatLng?.();
-                if (center && typeof center.lat === "number" && typeof center.lng === "number") {
-                  setSelectedPipePos([center.lat, center.lng]);
-                } else {
-                  setSelectedPipePos(null);
-                }
-              } catch {
-                setSelectedPipePos(null);
+                await createPipe({
+                  geometry: geom,
+                  properties: {
+                    type: "WATER",
+                    estado: "OK",
+                    flow_func: "DISTRIBUCION",
+                    diametro_mm: null,
+                    material: null,
+                    props: { Layer: "Nueva cañería" },
+                    style: {},
+                  },
+                });
+                setCreatingPipe(false);
+                setPipesReloadKey((k) => k + 1);
+              } catch (e: any) {
+                alert(e?.message ?? "No se pudo crear");
+                setCreatingPipe(false);
               }
             }}
           />
-        )}
 
-       {/* Popup de la cañería seleccionada */}
-{selectedPipeId && selectedPipePos && (
-  <Popup position={selectedPipePos} className="pipe-popup" closeButton={true} autoClose={false}>
-    <div className="pipePopup">
-      <div className="pipePopup__title" title={selectedPipeLabel ?? ""}>
-        {selectedPipeLabel ?? "Cañería"}
-      </div>
+          {/* CAÑERÍAS */}
+          {showPipes && (
+            <PipesLayer
+              key={pipesReloadKey}
+              visible={showPipes}
+              selectedId={selectedPipeId}
+              freeze={editingGeomOpen}
+              onSelect={(id, layer, label) => {
+                setSelectedPipeId(id);
+                setSelectedPipeLabel(label ?? null);
+                setSelectedPipeLayer(layer);
 
-      <div className="pipePopup__actions">
-        <button
-          className="pipePopup__btn pipePopup__btn--primary"
-          onClick={() => setEditingPipeId(selectedPipeId)}
-        >
-          Editar
-        </button>
+                setEditingPipeId(null);
+                setEditingGeomOpen(false);
 
-        <button className="pipePopup__btn" onClick={clearPipeSelection}>
-          Cerrar
-        </button>
-      </div>
-    </div>
-  </Popup>
-)}
+                try {
+                  const anyLayer: any = layer as any;
+                  const center = anyLayer?.getBounds?.().getCenter?.() ?? anyLayer?.getLatLng?.();
+                  if (center && typeof center.lat === "number" && typeof center.lng === "number") {
+                    setSelectedPipePos([center.lat, center.lng]);
+                  } else {
+                    setSelectedPipePos(null);
+                  }
+                } catch {
+                  setSelectedPipePos(null);
+                }
+              }}
+            />
+          )}
 
+          {/* Popup lindo */}
+          {selectedPipeId && selectedPipePos && !editingPipeId && !editingGeomOpen && (
+            <Popup position={selectedPipePos} className="pipe-popup" closeButton={true} autoClose={false}>
+              <div className="pipePopup">
+                <div className="pipePopup__title" title={selectedPipeLabel ?? ""}>
+                  {selectedPipeLabel ?? "Cañería"}
+                </div>
 
-
-        {/* =====================
-            ZONAS
-        ===================== */}
-        {showZones &&
-          zonesToShow.map((z) => {
-            const sel = mode === "ZONE" && selectedZoneId === z.id;
-            const c = centroid(z.polygon);
-
-            const icon = (() => {
-              if (!shrinkOthers) return locationMarkerIcon(z.name, sel, 1, 1);
-              if (sel) return locationMarkerIcon(z.name, true, 1, 1);
-              return locationMarkerIcon(z.name, false, 0.78, 0.55);
-            })();
-
-            const showPolygon = sel || zoom >= 15;
-
-            return (
-              <React.Fragment key={z.id}>
-                <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }} />
-
-                {showPolygon && (
-                  <Polygon
-                    positions={z.polygon}
-                    pathOptions={{
-                      color: "rgba(255,255,255,0.35)",
-                      weight: sel ? 3 : 1.5,
-                      fillOpacity: sel ? 0.07 : 0.03,
-                      dashArray: sel ? undefined : "8 12",
-                      lineCap: "round",
-                      lineJoin: "round",
+                <div className="pipePopup__actions">
+                  <button
+                    className="pipePopup__btn pipePopup__btn--primary"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedPipePos(null);
+                      setEditingGeomOpen(false);
+                      setEditingPipeId(selectedPipeId);
                     }}
-                    eventHandlers={{ click: () => onSelectZone(z) }}
-                  />
-                )}
-              </React.Fragment>
-            );
-          })}
+                  >
+                    Editar
+                  </button>
 
-        {/* =====================
-            BARRIOS
-        ===================== */}
-        {showBarrios &&
-          canDrawBarrios &&
-          barriosToShow.map((b) => {
-            const hlBase = highlightedBarrioIds.has(b.id);
-            const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
-            const hl = hlBase || hlByValve;
+                  <button
+                    className="pipePopup__btn"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedPipePos(null);
+                      setEditingPipeId(null);
+                      setEditingGeomOpen(true);
+                    }}
+                  >
+                    Recorrido
+                  </button>
 
-            const pres = pressureLabelForBarrio(b);
+                  <button
+                    className="pipePopup__btn"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!selectedPipeId) return;
 
-            return (
-              <Polygon
-                key={b.id}
-                positions={b.polygon}
-                pathOptions={{
-                  color: hl ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.55)",
-                  fillColor: hl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)",
-                  fillOpacity: hl ? 0.45 : 0.3,
-                  weight: hl ? 4 : 2,
-                }}
-              >
-                <Tooltip sticky direction="top" opacity={0.98}>
-                  <div style={{ fontWeight: 900 }}>{b.name}</div>
-                  <div style={{ fontSize: 12 }}>{pres.label}</div>
-                </Tooltip>
-              </Polygon>
-            );
-          })}
+                      const ok = confirm(`¿Borrar cañería "${selectedPipeLabel ?? ""}"?`);
+                      if (!ok) return;
 
-        <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
+                      try {
+                        await deletePipe(selectedPipeId);
+                        clearPipeSelection();
+                        setPipesReloadKey((k) => k + 1);
+                      } catch (err: any) {
+                        alert(err?.message ?? "No se pudo borrar");
+                      }
+                    }}
+                  >
+                    Borrar
+                  </button>
 
-        {!hasRoute && (
-          <FitToBarrios
-            enabled={hasBarrioImpact}
-            barrioIds={highlightedBarrioIdsExtra}
-            includePoint={activeValvePos ?? null}
-          />
-        )}
+                  <button
+                    className="pipePopup__btn"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearPipeSelection();
+                    }}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          )}
 
-        {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
+          {/* ZONAS */}
+          {showZones &&
+            zonesToShow.map((z) => {
+              const sel = mode === "ZONE" && selectedZoneId === z.id;
+              const c = centroid(z.polygon);
 
-        {/* assets demo */}
-        {(viewMode === "ALL" || viewMode === "ZONES") &&
-          (showAssets || (forceShowAssetIds && forceShowAssetIds.size > 0)) &&
-          assets
-            .filter((a) => {
-              if (mode === "ZONE" && selectedZoneId) return a.locationId === selectedZoneId;
-              return true;
-            })
-            .filter((a) => showAssets || (forceShowAssetIds?.has(a.id) ?? false))
-            .map((a) => {
-              const isValve = a.type === "VALVE";
-              const on = !isValve || valveEnabled[a.id] !== false;
-              const alpha = on ? 1.0 : 0.35;
+              const icon = (() => {
+                if (!shrinkOthers) return locationMarkerIcon(z.name, sel, 1, 1);
+                if (sel) return locationMarkerIcon(z.name, true, 1, 1);
+                return locationMarkerIcon(z.name, false, 0.78, 0.55);
+              })();
 
-              const isForced = forceShowAssetIds?.has(a.id) ?? false;
-
-              const size = isForced ? 16 : 12;
-              const html = `
-                <div class="pulse" style="
-                  width:${size}px;height:${size}px;
-                  border-radius:999px;
-                  background:${on ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)"};
-                  box-shadow:${isForced ? "0 0 0 6px rgba(255,255,255,0.18)" : "none"};
-                  opacity:${alpha};
-                "></div>
-              `;
+              const showPolygon = sel || zoom >= 15;
 
               return (
-                <Marker
-                  key={a.id}
-                  position={[a.lat, a.lng]}
-                  icon={new L.DivIcon({
-                    className: "",
-                    html,
-                    iconSize: [size, size],
-                    iconAnchor: [size / 2, size / 2],
-                  })}
-                  eventHandlers={{ click: () => onSelectAsset(a.id) }}
-                >
-                  <Popup>
-                    <div style={{ fontWeight: 900 }}>{a.name}</div>
-                    <div style={{ fontSize: 12, opacity: 0.85 }}>
-                      {a.type} · {a.status} · {a.locationId}
-                    </div>
-                  </Popup>
-                </Marker>
+                <React.Fragment key={z.id}>
+                  <Marker position={c} icon={icon} eventHandlers={{ click: () => onSelectZone(z) }} />
+
+                  {showPolygon && (
+                    <Polygon
+                      positions={z.polygon}
+                      pathOptions={{
+                        color: "rgba(255,255,255,0.35)",
+                        weight: sel ? 3 : 1.5,
+                        fillOpacity: sel ? 0.07 : 0.03,
+                        dashArray: sel ? undefined : "8 12",
+                        lineCap: "round",
+                        lineJoin: "round",
+                      }}
+                      eventHandlers={{ click: () => onSelectZone(z) }}
+                    />
+                  )}
+                </React.Fragment>
               );
             })}
 
-        {/* 2 puntos A/B */}
-        {focusPair && (
-          <>
-            <Marker interactive={false} position={focusPair.a.pos} icon={focusPointIcon(focusPair.a.label)} />
-            <Marker interactive={false} position={focusPair.b.pos} icon={focusPointIcon(focusPair.b.label)} />
-          </>
-        )}
-      </MapContainer>
+          {/* BARRIOS */}
+          {showBarrios &&
+            canDrawBarrios &&
+            barriosToShow.map((b) => {
+              const hlBase = highlightedBarrioIds.has(b.id);
+              const hlByValve = highlightedBarrioIdsExtra?.has(b.id) ?? false;
+              const hl = hlBase || hlByValve;
 
-      {/* =====================
-          EDITOR DE GEOMETRÍA (opcional)
-      ===================== */}
-      <PipeGeometryEditor pipeId={selectedPipeId} pipeLayer={selectedPipeLayer} />
+              const pres = pressureLabelForBarrio(b);
 
-      {/* =====================
-          EDITOR DE PROPIEDADES (MODAL)
-          ✅ abre solo con "Editar"
-      ===================== */}
+              return (
+                <Polygon
+                  key={b.id}
+                  positions={b.polygon}
+                  pathOptions={{
+                    color: hl ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.55)",
+                    fillColor: hl ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)",
+                    fillOpacity: hl ? 0.45 : 0.3,
+                    weight: hl ? 4 : 2,
+                  }}
+                >
+                  <Tooltip sticky direction="top" opacity={0.98}>
+                    <div style={{ fontWeight: 900 }}>{b.name}</div>
+                    <div style={{ fontSize: 12 }}>{pres.label}</div>
+                  </Tooltip>
+                </Polygon>
+              );
+            })}
+
+          <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
+
+          {!hasRoute && (
+            <FitToBarrios
+              enabled={hasBarrioImpact}
+              barrioIds={highlightedBarrioIdsExtra}
+              includePoint={activeValvePos ?? null}
+            />
+          )}
+
+          {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
+
+          {/* 2 puntos A/B */}
+          {focusPair && (
+            <>
+              <Marker interactive={false} position={focusPair.a.pos} icon={focusPointIcon(focusPair.a.label)} />
+              <Marker interactive={false} position={focusPair.b.pos} icon={focusPointIcon(focusPair.b.label)} />
+            </>
+          )}
+        </MapContainer>
+      </div>
+
+      {/* Editor recorrido (modal) */}
+      <PipeGeometryEditor
+        open={editingGeomOpen}
+        pipeId={selectedPipeId}
+        pipeLayer={selectedPipeLayer}
+        onClose={() => setEditingGeomOpen(false)}
+        onSaved={() => setPipesReloadKey((k) => k + 1)}
+      />
+
+      {/* Editor propiedades (modal) */}
       <PipeEditDrawer
         pipeId={editingPipeId}
         onClose={() => setEditingPipeId(null)}
-        onUpdated={() => {}}
+        onUpdated={(feature) => {
+          const nextLabel =
+            feature?.properties?.props?.Layer ??
+            feature?.properties?.props?.layer ??
+            null;
+          if (nextLabel != null) setSelectedPipeLabel(String(nextLabel));
+          setPipesReloadKey((k) => k + 1);
+        }}
       />
     </>
   );

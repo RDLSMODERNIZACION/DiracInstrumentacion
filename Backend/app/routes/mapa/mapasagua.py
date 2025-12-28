@@ -11,11 +11,25 @@ from app.db import get_conn
 router = APIRouter(prefix="/mapasagua", tags=["mapasagua"])
 
 
+# ============================================================
+# Helpers
+# ============================================================
 def _feature_from_row(row):
-    # ✅ agregado flow_func
-    (pid, diam, material, typ, estado, flow_func, style, props, geometry_json) = row
+    (
+        pid,
+        diam,
+        material,
+        typ,
+        estado,
+        flow_func,
+        style,
+        props,
+        geometry_json,
+    ) = row
+
     if not geometry_json:
         return None
+
     geom = json.loads(geometry_json)
     return {
         "type": "Feature",
@@ -25,7 +39,7 @@ def _feature_from_row(row):
             "material": material,
             "type": typ,
             "estado": estado,
-            "flow_func": flow_func,  # ✅ nuevo
+            "flow_func": flow_func,
             "style": style or {},
             "props": props or {},
         },
@@ -33,6 +47,9 @@ def _feature_from_row(row):
     }
 
 
+# ============================================================
+# GET pipes (GeoJSON, con bbox opcional)
+# ============================================================
 @router.get("/pipes")
 def get_pipes(
     min_lng: float | None = Query(default=None),
@@ -40,13 +57,12 @@ def get_pipes(
     max_lng: float | None = Query(default=None),
     max_lat: float | None = Query(default=None),
 ):
-    where = "where p.active = true"
-    params: list[float] = []
+    where = ""
+    params: list[Any] = []
 
-    # bbox opcional
     if None not in (min_lng, min_lat, max_lng, max_lat):
-        where += """
-          and infraestructura.st_intersects(
+        where = """
+          where infraestructura.st_intersects(
             p.geom,
             infraestructura.st_makeenvelope(%s, %s, %s, %s, 4326)
           )
@@ -60,7 +76,7 @@ def get_pipes(
         p.material,
         p.type,
         p.estado,
-        p.flow_func,               -- ✅ nuevo
+        p.flow_func,
         p.style,
         p.props,
         infraestructura.st_asgeojson(p.geom) as geometry_json
@@ -81,6 +97,9 @@ def get_pipes(
     return JSONResponse({"type": "FeatureCollection", "features": features})
 
 
+# ============================================================
+# GET extent
+# ============================================================
 @router.get("/pipes/extent")
 def pipes_extent():
     sql = """
@@ -90,7 +109,7 @@ def pipes_extent():
         max(infraestructura.st_xmax(geom)) as max_lng,
         max(infraestructura.st_ymax(geom)) as max_lat
       from "MapasAgua".pipes
-      where active = true and geom is not null
+      where geom is not null
     """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql)
@@ -99,12 +118,17 @@ def pipes_extent():
     if not row or row[0] is None:
         return {"min_lng": None, "min_lat": None, "max_lng": None, "max_lat": None}
 
-    return {"min_lng": row[0], "min_lat": row[1], "max_lng": row[2], "max_lat": row[3]}
+    return {
+        "min_lng": row[0],
+        "min_lat": row[1],
+        "max_lng": row[2],
+        "max_lat": row[3],
+    }
 
 
-# ==========================
-# ✅ GET por ID (Feature)
-# ==========================
+# ============================================================
+# GET pipe por ID
+# ============================================================
 @router.get("/pipes/{pipe_id}")
 def get_pipe(pipe_id: str):
     sql = """
@@ -114,12 +138,12 @@ def get_pipe(pipe_id: str):
         p.material,
         p.type,
         p.estado,
-        p.flow_func,               -- ✅ nuevo
+        p.flow_func,
         p.style,
         p.props,
         infraestructura.st_asgeojson(p.geom) as geometry_json
       from "MapasAgua".pipes p
-      where p.active = true and p.id::text = %s
+      where p.id::text = %s
       limit 1
     """
     with get_conn() as conn, conn.cursor() as cur:
@@ -136,28 +160,20 @@ def get_pipe(pipe_id: str):
     return JSONResponse(feat)
 
 
-# ==========================
-# ✅ PATCH update por ID (propiedades)
-# ==========================
+# ============================================================
+# PATCH pipe (propiedades)
+# ============================================================
 @router.patch("/pipes/{pipe_id}")
-def patch_pipe(
-    pipe_id: str,
-    body: dict[str, Any],
-):
-    """
-    Body permitido (cualquiera opcional):
-      {
-        "diametro_mm": 110,
-        "material": "PEAD",
-        "type": "WATER",
-        "estado": "OK",
-        "flow_func": "IMPULSION",  # ✅ nuevo
-        "style": { ... },          # json/jsonb
-        "props": { ... }           # json/jsonb
-      }
-    """
-    # ✅ agregado flow_func
-    allowed = {"diametro_mm", "material", "type", "estado", "flow_func", "style", "props"}
+def patch_pipe(pipe_id: str, body: dict[str, Any]):
+    allowed = {
+        "diametro_mm",
+        "material",
+        "type",
+        "estado",
+        "flow_func",
+        "style",
+        "props",
+    }
 
     unknown = [k for k in body.keys() if k not in allowed]
     if unknown:
@@ -172,15 +188,11 @@ def patch_pipe(
     sets = []
     params: list[Any] = []
 
-    # armamos SET dinámico
     for k in allowed:
         if k in body:
             val = body[k]
-
-            # ✅ jsonb: psycopg3 necesita Json() para dict/list
             if k in ("style", "props") and isinstance(val, (dict, list)):
                 val = Json(val)
-
             sets.append(f"{k} = %s")
             params.append(val)
 
@@ -189,14 +201,14 @@ def patch_pipe(
     sql = f"""
       update "MapasAgua".pipes
       set {", ".join(sets)}, updated_at = now()
-      where active = true and id::text = %s
+      where id::text = %s
       returning
         id::text as id,
         diametro_mm,
         material,
         type,
         estado,
-        flow_func,                 -- ✅ nuevo
+        flow_func,
         style,
         props,
         infraestructura.st_asgeojson(geom) as geometry_json
@@ -206,11 +218,8 @@ def patch_pipe(
         cur.execute(sql, params)
         row = cur.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Pipe not found or inactive")
-        try:
-            conn.commit()
-        except Exception:
-            pass
+            raise HTTPException(status_code=404, detail="Pipe not found")
+        conn.commit()
 
     feat = _feature_from_row(row)
     if not feat:
@@ -219,20 +228,11 @@ def patch_pipe(
     return JSONResponse(feat)
 
 
-# ==========================
-# ✅ PATCH geometry por ID (recorrido)
-# ==========================
+# ============================================================
+# PATCH geometry (recorrido)
+# ============================================================
 @router.patch("/pipes/{pipe_id}/geometry")
 def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
-    """
-    Acepta:
-      - GeoJSON geometry directo:
-          { "type": "LineString", "coordinates": [...] }
-      - o wrapper:
-          { "geometry": { ... } }
-
-    Guarda en SRID 4326.
-    """
     geom = body.get("geometry") if isinstance(body, dict) and "geometry" in body else body
 
     if not isinstance(geom, dict):
@@ -240,7 +240,10 @@ def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
 
     gtype = geom.get("type")
     if gtype not in ("LineString", "MultiLineString"):
-        raise HTTPException(status_code=400, detail="geometry.type must be LineString or MultiLineString")
+        raise HTTPException(
+            status_code=400,
+            detail="geometry.type must be LineString or MultiLineString",
+        )
 
     sql = """
       update "MapasAgua".pipes
@@ -250,14 +253,14 @@ def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
                 4326
               ),
         updated_at = now()
-      where active = true and id::text = %s
+      where id::text = %s
       returning
         id::text as id,
         diametro_mm,
         material,
         type,
         estado,
-        flow_func,                 -- ✅ nuevo
+        flow_func,
         style,
         props,
         infraestructura.st_asgeojson(geom) as geometry_json
@@ -267,11 +270,8 @@ def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
         cur.execute(sql, [json.dumps(geom), pipe_id])
         row = cur.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Pipe not found or inactive")
-        try:
-            conn.commit()
-        except Exception:
-            pass
+            raise HTTPException(status_code=404, detail="Pipe not found")
+        conn.commit()
 
     feat = _feature_from_row(row)
     if not feat:
@@ -280,52 +280,44 @@ def patch_pipe_geometry(pipe_id: str, body: dict[str, Any]):
     return JSONResponse(feat)
 
 
-# ==========================
-# ✅ POST create pipe (dibujar nueva)
-# ==========================
+# ============================================================
+# POST create pipe
+# ============================================================
 @router.post("/pipes")
 def create_pipe(body: dict[str, Any]):
-    """
-    Body:
-      {
-        "geometry": { GeoJSON LineString },
-        "properties": {
-          "diametro_mm": 75,
-          "material": "PVC",
-          "type": "WATER",
-          "estado": "OK",
-          "flow_func": "DISTRIBUCION",  # ✅ nuevo (opcional)
-          "props": {...},
-          "style": {...}
-        }
-      }
-    """
     geom = body.get("geometry")
     props = body.get("properties") or {}
 
     if not isinstance(geom, dict):
-        raise HTTPException(status_code=400, detail="geometry is required (GeoJSON object)")
+        raise HTTPException(status_code=400, detail="geometry is required")
 
     gtype = geom.get("type")
     if gtype not in ("LineString", "MultiLineString"):
-        raise HTTPException(status_code=400, detail="geometry.type must be LineString or MultiLineString")
+        raise HTTPException(
+            status_code=400,
+            detail="geometry.type must be LineString or MultiLineString",
+        )
 
     diametro_mm = props.get("diametro_mm")
     material = props.get("material")
     typ = props.get("type") or "WATER"
     estado = props.get("estado") or "OK"
-    flow_func = props.get("flow_func") or "DISTRIBUCION"  # ✅ nuevo
+    flow_func = props.get("flow_func") or "DISTRIBUCION"
 
     props_json = props.get("props") or {}
     style_json = props.get("style") or {}
 
     sql = """
       insert into "MapasAgua".pipes
-        (id, geom, diametro_mm, material, type, estado, flow_func, props, style, active, created_at, updated_at)
+        (id, geom, diametro_mm, material, type, estado, flow_func, props, style, created_at, updated_at)
       values
-        (gen_random_uuid(),
-         infraestructura.st_setsrid(infraestructura.st_geomfromgeojson(%s), 4326),
-         %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, true, now(), now())
+        (
+          gen_random_uuid(),
+          infraestructura.st_setsrid(infraestructura.st_geomfromgeojson(%s), 4326),
+          %s, %s, %s, %s, %s,
+          %s::jsonb, %s::jsonb,
+          now(), now()
+        )
       returning
         id::text as id,
         diametro_mm,
@@ -353,13 +345,33 @@ def create_pipe(body: dict[str, Any]):
             ],
         )
         row = cur.fetchone()
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        conn.commit()
 
     feat = _feature_from_row(row)
     if not feat:
-        raise HTTPException(status_code=500, detail="Pipe created but geometry could not be returned")
+        raise HTTPException(
+            status_code=500,
+            detail="Pipe created but geometry could not be returned",
+        )
 
     return JSONResponse(feat)
+
+
+# ============================================================
+# DELETE pipe (BORRADO REAL)
+# ============================================================
+@router.delete("/pipes/{pipe_id}")
+def delete_pipe(pipe_id: str):
+    sql = """
+      delete from "MapasAgua".pipes
+      where id::text = %s
+      returning id::text
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, [pipe_id])
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pipe not found")
+        conn.commit()
+
+    return JSONResponse({"ok": True, "deleted_id": row[0]})

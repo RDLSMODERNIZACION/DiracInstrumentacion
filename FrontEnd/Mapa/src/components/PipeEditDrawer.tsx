@@ -8,6 +8,43 @@ type Props = {
   onUpdated: (feature: any) => void;
 };
 
+const FLOW_FUNCS = [
+  { value: "IMPULSION", label: "Impulsión" },
+  { value: "DISTRIBUCION", label: "Distribución" },
+  { value: "ADUCCION", label: "Aducción" },
+  { value: "BYPASS", label: "Bypass" },
+  { value: "RETORNO", label: "Retorno" },
+  { value: "DRENAJE", label: "Drenaje" },
+  { value: "DESCONOCIDO", label: "Desconocido" },
+] as const;
+
+// ✅ Listas controladas
+const DIAMETERS_MM = [50, 63, 75, 90, 110, 160, 200, 250, 315, 400] as const;
+
+const MATERIALS = [
+  { value: "PVC", label: "PVC" },
+  { value: "PEAD", label: "PEAD" },
+  { value: "ACERO", label: "Acero" },
+  { value: "FUNDICION", label: "Fundición" },
+  { value: "HORMIGON", label: "Hormigón" },
+] as const;
+
+function normalizeMaterial(v: any): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const up = s.toUpperCase();
+  if (up === "PEAD") return "PEAD";
+  if (up === "PVC") return "PVC";
+  if (up === "ACERO" || up === "STEEL") return "ACERO";
+  if (up === "FUNDICION" || up === "FUNDICIÓN") return "FUNDICION";
+  if (up === "HORMIGON" || up === "HORMIGÓN") return "HORMIGON";
+
+  // si no matchea, lo dejamos como venía (para no romper datos existentes)
+  return s;
+}
+
 export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
   const [data, setData] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -27,7 +64,21 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
 
     fetchPipeById(pipeId)
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (cancelled) return;
+
+        const flow_func = res?.properties?.flow_func ?? "DISTRIBUCION";
+        const props = (res?.properties ?? {})?.props ?? {};
+        const materialNorm = normalizeMaterial(res?.properties?.material);
+
+        setData({
+          ...res,
+          properties: {
+            ...(res?.properties ?? {}),
+            flow_func,
+            props,
+            material: materialNorm,
+          },
+        });
       })
       .catch((e) => {
         if (!cancelled) setError(e?.message ?? "No se pudo cargar la cañería");
@@ -54,6 +105,7 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
         diametro_mm: p.diametro_mm ?? null,
         material: p.material ?? null,
         estado: p.estado ?? null,
+        flow_func: p.flow_func ?? "DISTRIBUCION",
         props: {
           ...props,
           Layer: props.Layer ?? "",
@@ -98,7 +150,7 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
         <div
           style={{
             width: "100%",
-            maxWidth: 460,
+            maxWidth: 520,
             background: C.surface,
             color: C.text,
             borderRadius: 14,
@@ -118,15 +170,12 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "flex-start",
+              gap: 12,
             }}
           >
             <div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                Editar cañería
-              </div>
-              <div style={{ fontSize: 12, color: C.muted }}>
-                ID: {pipeId}
-              </div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Editar cañería</div>
+              <div style={{ fontSize: 12, color: C.muted }}>ID: {pipeId}</div>
             </div>
 
             <button
@@ -167,14 +216,14 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
 
             {data && (
               <>
-                {/* ✅ NOMBRE */}
+                {/* ✅ NOMBRE (props.Layer) */}
                 <label>
                   <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
                     Nombre / Identificador
                   </div>
                   <input
                     value={props.Layer ?? ""}
-                    placeholder="Ej: RA_3TKS_Llanquihue_PVC_075"
+                    placeholder="Ej: RA_PO_Impulsión_Acero_250"
                     onChange={(e) =>
                       setData({
                         ...data,
@@ -196,22 +245,19 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                   />
                 </label>
 
+                {/* ✅ FLOW FUNC */}
                 <label>
                   <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
-                    Diámetro (mm)
+                    Función hidráulica
                   </div>
-                  <input
-                    type="number"
-                    value={p.diametro_mm ?? ""}
-                    placeholder="Ej: 110"
+                  <select
+                    value={p.flow_func ?? "DISTRIBUCION"}
                     onChange={(e) =>
                       setData({
                         ...data,
                         properties: {
                           ...p,
-                          diametro_mm: e.target.value
-                            ? Number(e.target.value)
-                            : null,
+                          flow_func: e.target.value,
                         },
                       })
                     }
@@ -220,34 +266,90 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                       padding: "10px",
                       borderRadius: 12,
                       border: `1px solid ${C.border}`,
+                      background: "#fff",
                     }}
-                  />
+                  >
+                    {FLOW_FUNCS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
-                <label>
-                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
-                    Material
-                  </div>
-                  <input
-                    value={p.material ?? ""}
-                    placeholder="Ej: PEAD"
-                    onChange={(e) =>
-                      setData({
-                        ...data,
-                        properties: {
-                          ...p,
-                          material: e.target.value,
-                        },
-                      })
-                    }
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: 12,
-                      border: `1px solid ${C.border}`,
-                    }}
-                  />
-                </label>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 12,
+                  }}
+                >
+                  {/* ✅ Diámetro como lista */}
+                  <label>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                      Diámetro (DN mm)
+                    </div>
+                    <select
+                      value={p.diametro_mm ?? ""}
+                      onChange={(e) =>
+                        setData({
+                          ...data,
+                          properties: {
+                            ...p,
+                            diametro_mm: e.target.value ? Number(e.target.value) : null,
+                          },
+                        })
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: 12,
+                        border: `1px solid ${C.border}`,
+                        background: "#fff",
+                      }}
+                    >
+                      <option value="">—</option>
+                      {DIAMETERS_MM.map((d) => (
+                        <option key={d} value={d}>
+                          DN {d}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {/* ✅ Material como lista */}
+                  <label>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                      Material
+                    </div>
+                    <select
+                      value={p.material ?? ""}
+                      onChange={(e) =>
+                        setData({
+                          ...data,
+                          properties: {
+                            ...p,
+                            material: e.target.value ? e.target.value : null,
+                          },
+                        })
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: 12,
+                        border: `1px solid ${C.border}`,
+                        background: "#fff",
+                      }}
+                    >
+                      <option value="">—</option>
+                      {MATERIALS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
 
                 <label>
                   <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
@@ -269,6 +371,7 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                       padding: "10px",
                       borderRadius: 12,
                       border: `1px solid ${C.border}`,
+                      background: "#fff",
                     }}
                   >
                     <option value="OK">OK</option>
@@ -300,6 +403,8 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                 border: `1px solid ${C.border}`,
                 background: "#fff",
                 fontWeight: 600,
+                cursor: saving ? "not-allowed" : "pointer",
+                opacity: saving ? 0.7 : 1,
               }}
             >
               Cancelar
@@ -313,7 +418,8 @@ export default function PipeEditDrawer({ pipeId, onClose, onUpdated }: Props) {
                 borderRadius: 12,
                 background: C.primary,
                 color: "#fff",
-                fontWeight: 700,
+                fontWeight: 800,
+                cursor: saving || !data ? "not-allowed" : "pointer",
                 opacity: saving || !data ? 0.7 : 1,
               }}
             >
