@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Any, Dict, Optional
 
 from app.db import get_conn
 from app.services.sim_solver import run_linear_simulation
@@ -42,6 +42,11 @@ def _fetchall_dict(cur):
 
 @router.post("/sim/run")
 def sim_run(body: SimRunRequest):
+    """
+    Corre simulación.
+    - Lee pipes/nodes/valves/sources/demands
+    - Si sources (tabla) está vacía, hace fallback a nodes.kind='SOURCE' con props.head_m
+    """
     try:
         with get_conn() as conn, conn.cursor() as cur:
             # Pipes
@@ -60,23 +65,20 @@ def sim_run(body: SimRunRequest):
             """, (int(body.options.default_diam_mm),))
             pipes = _fetchall_dict(cur)
 
-            # Nodes
-            cur.execute("""SELECT id, kind FROM "MapasAgua".nodes""")
+            # Nodes (incluimos props para fallback)
+            cur.execute("""SELECT id, kind, props FROM "MapasAgua".nodes""")
             nodes = _fetchall_dict(cur)
 
-            # Valves (si no existe tabla, asumimos sin válvulas)
+            # Valves (opcional)
             try:
                 cur.execute("""SELECT node_id, is_open FROM "MapasAgua".valves""")
                 valves = _fetchall_dict(cur)
             except Exception:
                 valves = []
 
-            # Sources (OBLIGATORIO)
-            try:
-                cur.execute("""SELECT node_id, head_m FROM "MapasAgua".sources""")
-                sources = _fetchall_dict(cur)
-            except Exception:
-                sources = []
+            # Sources (OBLIGATORIO) -> NO tragamos errores: si falla, queremos verlo.
+            cur.execute("""SELECT node_id, head_m FROM "MapasAgua".sources""")
+            sources = _fetchall_dict(cur)
 
             # Demands (opcional)
             try:
@@ -85,8 +87,35 @@ def sim_run(body: SimRunRequest):
             except Exception:
                 demands = []
 
+        # --------
+        # Fallback: si sources tabla está vacía, usar nodes.kind='SOURCE' con props.head_m
+        # --------
         if not sources:
-            raise HTTPException(400, "No hay sources en \"MapasAgua\".sources (node_id + head_m).")
+            fallback = []
+            for n in nodes:
+                if (n.get("kind") or "").upper() != "SOURCE":
+                    continue
+                props = n.get("props") or {}
+                head = None
+                if isinstance(props, dict):
+                    head = props.get("head_m")
+                    if head is None and "head" in props:
+                        head = props.get("head")
+                try:
+                    head_m = float(head) if head is not None else None
+                except Exception:
+                    head_m = None
+
+                if head_m is not None:
+                    fallback.append({"node_id": n["id"], "head_m": head_m})
+
+            sources = fallback
+
+        if not sources:
+            raise HTTPException(
+                status_code=400,
+                detail='No hay sources en "MapasAgua".sources (node_id + head_m) y no hay fallback en nodes.props.head_m.'
+            )
 
         result = run_linear_simulation(
             nodes_rows=nodes,
@@ -96,18 +125,20 @@ def sim_run(body: SimRunRequest):
             demands_rows=demands,
             options=body.options.model_dump(),
         )
+
+        # meta extra para debug
+        if isinstance(result, dict):
+            result.setdefault("meta", {})
+            result["meta"]["sources_count"] = len(sources)
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Simulación falló: {e}")
+        raise HTTPException(500, f"Simulación falló (error real): {e}")
 
 @router.patch("/pipes/{pipe_id}/connect")
 def connect_pipe(pipe_id: str, body: ConnectPipeBody):
-    """
-    Conexión manual: asigna from_node y to_node a un pipe.
-    """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
             UPDATE "MapasAgua".pipes
@@ -124,7 +155,6 @@ def connect_pipe(pipe_id: str, body: ConnectPipeBody):
         conn.commit()
 
     return {"ok": True, "pipe_id": pipe_id, "from_node": body.from_node, "to_node": body.to_node}
-
 
 @router.get("/sim/debug_sources")
 def debug_sources():
