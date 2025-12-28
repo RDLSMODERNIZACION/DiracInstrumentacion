@@ -92,11 +92,12 @@ export async function patchPipe(id: string, payload: Record<string, any>) {
 }
 
 /* =========================
-   DELETE PIPE (borrado lógico)
-   ✅ Requiere backend: patch_pipe permita "active"
+   DELETE PIPE (borrado REAL)
+   ✅ Requiere backend: DELETE /mapasagua/pipes/{id}
 ========================= */
 export async function deletePipe(id: string) {
-  return patchPipe(id, { active: false });
+  const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
+  return fetchJSON(url, { method: "DELETE" });
 }
 
 /* =========================

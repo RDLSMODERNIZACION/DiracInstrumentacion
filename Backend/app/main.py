@@ -49,6 +49,7 @@ from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
 # ===== Mapa =====
 from app.routes.mapa.mapasagua import router as mapasagua_router
+from app.routes.mapa.simulacion import router as mapasagua_sim_router
 
 
 # ===== Logging =====
@@ -153,6 +154,7 @@ app.include_router(admin_manifolds_router)
 
 # ===== Mapa =====
 app.include_router(mapasagua_router, prefix="/mapa", tags=["mapa"])
+app.include_router(mapasagua_sim_router, prefix="/mapa", tags=["mapa"])
 
 # ===== Telegram test =====
 app.include_router(telegram_test_router)
