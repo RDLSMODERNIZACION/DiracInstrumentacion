@@ -124,3 +124,12 @@ def connect_pipe(pipe_id: str, body: ConnectPipeBody):
         conn.commit()
 
     return {"ok": True, "pipe_id": pipe_id, "from_node": body.from_node, "to_node": body.to_node}
+
+
+@router.get("/sim/debug_sources")
+def debug_sources():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT node_id::text as node_id, head_m FROM "MapasAgua".sources""")
+        cols = [d[0] for d in cur.description]
+        items = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {"count": len(items), "items": items}
