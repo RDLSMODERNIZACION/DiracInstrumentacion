@@ -1,6 +1,6 @@
 # app/services/sim_solver.py
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import math
 
 
@@ -11,11 +11,9 @@ def _solve_linear_system(A: List[List[float]], b: List[float]) -> List[float]:
     returns x
     """
     n = len(A)
-    # Augment matrix
     M = [row[:] + [b[i]] for i, row in enumerate(A)]
 
     for col in range(n):
-        # pivot
         pivot = col
         max_abs = abs(M[col][col])
         for r in range(col + 1, n):
@@ -23,19 +21,18 @@ def _solve_linear_system(A: List[List[float]], b: List[float]) -> List[float]:
             if v > max_abs:
                 max_abs = v
                 pivot = r
+
         if max_abs < 1e-12:
             raise ValueError("Matriz singular (red desconectada o sin anclaje de fuentes).")
 
         if pivot != col:
             M[col], M[pivot] = M[pivot], M[col]
 
-        # normalize pivot row
         piv = M[col][col]
         inv = 1.0 / piv
         for c in range(col, n + 1):
             M[col][c] *= inv
 
-        # eliminate below
         for r in range(col + 1, n):
             factor = M[r][col]
             if abs(factor) < 1e-18:
@@ -43,7 +40,6 @@ def _solve_linear_system(A: List[List[float]], b: List[float]) -> List[float]:
             for c in range(col, n + 1):
                 M[r][c] -= factor * M[col][c]
 
-    # back substitution
     x = [0.0] * n
     for r in range(n - 1, -1, -1):
         s = M[r][n]
@@ -54,7 +50,7 @@ def _solve_linear_system(A: List[List[float]], b: List[float]) -> List[float]:
 
 
 def _pipe_resistance(length_m: float, diam_mm: float, r_scale: float) -> float:
-    # R ~ L / D^4 , D en metros
+    # R ~ L / D^4 , D en metros (modelo simple)
     L = max(0.1, float(length_m))
     D = max(0.001, float(diam_mm) / 1000.0)
     return (L / (D ** 4)) * float(r_scale)
@@ -65,7 +61,7 @@ def run_linear_simulation(
     pipes_rows: List[Dict[str, Any]],
     valves_rows: List[Dict[str, Any]],
     sources_rows: List[Dict[str, Any]],
-    demands_rows: List[Dict[str, Any]],
+    demands_rows: List[Dict[str, Any]],  # <- se recibe pero se ignora por ahora
     options: Dict[str, Any],
 ) -> Dict[str, Any]:
     default_diam_mm = float(options.get("default_diam_mm", 75.0))
@@ -81,7 +77,7 @@ def run_linear_simulation(
     n = len(node_ids)
 
     # Valve openness map
-    valve_open = {}
+    valve_open: Dict[str, bool] = {}
     for r in valves_rows:
         valve_open[str(r["node_id"])] = bool(r["is_open"])
 
@@ -92,7 +88,7 @@ def run_linear_simulation(
                 blocked_nodes.add(nid)
 
     # Sources (fixed heads)
-    source_head = {}
+    source_head: Dict[str, float] = {}
     for r in sources_rows:
         nid = str(r["node_id"])
         head = float(r["head_m"])
@@ -101,20 +97,13 @@ def run_linear_simulation(
     if not source_head:
         raise ValueError("No hay sources. Creá al menos una fuente (node_id + head_m).")
 
-    # Demands (outflow) in L/s
-    demand_lps = {}
-    for r in demands_rows:
-        nid = str(r["node_id"])
-        demand_lps[nid] = demand_lps.get(nid, 0.0) + float(r["demand_lps"])
-
     # Initialize G matrix and b vector
     G = [[0.0 for _ in range(n)] for __ in range(n)]
     b = [0.0 for _ in range(n)]
 
-    # Demands subtract injection
-    for nid, q in demand_lps.items():
-        if nid in idx:
-            b[idx[nid]] -= q
+    # ✅ DEMANDS IGNORADAS (modo simple)
+    demands_ignored = True
+    demands_count = len(demands_rows) if demands_rows is not None else 0
 
     used_pipes = []
 
@@ -153,7 +142,7 @@ def run_linear_simulation(
         used_pipes.append((pid, u, v, g, R, L, Dmm))
 
     # Apply fixed head constraints for sources
-    fixed_indices = {}
+    fixed_indices: Dict[int, float] = {}
     for nid, head in source_head.items():
         if nid in idx and nid not in blocked_nodes:
             fixed_indices[idx[nid]] = float(head)
@@ -161,7 +150,6 @@ def run_linear_simulation(
     if not fixed_indices:
         raise ValueError("No hay sources válidas (todas bloqueadas o inexistentes).")
 
-    # Impose constraints
     for k, head in fixed_indices.items():
         for c in range(n):
             G[k][c] = 0.0
@@ -177,7 +165,7 @@ def run_linear_simulation(
     for nid in node_ids:
         i = idx[nid]
         head_m = float(H[i])
-        pressure_bar = head_m / 10.197162129779  # 1 bar ~ 10.197 mH2O
+        pressure_bar = head_m / 10.197162129779
         nodes_out[nid] = {
             "head_m": head_m,
             "pressure_bar": pressure_bar,
@@ -191,7 +179,7 @@ def run_linear_simulation(
         du = idx[u]
         dv = idx[v]
         dH = float(H[du] - H[dv])
-        Q = g * dH  # “L/s” en escala del modelo lineal
+        Q = g * dH
 
         blocked = False
         if min_pressure_m > 0:
@@ -202,7 +190,7 @@ def run_linear_simulation(
         pipes_out[pid] = {
             "q_lps": float(Q),
             "abs_q_lps": float(abs(Q)),
-            "dir": 1 if Q >= 0 else -1,  # 1: from->to, -1: to->from
+            "dir": 1 if Q >= 0 else -1,
             "dH_m": float(dH),
             "R": float(R),
             "length_m": float(L),
@@ -220,5 +208,7 @@ def run_linear_simulation(
             "n_nodes": n,
             "n_pipes_used": len(used_pipes),
             "n_sources": len(fixed_indices),
+            "demands_ignored": demands_ignored,
+            "demands_count": demands_count,
         },
     }
