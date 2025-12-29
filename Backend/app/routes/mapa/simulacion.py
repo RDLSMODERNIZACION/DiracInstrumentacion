@@ -19,6 +19,7 @@ class SimOptions(BaseModel):
     default_diam_mm: float = 75.0
     r_scale: float = 1.0
     closed_valve_blocks_node: bool = True
+
     # caída de head por "resistencia" (estable)
     # head_drop = absQ * R * head_drop_scale
     head_drop_scale: float = 0.00001
@@ -132,7 +133,6 @@ def sim_run(body: SimRunRequest):
     if not sources:
         raise HTTPException(400, 'No hay sources en "MapasAgua".sources (node_id + head_m).')
 
-    # node kind map
     node_kind = {n["id"]: (n.get("kind") or "JUNCTION") for n in nodes}
 
     # blocked nodes by closed valves
@@ -189,6 +189,7 @@ def sim_run(body: SimRunRequest):
         neg_h, u = heapq.heappop(pq)
         hu = -neg_h
 
+        # skip outdated
         if head.get(u, float("-inf")) > hu + 1e-9:
             continue
 
@@ -196,10 +197,7 @@ def sim_run(body: SimRunRequest):
             if v in blocked:
                 continue
 
-            # flujo simple (estable, solo para visual)
             absQ = 1.0 / (1.0 + (R / R0))
-
-            # caída simple
             drop = absQ * R * float(body.options.head_drop_scale)
             hv = hu - drop
 
@@ -226,17 +224,23 @@ def sim_run(body: SimRunRequest):
     for pid, po in pipe_out.items():
         u = po["u"]
         v = po["v"]
-        hu = head.get(u, float("nan"))
-        hv = head.get(v, float("nan"))
+        hu = head.get(u, None)
+        hv = head.get(v, None)
 
-        if not (math.isfinite(hu) and math.isfinite(hv)):
+        reached_u = (hu is not None) and math.isfinite(float(hu))
+        reached_v = (hv is not None) and math.isfinite(float(hv))
+
+        if not (reached_u and reached_v):
             po["blocked"] = True
             po["q_lps"] = 0.0
             po["abs_q_lps"] = 0.0
-            po["dH_m"] = float("nan")
+            po["dH_m"] = None  # ✅ NO NaN
             continue
 
+        hu = float(hu)
+        hv = float(hv)
         dH = hu - hv
+
         if dH >= 0:
             po["dir"] = 1
             po["dH_m"] = dH
@@ -246,17 +250,31 @@ def sim_run(body: SimRunRequest):
             po["dH_m"] = -dH
             po["q_lps"] = -po["abs_q_lps"]
 
-    # output nodes: reached or not
+    # output nodes: reached or not (✅ NO NaN)
     nodes_out: Dict[str, Any] = {}
     for n in nodes:
         nid = n["id"]
-        h = head.get(nid, float("nan"))
+        h = head.get(nid, None)
+
+        reached = (h is not None) and math.isfinite(float(h))
+
+        if not reached:
+            nodes_out[nid] = {
+                "head_m": None,
+                "pressure_bar": None,
+                "blocked": (nid in blocked),
+                "kind": node_kind.get(nid, "JUNCTION"),
+                "reached": False,
+            }
+            continue
+
+        h = float(h)
         nodes_out[nid] = {
             "head_m": h,
-            "pressure_bar": (h / 10.197162129779) if math.isfinite(h) else float("nan"),
+            "pressure_bar": (h / 10.197162129779),
             "blocked": (nid in blocked),
             "kind": node_kind.get(nid, "JUNCTION"),
-            "reached": bool(math.isfinite(h)),
+            "reached": True,
         }
 
     return {
