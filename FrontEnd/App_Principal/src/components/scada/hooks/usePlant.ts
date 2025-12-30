@@ -62,7 +62,7 @@ type UsePlant = {
   kpis: Kpis;
 };
 
-const ONLINE_DEAD_SEC = 60;
+const ONLINE_DEAD_SEC = 180;
 
 const API_BASE =
   (window as any).__API_BASE__ ||

@@ -29,7 +29,7 @@ async function postJSON(path: string, body: any) {
   return res.json();
 }
 
-const ONLINE_DEAD_SEC = 60;
+const ONLINE_DEAD_SEC = 180;
 
 export function PumpFaceplate({
   pump,
