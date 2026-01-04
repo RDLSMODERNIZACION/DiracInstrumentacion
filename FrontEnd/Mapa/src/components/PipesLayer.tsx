@@ -7,20 +7,29 @@ import { fetchPipesBBox, fetchPipesAll } from "../services/mapasagua";
 
 /**
  * Resultado de simulación (backend /mapa/sim/run)
+ * - model puede ser "SIMPLE" o "LINEAR"
+ * - nodes puede traer head_m/pressure_bar null y reached=false
+ * - pipes puede traer dH_m null si está bloqueada/no alcanzada
  */
 export type SimRunResponse = {
-  model: "LINEAR" | string;
-  nodes?: Record<string, { head_m: number; pressure_bar: number; blocked?: boolean; kind?: string }>;
+  model: "SIMPLE" | "LINEAR" | string;
+  nodes?: Record<
+    string,
+    { head_m: number | null; pressure_bar: number | null; blocked?: boolean; kind?: string; reached?: boolean }
+  >;
   pipes?: Record<
     string,
     {
       q_lps: number;
       abs_q_lps: number;
       dir: 1 | -1;
-      dH_m?: number;
+      dH_m?: number | null;
       blocked?: boolean;
       u?: string;
       v?: string;
+      R?: number;
+      length_m?: number;
+      diam_mm?: number;
     }
   >;
   meta?: Record<string, any>;
@@ -200,13 +209,12 @@ export default function PipesLayer({
   // ARROWS (SIM)
   // =========
   React.useEffect(() => {
-    // siempre limpiar la capa anterior (si existe)
+    // limpiar capa anterior
     if (arrowLayerRef.current) {
       arrowLayerRef.current.remove();
       arrowLayerRef.current = null;
     }
 
-    // condiciones para dibujar flechas
     if (!showArrows) return;
     if (!visible) return;
     if (!sim?.pipes) return;
@@ -233,22 +241,6 @@ export default function PipesLayer({
     }
 
     function bearingDeg(a: [number, number], b: [number, number]) {
-      const toRad = (x: number) => (x * Math.PI) / 180;
-      const toDeg = (x: number) => (x * 180) / Math.PI;
-      const lon1 = toRad(a[0]);
-      const lat1 = toRad(a[1]);
-      const lon2 = toRad(b[0]);
-      const lat2 = toRad(b[1]);
-      const dLon = lon2 - lon1;
-      const y = Math.sin(dLon) * Math.cos(lat2);
-      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * math.cos(lat2) * Math.cos(dLon);
-      let brng = toDeg(Math.atan2(y, x));
-      brng = (brng + 360) % 360;
-      return brng;
-    }
-
-    // OJO: typo arriba: "math.cos" no existe -> lo corregimos aquí:
-    function bearingDegFixed(a: [number, number], b: [number, number]) {
       const toRad = (x: number) => (x * Math.PI) / 180;
       const toDeg = (x: number) => (x * 180) / Math.PI;
       const lon1 = toRad(a[0]);
@@ -291,7 +283,7 @@ export default function PipesLayer({
       const p2 = coordsDir[Math.min(coordsDir.length - 1, mi)];
       if (!p1 || !p2) continue;
 
-      const brng = bearingDegFixed([p1[0], p1[1]], [p2[0], p2[1]]);
+      const brng = bearingDeg([p1[0], p1[1]], [p2[0], p2[1]]);
 
       const m = L.marker([mid[1], mid[0]], {
         icon: arrowIcon,
@@ -394,9 +386,9 @@ export default function PipesLayer({
 
     if (ps) {
       const q = ps.q_lps ?? 0;
-      const dh = ps.dH_m ?? 0;
+      const dh = ps.dH_m ?? null;
       lines.push(`<div><b>Q</b>: ${fmt(q)} L/s (${ps.dir === 1 ? "from→to" : "to→from"})</div>`);
-      lines.push(`<div><b>ΔH</b>: ${fmt(dh)} m</div>`);
+      lines.push(`<div><b>ΔH</b>: ${dh == null ? "N/D" : fmt(dh)} m</div>`);
       if (ps.blocked) lines.push(`<div style="color:#991b1b;font-weight:600">BLOQUEADO</div>`);
     } else if (sim && id) {
       lines.push(`<div style="opacity:.7">Sin datos de simulación</div>`);

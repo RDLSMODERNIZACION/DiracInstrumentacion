@@ -23,7 +23,7 @@ import PipesLayer, { type SimRunResponse } from "./PipesLayer";
 import PipeEditDrawer from "./PipeEditDrawer";
 import PipeGeometryEditor from "./PipeGeometryEditor";
 
-// ✅ Connect drawer (nuevo)
+// ✅ Connect drawer
 import PipeConnectDrawer from "./PipeConnectDrawer";
 
 // ✅ Create / Delete
@@ -120,7 +120,7 @@ function pressureLabelForBarrio(b: any): { label: string; tone: "good" | "mid" |
 }
 
 /* ---------------------------
-   Fit helpers (sin cambios)
+   Fit helpers
 --------------------------- */
 function FitToRoute({
   dashedEdgeIdsExtra,
@@ -253,23 +253,21 @@ function PipeDrawController({
 
 /* ===========================
    Helpers API (nodes lite)
-   - Esto asume que tenés un endpoint /mapa/nodes (o lo vas a agregar).
-   - Si no existe aún, igual la UI no crashea: muestra lista vacía.
+   - backend /mapa/nodes devuelve { items: [{id, kind, label, ...}] }
 =========================== */
-type NodeLite = { id: string; kind?: string; name?: string };
+type NodeLite = { id: string; kind?: string; label?: string };
+
 async function fetchNodesLiteSafe(): Promise<NodeLite[]> {
   try {
     const res = await fetch(`/mapa/nodes`, { headers: { "Content-Type": "application/json" } });
     if (!res.ok) return [];
     const j = await res.json();
-    // aceptamos formatos:
-    // - {items:[...]} o array directo
     const items = Array.isArray(j) ? j : Array.isArray(j?.items) ? j.items : [];
     return items
       .map((x: any) => ({
         id: String(x?.id),
         kind: x?.kind ? String(x.kind) : undefined,
-        name: x?.name ? String(x.name) : undefined,
+        label: x?.label ? String(x.label) : undefined,
       }))
       .filter((x: any) => !!x.id);
   } catch {
@@ -334,7 +332,6 @@ export function MapView(props: {
     forceShowAssetIds,
   } = props;
 
-  const showAssets = zoom >= 14.5 || (mode === "ZONE" && selectedZoneId);
   const hasRoute = (dashedEdgeIdsExtra?.size ?? 0) > 0;
   const hasBarrioImpact = (highlightedBarrioIdsExtra?.size ?? 0) > 0;
 
@@ -363,18 +360,18 @@ export function MapView(props: {
   const [editingPipeId, setEditingPipeId] = React.useState<string | null>(null);
   const [editingGeomOpen, setEditingGeomOpen] = React.useState(false);
 
-  // ✅ creación por dibujo
+  // creación por dibujo
   const [creatingPipe, setCreatingPipe] = React.useState(false);
 
-  // ✅ forzar recarga de pipes al crear/borrar/editar
+  // forzar recarga de pipes
   const [pipesReloadKey, setPipesReloadKey] = React.useState(0);
 
-  // ✅ SIM
+  // SIM
   const [sim, setSim] = React.useState<SimRunResponse | null>(null);
   const [simBusy, setSimBusy] = React.useState(false);
   const [simErr, setSimErr] = React.useState<string | null>(null);
 
-  // ✅ Connect drawer
+  // Connect drawer
   const [connectOpen, setConnectOpen] = React.useState(false);
   const [nodesLite, setNodesLite] = React.useState<NodeLite[]>([]);
   const [nodesBusy, setNodesBusy] = React.useState(false);
@@ -408,6 +405,7 @@ export function MapView(props: {
       const r = await runSim({
         default_diam_mm: 75,
         r_scale: 1,
+        // estas opciones en SIMPLE no afectan, pero las dejamos para compatibilidad
         ignore_unconnected: true,
         closed_valve_blocks_node: true,
         min_pressure_m: 0,
@@ -568,7 +566,7 @@ export function MapView(props: {
             />
           )}
 
-          {/* Popup lindo */}
+          {/* Popup */}
           {selectedPipeId && selectedPipePos && !editingPipeId && !editingGeomOpen && !connectOpen && (
             <Popup position={selectedPipePos} className="pipe-popup" closeButton={true} autoClose={false}>
               <div className="pipePopup">
@@ -603,7 +601,7 @@ export function MapView(props: {
                     Recorrido
                   </button>
 
-                  {/* ✅ NUEVO: Conectar manual */}
+                  {/* Conectar manual */}
                   <button
                     className="pipePopup__btn"
                     onClick={async (e) => {
@@ -656,11 +654,15 @@ export function MapView(props: {
                 {sim?.pipes?.[selectedPipeId] && (
                   <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
                     <div>
-                      <b>Q</b>: {Number(sim.pipes[selectedPipeId].q_lps ?? 0).toFixed(2)} L/s{" "}
+                      <b>Q</b>: {Number(sim.pipes[selectedPipeId].q_lps ?? 0).toFixed(3)} L/s{" "}
                       ({sim.pipes[selectedPipeId].dir === 1 ? "from→to" : "to→from"})
                     </div>
                     <div>
-                      <b>ΔH</b>: {Number(sim.pipes[selectedPipeId].dH_m ?? 0).toFixed(2)} m
+                      <b>ΔH</b>:{" "}
+                      {sim.pipes[selectedPipeId].dH_m == null
+                        ? "N/D"
+                        : Number(sim.pipes[selectedPipeId].dH_m).toFixed(2)}{" "}
+                      m
                     </div>
                     {sim.pipes[selectedPipeId].blocked && (
                       <div style={{ fontWeight: 800, color: "#b91c1c" }}>BLOQUEADO</div>
@@ -678,7 +680,6 @@ export function MapView(props: {
               const c = centroid(z.polygon);
 
               const icon = (() => {
-                if (!shrinkOthers) return locationMarkerIcon(z.name, sel, 1, 1);
                 if (sel) return locationMarkerIcon(z.name, true, 1, 1);
                 return locationMarkerIcon(z.name, false, 0.78, 0.55);
               })();
@@ -739,11 +740,7 @@ export function MapView(props: {
           <FitToRoute enabled={hasRoute} dashedEdgeIdsExtra={dashedEdgeIdsExtra} assetsById={assetsById} />
 
           {!hasRoute && (
-            <FitToBarrios
-              enabled={hasBarrioImpact}
-              barrioIds={highlightedBarrioIdsExtra}
-              includePoint={activeValvePos ?? null}
-            />
+            <FitToBarrios enabled={hasBarrioImpact} barrioIds={highlightedBarrioIdsExtra} includePoint={activeValvePos ?? null} />
           )}
 
           {!hasRoute && !hasBarrioImpact && <FlyTo target={focusTarget} />}
@@ -758,7 +755,7 @@ export function MapView(props: {
         </MapContainer>
       </div>
 
-      {/* ✅ Drawer conectar pipe */}
+      {/* Drawer conectar pipe */}
       <PipeConnectDrawer
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
@@ -768,7 +765,6 @@ export function MapView(props: {
         initialTo={connHint.to_node}
         onConnected={() => {
           setPipesReloadKey((k) => k + 1);
-          // si ya había sim, la volvemos a correr para ver cambios de dirección/caudal
           if (sim) runSimulation();
         }}
       />

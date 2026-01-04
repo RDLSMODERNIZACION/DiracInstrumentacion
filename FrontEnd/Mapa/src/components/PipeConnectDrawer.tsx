@@ -2,7 +2,7 @@
 import React from "react";
 import { connectPipe } from "../features/mapa/services/simApi";
 
-type NodeLite = { id: string; kind?: string; name?: string };
+type NodeLite = { id: string; kind?: string; label?: string };
 
 export default function PipeConnectDrawer({
   open,
@@ -30,7 +30,7 @@ export default function PipeConnectDrawer({
   // ✅ useMemo SIEMPRE se ejecuta (antes del return)
   const sorted = React.useMemo(() => {
     const arr = Array.isArray(nodes) ? [...nodes] : [];
-    arr.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    arr.sort((a, b) => (a.label || a.id).localeCompare(b.label || b.id));
     return arr;
   }, [nodes]);
 
@@ -94,7 +94,7 @@ export default function PipeConnectDrawer({
             <option value="">— elegir —</option>
             {sorted.map((n) => (
               <option key={n.id} value={n.id}>
-                {(n.name ? `${n.name} ` : "")}[{n.kind ?? "JUNCTION"}] {n.id.slice(0, 8)}
+                {(n.label ? `${n.label} ` : "")}[{n.kind ?? "JUNCTION"}] {n.id.slice(0, 8)}
               </option>
             ))}
           </select>
@@ -110,7 +110,7 @@ export default function PipeConnectDrawer({
             <option value="">— elegir —</option>
             {sorted.map((n) => (
               <option key={n.id} value={n.id}>
-                {(n.name ? `${n.name} ` : "")}[{n.kind ?? "JUNCTION"}] {n.id.slice(0, 8)}
+                {(n.label ? `${n.label} ` : "")}[{n.kind ?? "JUNCTION"}] {n.id.slice(0, 8)}
               </option>
             ))}
           </select>

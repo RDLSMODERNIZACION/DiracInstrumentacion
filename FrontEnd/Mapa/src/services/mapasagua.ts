@@ -25,6 +25,35 @@ export type GeoJSONGeometry =
   | { type: string; coordinates?: any[] };
 
 /* =========================
+   NODES (manual)
+========================= */
+export type NodeKind = "JUNCTION" | "VALVE" | "SOURCE" | "PUMP" | "DEMAND";
+
+export type NodeDTO = {
+  id: string;
+  kind: NodeKind | string;
+  elev_m?: number | null;
+  label?: string; // viene de props->>'label' desde backend
+  props?: Record<string, any>;
+  lng?: number;
+  lat?: number;
+  created_at?: string;
+};
+
+export type NodesListResponse = { items: NodeDTO[] };
+
+export type NodeCreateInput = {
+  lat: number;
+  lng: number;
+  kind?: NodeKind;
+  label?: string;
+  elev_m?: number | null;
+  props?: Record<string, any>;
+};
+
+export type NodeUpdateInput = Partial<NodeCreateInput>;
+
+/* =========================
    Fetch helper (sin logs)
 ========================= */
 async function fetchJSON(url: string, init?: RequestInit) {
@@ -93,7 +122,6 @@ export async function patchPipe(id: string, payload: Record<string, any>) {
 
 /* =========================
    DELETE PIPE (borrado REAL)
-   ✅ Requiere backend: DELETE /mapasagua/pipes/{id}
 ========================= */
 export async function deletePipe(id: string) {
   const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
@@ -106,7 +134,6 @@ export async function deletePipe(id: string) {
 export async function patchPipeGeometry(id: string, geometry: GeoJSONGeometry) {
   const url = `${API_BASE}/mapa/mapasagua/pipes/${id}/geometry`;
 
-  // backend acepta geometry directo (no wrapper)
   return fetchJSON(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -136,4 +163,38 @@ export async function createPipe(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+/* =========================
+   NODES API (manual)
+   Backend: /mapa/nodes
+========================= */
+export async function fetchNodes(limit = 2000): Promise<NodeDTO[]> {
+  const url = `${API_BASE}/mapa/nodes?limit=${encodeURIComponent(String(limit))}`;
+  const json = (await fetchJSON(url)) as NodesListResponse | NodeDTO[];
+  const items = Array.isArray(json) ? (json as NodeDTO[]) : (json as NodesListResponse).items ?? [];
+  return items;
+}
+
+export async function createNode(input: NodeCreateInput): Promise<NodeDTO> {
+  const url = `${API_BASE}/mapa/nodes`;
+  return fetchJSON(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateNode(nodeId: string, patch: NodeUpdateInput): Promise<NodeDTO> {
+  const url = `${API_BASE}/mapa/nodes/${nodeId}`;
+  return fetchJSON(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteNode(nodeId: string): Promise<{ ok: boolean; node_id: string }> {
+  const url = `${API_BASE}/mapa/nodes/${nodeId}`;
+  return fetchJSON(url, { method: "DELETE" });
 }
