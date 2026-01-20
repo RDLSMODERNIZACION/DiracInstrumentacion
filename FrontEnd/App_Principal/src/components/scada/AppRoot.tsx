@@ -21,9 +21,7 @@ function deriveRoleFromAccess(locs: MeLocation[]): User["role"] {
 
 const COMPANY_KEY = "dirac.company_id";
 
-// tipos mínimos para leer /dirac/me si está disponible
-type MeCompany = { company_id?: number; id?: number; company_name?: string; name?: string };
-type MeResponse = { companies?: MeCompany[]; primary_company_id?: number | null };
+type CompanyRow = { id: number; name: string };
 
 export default function AppRoot() {
   const { isAuthenticated, email, logout } = useAuth();
@@ -52,66 +50,59 @@ export default function AppRoot() {
       }
 
       setLoadingUser(true);
+
       try {
-        const res = await api("/dirac/me/locations");
+        // 1) Traer locations permitidas (una sola vez)
+        const res = await api("/dirac/me/locations", { method: "GET" });
         if (!res.ok) throw new Error(`me/locations -> ${res.status}`);
+
         const locs: MeLocation[] = await res.json();
 
+        // 2) CompanyIds disponibles desde locs
         const availableCompanyIds = Array.from(
           new Set(
             locs
               .map((l) => (l.company_id == null ? null : Number(l.company_id)))
-              .filter((x): x is number => x !== null)
+              .filter((x): x is number => x !== null && !Number.isNaN(x))
           )
         );
 
+        // 3) Elegir company (persistido si existe)
         const persisted = sessionStorage.getItem(COMPANY_KEY);
         let chosenCompanyId: number | null = null;
+
         if (persisted && availableCompanyIds.includes(Number(persisted))) {
           chosenCompanyId = Number(persisted);
         } else if (availableCompanyIds.length) {
           chosenCompanyId = availableCompanyIds[0];
         }
 
+        // 4) Filtrar locs visibles por company seleccionada
         const visibleLocs =
-          chosenCompanyId === null ? locs : locs.filter((l) => Number(l.company_id) === chosenCompanyId);
+          chosenCompanyId === null
+            ? locs
+            : locs.filter((l) => Number(l.company_id) === chosenCompanyId);
 
         const role = deriveRoleFromAccess(visibleLocs);
         const allowed = new Set<number>(visibleLocs.map((l) => Number(l.location_id)));
 
-        // === RESOLVER NOMBRE REAL DE EMPRESA ===
+        // 5) Resolver nombre de empresa sin volver a llamar /me/locations (evita duplicados)
         let companyName: string | undefined = undefined;
 
         if (chosenCompanyId !== null) {
-          // 1) intentar /dirac/me (companies[].company_name | name)
+          // Intento: /dirac/admin/companies (si el usuario tiene permiso)
           try {
-            const meRes = await api("/dirac/me/locations");
-            if (meRes.ok) {
-              const me: MeResponse = await meRes.json();
-              const found = (me.companies || []).find(
-                (c) => Number(c.company_id ?? c.id) === Number(chosenCompanyId)
-              );
-              companyName = found?.company_name ?? found?.name;
+            const list = await api("/dirac/admin/companies", { method: "GET" });
+            if (list.ok) {
+              const rows: CompanyRow[] = await list.json();
+              const found = rows.find((r) => Number(r.id) === Number(chosenCompanyId));
+              companyName = found?.name;
             }
           } catch {
             // ignorar
           }
 
-          // 2) fallback: /dirac/admin/companies (si existe/permite)
-          if (!companyName) {
-            try {
-              const list = await api("/dirac/admin/companies");
-              if (list.ok) {
-                const rows: any[] = await list.json();
-                const found = rows.find((r) => Number(r.id) === Number(chosenCompanyId));
-                companyName = found?.name;
-              }
-            } catch {
-              // ignorar
-            }
-          }
-
-          // 3) último recurso: “Empresa #id”
+          // Último recurso: Empresa #id
           if (!companyName) companyName = `Empresa #${chosenCompanyId}`;
         }
 
@@ -130,12 +121,13 @@ export default function AppRoot() {
           setUser(u);
           setCompanyId(chosenCompanyId);
           setAllowedLocationIds(allowed);
+
           if (chosenCompanyId !== null) sessionStorage.setItem(COMPANY_KEY, String(chosenCompanyId));
           else sessionStorage.removeItem(COMPANY_KEY);
         }
       } catch (err) {
         console.error("Auth inválida:", err);
-        // mantener tu comportamiento actual (fallback-cerrado)
+        // comportamiento actual: fallback-cerrado
         logout();
         if (!cancelled) {
           setUser(null);
@@ -158,11 +150,7 @@ export default function AppRoot() {
   }
 
   if (loadingUser || !user) {
-    return (
-      <div className="min-h-screen grid place-items-center text-slate-600">
-        Cargando…
-      </div>
-    );
+    return <div className="min-h-screen grid place-items-center text-slate-600">Cargando…</div>;
   }
 
   return (
