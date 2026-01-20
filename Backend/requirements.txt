@@ -5,5 +5,3 @@ psycopg_pool==3.2.7
 email-validator>=2.1.0.post1
 passlib[argon2]==1.7.4
 requests==2.32.3
-gunicorn==21.2.0
-
