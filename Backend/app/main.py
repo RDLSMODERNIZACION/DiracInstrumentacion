@@ -75,11 +75,24 @@ app = FastAPI(
 
 
 # ===== Middlewares =====
+
+# ✅ CORS estable: origins explícitos (incluye localhost)
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://www.diracserviciosenergia.com",
+    "https://diracserviciosenergia.com",
+    # si tenés otros frontends:
+    # "https://tu-frontend.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Con Authorization header NO hace falta allow_credentials=True si no usás cookies.
+    # Si más adelante usás cookies/sessions, ahí sí ponelo True (y NO uses "*").
     allow_credentials=False,
     expose_headers=["*"],
     max_age=3600,
