@@ -2,9 +2,10 @@
 import os
 import logging
 from fastapi import FastAPI, Response
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from psycopg_pool import PoolTimeout, TooManyRequests
+from psycopg import OperationalError
 
 from app.db import get_conn, close_pool
 
@@ -73,32 +74,12 @@ app = FastAPI(
     openapi_url="/openapi.json" if enable_docs else None,
 )
 
-
-# ===== Middlewares =====
-
-# ✅ CORS estable: origins explícitos (incluye localhost)
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://www.diracserviciosenergia.com",
-    "https://diracserviciosenergia.com",
-    # si tenés otros frontends:
-    # "https://tu-frontend.vercel.app",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # Con Authorization header NO hace falta allow_credentials=True si no usás cookies.
-    # Si más adelante usás cookies/sessions, ahí sí ponelo True (y NO uses "*").
-    allow_credentials=False,
-    expose_headers=["*"],
-    max_age=3600,
-)
-
+# ✅ Solo GZip (SIN CORS)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+# ===== Flags de diagnóstico =====
+DEBUG_BYPASS = os.getenv("DEBUG_BYPASS", "0") == "1"
+DISABLE_TELEGRAM_REPORTER = os.getenv("DISABLE_TELEGRAM_REPORTER", "1") == "1"
 
 
 # ===== Health =====
@@ -111,7 +92,7 @@ def root():
         "docs": "/docs" if enable_docs else None,
         "health": "/health",
         "health_db": "/health/db",
-        "telegram_test": "/telegram/test",
+        "debug_bypass": DEBUG_BYPASS,
     }
 
 
@@ -127,14 +108,35 @@ def health():
 
 @app.get("/health/db", tags=["health"])
 def health_db():
+    """
+    - up: conecta y ejecuta SELECT 1
+    - busy: pool saturado (DB vive, pero no hay conexión libre)
+    - down: fallo real de conexión/auth/ssl/etc
+    """
     try:
-        with get_conn() as conn, conn.cursor() as cur:
+        with get_conn(timeout=2) as conn, conn.cursor() as cur:
             cur.execute("select 1")
             cur.fetchone()
         return {"ok": True, "db": "up"}
-    except Exception:
+    except (PoolTimeout, TooManyRequests):
+        return JSONResponse({"ok": False, "db": "busy"}, status_code=503)
+    except (OperationalError, Exception):
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
+
+
+# ===== DEBUG: endpoint sin auth para probar DB rápidamente =====
+@app.get("/debug/db/ping", include_in_schema=False)
+def debug_db_ping():
+    if not DEBUG_BYPASS:
+        return JSONResponse({"ok": False, "detail": "DEBUG_BYPASS=0"}, status_code=403)
+    try:
+        with get_conn(timeout=2) as conn, conn.cursor() as cur:
+            cur.execute("select 1")
+            return {"ok": True, "ping": 1}
+    except Exception as e:
+        logging.exception("debug db ping failed")
+        return JSONResponse({"ok": False, "detail": f"{type(e).__name__}: {e}"}, status_code=500)
 
 
 # ===== Rutas (operación base) =====
@@ -169,7 +171,7 @@ app.include_router(admin_manifolds_router)
 # ===== Mapa =====
 app.include_router(mapasagua_router, prefix="/mapa", tags=["mapa"])
 app.include_router(mapasagua_sim_router, prefix="/mapa", tags=["mapa"])
-app.include_router(mapa_nodes_router, prefix="/mapa", tags=["mapa"])  # ✅ NUEVO
+app.include_router(mapa_nodes_router, prefix="/mapa", tags=["mapa"])
 
 # ===== Telegram test =====
 app.include_router(telegram_test_router)
@@ -178,10 +180,15 @@ app.include_router(telegram_test_router)
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():
-    start_telegram_reporter()
+    # Para diagnóstico: no metas carga extra
+    if not DISABLE_TELEGRAM_REPORTER:
+        start_telegram_reporter()
 
 
 @app.on_event("shutdown")
 def _shutdown():
-    stop_telegram_reporter()
+    try:
+        stop_telegram_reporter()
+    except Exception:
+        pass
     close_pool()
