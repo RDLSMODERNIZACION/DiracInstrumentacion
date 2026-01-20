@@ -33,7 +33,6 @@ const toMs = (x: number | string) => {
   if (Number.isFinite(n) && n > 10_000) return n;
   return new Date(x).getTime();
 };
-
 const startOfMin  = (ms: number) => { const d = new Date(ms); d.setSeconds(0,0); return d.getTime(); };
 const startOfHour = (ms: number) => { const d = new Date(ms); d.setMinutes(0,0,0); return d.getTime(); };
 const addMinutes  = (ms: number, m: number) => ms + m * 60_000;
@@ -56,7 +55,10 @@ const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
 };
 
 /**
- * Arma perfil horario escalonado por minuto en 24h
+ * Arma perfil horario escalonado por minuto en 24h:
+ * - dilateMin: ensancha ±N minutos los ON para que no queden “palitos”
+ * - bridgeMin: rellena gaps cortos entre ON consecutivos (evita cortes por jitter)
+ * Devuelve serie numérica (ms) para sincronizar por valor con el chart de tanques.
  */
 function buildMinuteProfile24h(
   pumps: Agg,
@@ -79,6 +81,7 @@ function buildMinuteProfile24h(
   const end   = startOfMin(last);
   const start = addHours(end, -24);
 
+  // minuto → max ON en ese minuto
   const perMin = new Map<number, number>();
   for (const p of pairs) {
     if (p.ms < start || p.ms > end) continue;
@@ -87,7 +90,7 @@ function buildMinuteProfile24h(
     if (p.on > cur) perMin.set(m, p.on);
   }
 
-  // Dilatación
+  // 1) DILATACIÓN
   if (dilateMin > 0) {
     const activeMinutes = Array.from(perMin.keys()).filter(k => (perMin.get(k) ?? 0) > 0);
     for (const m of activeMinutes) {
@@ -99,12 +102,9 @@ function buildMinuteProfile24h(
     }
   }
 
-  // Puente de gaps cortos
+  // 2) PUENTE de gaps cortos
   if (bridgeMin > 0) {
-    const minutes = Array.from(
-      { length: ((end - start) / 60_000) + 1 },
-      (_, i) => addMinutes(start, i)
-    );
+    const minutes = Array.from({ length: ((end - start) / 60_000) + 1 }, (_, i) => addMinutes(start, i));
     let i = 0;
     while (i < minutes.length) {
       if ((perMin.get(minutes[i]) ?? 0) > 0) { i++; continue; }
@@ -121,12 +121,18 @@ function buildMinuteProfile24h(
     }
   }
 
+  // Serie final (step)
   let series: Array<{ x: number; on: number; tLabel: string }> = [];
   for (let t = start; t <= end; t = addMinutes(t, 1)) {
     const on = perMin.get(t) ?? 0;
     series.push({ x: t, on, tLabel: fmtHM(t) });
   }
+  if (series.length === 1) {
+    const only = series[0];
+    series = [{ x: only.x - 60_000, on: 0, tLabel: fmtHM(only.x - 60_000) }, only];
+  }
 
+  // Ticks de X a cada hora
   const ticks: number[] = [];
   for (let t = startOfHour(start); t <= end; t = addHours(t, 1)) ticks.push(t);
 
@@ -142,6 +148,7 @@ export default function PumpsOnChart({
   max,
   syncId,
 }: Props) {
+  // Igual que eficiencia: línea escalonada + grid punteada + ejes simples
   const { series, ticks, yDataMax } = useMemo(
     () => buildMinuteProfile24h(pumpsTs ?? {}, { dilateMin: 2, bridgeMin: 1 }),
     [pumpsTs]
@@ -149,13 +156,10 @@ export default function PumpsOnChart({
 
   const yMax = Math.max(1, yDataMax, max ?? 0);
 
-  // Estética
+  // Estética igual a eficiencia
   const GRID_COLOR = "rgba(0,0,0,.18)";
   const AXIS_COLOR = "rgba(0,0,0,.20)";
-  const TICK_COLOR = "#475569";
-
-  // 👉 COLOR BOMBAS (no agua)
-  const PUMP_COLOR = "#c2410c"; // naranja oscuro / cobre (bombas, energía)
+  const TICK_COLOR = "#475569"; // slate-600
 
   return (
     <Card className="rounded-2xl">
@@ -169,10 +173,12 @@ export default function PumpsOnChart({
             data={series}
             syncId={syncId}
             syncMethod="value"
-            margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+            margin={{ top: 8, right: 16, left: 8, bottom: 0 }} // = TankLevelChart
           >
+            {/* Grid punteada como eficiencia */}
             <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
 
+            {/* Eje X con HH:mm por hora */}
             <XAxis
               dataKey="x"
               type="number"
@@ -185,7 +191,7 @@ export default function PumpsOnChart({
               tick={{ fontSize: 11, fill: TICK_COLOR }}
               minTickGap={24}
             />
-
+            {/* Eje Y alineado con Tank (width=40) */}
             <YAxis
               domain={[0, yMax]}
               allowDecimals={false}
@@ -195,6 +201,7 @@ export default function PumpsOnChart({
               tick={{ fontSize: 11, fill: TICK_COLOR }}
             />
 
+            {/* Tooltip minimal en el mismo formato */}
             <Tooltip
               cursor={{ strokeDasharray: "3 3" }}
               content={({ active, payload }) => {
@@ -208,16 +215,15 @@ export default function PumpsOnChart({
                 );
               }}
             />
-
             <Legend />
 
-            {/* Línea escalonada – BOMBAS */}
+            {/* Línea escalonada negra (como eficiencia) */}
             <Line
               type="stepAfter"
               dataKey="on"
               name="Bombas ON"
-              stroke={PUMP_COLOR}
-              strokeWidth={2.5}
+              stroke="#0b0f19"     // negro suave (mejor anti-alias)
+              strokeWidth={2}
               dot={false}
               isAnimationActive={false}
               activeDot={{ r: 2 }}
