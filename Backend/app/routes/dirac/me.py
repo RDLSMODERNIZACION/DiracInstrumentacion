@@ -13,21 +13,17 @@ router = APIRouter(prefix="/dirac", tags=["me"])
 @router.get("/me/locations")
 def my_locations(user=Depends(require_user)):
     try:
-        # timeout corto: si no hay conexión libre, no cuelga el login
         with get_conn(timeout=2) as conn, conn.cursor(row_factory=dict_row) as cur:
-            # evita que una view lenta te coma el pool
-            cur.execute("SET LOCAL statement_timeout = 5000")
             cur.execute(
                 "SELECT location_id, location_name, access, company_id "
                 "FROM v_user_locations WHERE user_id=%s ORDER BY location_name",
                 (user["user_id"],)
             )
             return cur.fetchall() or []
-
     except (PoolTimeout, TooManyRequests) as e:
         log.warning("DB busy /dirac/me/locations user_id=%s err=%s", user.get("user_id"), e)
         raise HTTPException(status_code=503, detail="DB busy, try again")
-
     except Exception as e:
         log.exception("ERROR /dirac/me/locations user=%s", user)
-        raise HTTPException(status_code=500, detail=str(e))
+        # 👇 clave para debug: así PowerShell te muestra la causa
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
