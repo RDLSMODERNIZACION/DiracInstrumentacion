@@ -1,37 +1,47 @@
+# app/db.py
 import os
+import logging
 from psycopg_pool import ConnectionPool
 
-# Usar SIEMPRE el pooler de Supabase (puerto 6543) con SSL, ej:
-# postgresql://USER:PASS@aws-1-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require
+log = logging.getLogger(__name__)
+
 DSN = os.environ.get("DATABASE_URL")
 if not DSN:
-    raise RuntimeError(
-        "Falta la env DATABASE_URL (ej: postgresql://user:pass@aws-1-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require)"
-    )
+    raise RuntimeError("Falta la env DATABASE_URL")
 
-# Pool simple y estable
+# ✅ Ajustables por ENV (Render)
+PG_POOL_MIN_SIZE = int(os.getenv("PG_POOL_MIN_SIZE", "1"))
+PG_POOL_MAX_SIZE = int(os.getenv("PG_POOL_MAX_SIZE", "10"))
+PG_POOL_TIMEOUT = float(os.getenv("PG_POOL_TIMEOUT", "5"))          # antes 30s -> MUY alto
+PG_POOL_MAX_WAITING = int(os.getenv("PG_POOL_MAX_WAITING", "50"))   # cola máxima de espera
+
+# connect_timeout (socket) separado del timeout de pool
+DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+
 pool = ConnectionPool(
     conninfo=DSN,
-    min_size=1,
-    max_size=8,
-    timeout=30,  # segundos para conseguir una conexión del pool
+    min_size=PG_POOL_MIN_SIZE,
+    max_size=PG_POOL_MAX_SIZE,
+    timeout=PG_POOL_TIMEOUT,         # tiempo máximo esperando una conexión libre del pool
+    max_waiting=PG_POOL_MAX_WAITING, # evita backlog infinito
     kwargs={
+        # Si el DSN ya trae sslmode=require, no molesta repetirlo.
         "sslmode": "require",
-        "connect_timeout": 5,      # segundos para abrir el socket a la DB
-        "prepare_threshold": None, # <- desactiva prepared statements del lado servidor
+        "connect_timeout": DB_CONNECT_TIMEOUT,
+        # ✅ importante con poolers tipo PgBouncer
+        "prepare_threshold": None,
     },
 )
 
-
-def get_conn():
-    """Uso: with get_conn() as conn: ..."""
-    # pool.connection() devuelve un context manager:
-    # with get_conn() as conn: ...  -> devuelve la conexión al pool al salir
-    return pool.connection()
-
+def get_conn(timeout: float | None = None):
+    """
+    Uso: with get_conn() as conn: ...
+    Si querés, podés pasar timeout puntual (en segundos) para esa operación.
+    """
+    return pool.connection(timeout=timeout or PG_POOL_TIMEOUT)
 
 def close_pool():
     try:
         pool.close()
     except Exception:
-        pass
+        log.exception("Error cerrando pool")
