@@ -18,13 +18,14 @@ from app.services.telegram_test import router as telegram_test_router
 # ===== Rutas base (operación / visualización) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
-from app.routes.ingest import router as ingest_router
+# 🔴 INGEST TEMPORALMENTE DESHABILITADO
+# from app.routes.ingest import router as ingest_router
 from app.routes.arduino_controler import router as arduino_router
 
-# Infraestructura (lectura)
+# ===== Infraestructura (lectura) =====
 from app.routes.infraestructura import router as infraestructura_router
 
-# Infraestructura (edición)
+# ===== Infraestructura (edición) =====
 from app.routes.infra_edit.edit import router as infra_edit_router
 
 # ===== PLC =====
@@ -53,7 +54,6 @@ from app.routes.mapa.mapasagua import router as mapasagua_router
 from app.routes.mapa.simulacion import router as mapasagua_sim_router
 from app.routes.mapa.nodes import router as mapa_nodes_router  # ✅ NUEVO
 
-
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -62,7 +62,6 @@ logging.basicConfig(
 )
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
-
 
 # ===== App =====
 enable_docs = os.getenv("ENABLE_DOCS", "1") == "1"
@@ -81,7 +80,6 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 DEBUG_BYPASS = os.getenv("DEBUG_BYPASS", "0") == "1"
 DISABLE_TELEGRAM_REPORTER = os.getenv("DISABLE_TELEGRAM_REPORTER", "1") == "1"
 
-
 # ===== Health =====
 @app.get("/", tags=["health"])
 def root():
@@ -95,16 +93,13 @@ def root():
         "debug_bypass": DEBUG_BYPASS,
     }
 
-
 @app.head("/", include_in_schema=False)
 def head_root():
     return Response(status_code=200)
 
-
 @app.get("/health", tags=["health"])
 def health():
     return {"ok": True}
-
 
 @app.get("/health/db", tags=["health"])
 def health_db():
@@ -124,8 +119,7 @@ def health_db():
         logging.exception("DB health check failed")
         return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
-
-# ===== DEBUG: endpoint sin auth para probar DB rápidamente =====
+# ===== DEBUG DB =====
 @app.get("/debug/db/ping", include_in_schema=False)
 def debug_db_ping():
     if not DEBUG_BYPASS:
@@ -136,13 +130,16 @@ def debug_db_ping():
             return {"ok": True, "ping": 1}
     except Exception as e:
         logging.exception("debug db ping failed")
-        return JSONResponse({"ok": False, "detail": f"{type(e).__name__}: {e}"}, status_code=500)
-
+        return JSONResponse(
+            {"ok": False, "detail": f"{type(e).__name__}: {e}"},
+            status_code=500,
+        )
 
 # ===== Rutas (operación base) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
-app.include_router(ingest_router)
+# 🔴 INGEST DESHABILITADO
+# app.include_router(ingest_router)
 app.include_router(arduino_router)
 
 # ===== Infraestructura =====
@@ -176,14 +173,11 @@ app.include_router(mapa_nodes_router, prefix="/mapa", tags=["mapa"])
 # ===== Telegram test =====
 app.include_router(telegram_test_router)
 
-
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():
-    # Para diagnóstico: no metas carga extra
     if not DISABLE_TELEGRAM_REPORTER:
         start_telegram_reporter()
-
 
 @app.on_event("shutdown")
 def _shutdown():
