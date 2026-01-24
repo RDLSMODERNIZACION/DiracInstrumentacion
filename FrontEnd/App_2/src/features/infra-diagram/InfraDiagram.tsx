@@ -28,6 +28,22 @@ type LocationGroup = {
   location_id: number | null;
 };
 
+// ✅ Extiendo UIEdge localmente (no backend) para puertos visuales
+type UIEdgeWithPorts = UIEdge & {
+  a_port?: string | null;
+  b_port?: string | null;
+};
+
+type PortSide = "in" | "out";
+type PortHit = { nodeId: string; side: PortSide; portId: string; x: number; y: number };
+
+function spreadOffsets(count: number, span: number) {
+  if (count <= 1) return [0];
+  const step = span / (count - 1);
+  const start = -span / 2;
+  return Array.from({ length: count }, (_, i) => start + i * step);
+}
+
 export default function InfraDiagram() {
   // altura de la barra superior (en px)
   const TOPBAR_H = 44;
@@ -39,7 +55,7 @@ export default function InfraDiagram() {
   const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
 
   const [nodes, setNodes] = useState<UINode[]>([]);
-  const [edges, setEdges] = useState<UIEdge[]>([]);
+  const [edges, setEdges] = useState<UIEdgeWithPorts[]>([]);
 
   // viewBox dinámico
   const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
@@ -79,7 +95,6 @@ export default function InfraDiagram() {
       const topWin = w.top || w;
       topWin.location.href = MAPA_URL;
     } catch {
-      // Si el navegador bloquea top-navigation por sandbox, al menos abrimos nueva pestaña
       window.open(MAPA_URL, "_blank", "noopener,noreferrer");
     }
   };
@@ -89,9 +104,8 @@ export default function InfraDiagram() {
   const [connectMode, setConnectMode] = useState(false);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
-  // Node-RED ports state
-  type PortRef = { nodeId: string; side: "out" | "in"; x: number; y: number };
-  const [connectFrom, setConnectFrom] = useState<PortRef | null>(null);
+  // Ports state
+  const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -182,12 +196,14 @@ export default function InfraDiagram() {
       return { ...n, x, y } as UINode;
     });
 
-    const uiEdges: UIEdge[] = (data.edgesRaw ?? []).map((e) => ({
+    const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e) => ({
       id: e.edge_id,
       a: e.src_node_id,
       b: e.dst_node_id,
       relacion: e.relacion,
       prioridad: e.prioridad,
+      a_port: null,
+      b_port: null,
     }));
 
     const saved = loadLayoutFromStorage();
@@ -221,7 +237,6 @@ export default function InfraDiagram() {
     const pad = 90;
     const bb = computeBBox(nodes, pad);
 
-    // clamp: si un nodo quedó lejísimo, no te destruye la vista
     const MAX_W = 6000;
     const MAX_H = 3500;
 
@@ -297,7 +312,7 @@ export default function InfraDiagram() {
     }
   };
 
-  // ====== Node-RED helpers ======
+  // ====== Ports (multi) ======
   function halfByType(t?: string) {
     const tt = (t || "").toLowerCase();
     if (tt === "tank") return 66;
@@ -306,13 +321,50 @@ export default function InfraDiagram() {
     if (tt === "valve") return 14;
     return 20;
   }
-  function portsOf(n: UINode) {
-    const off = 6;
-    return {
-      in: { x: n.x - halfByType(n.type) - off, y: n.y },
-      out: { x: n.x + halfByType(n.type) + off, y: n.y },
-    };
+  function heightByType(t?: string) {
+    const tt = (t || "").toLowerCase();
+    if (tt === "tank") return 92;
+    if (tt === "pump") return 52;
+    if (tt === "manifold") return 74;
+    if (tt === "valve") return 28;
+    return 40;
   }
+
+  function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
+    const tt = (n.type || "").toLowerCase();
+    if (tt === "tank") return { ins: ["L1"], outs: ["R1", "R2", "R3"] }; // ✅ tanque con 3 salidas
+    if (tt === "manifold") return { ins: ["L1"], outs: ["R1", "R2", "R3", "R4"] };
+    if (tt === "pump") return { ins: ["L1"], outs: ["R1"] };
+    if (tt === "valve") return { ins: ["L1"], outs: ["R1"] };
+    return { ins: ["L1"], outs: ["R1"] };
+  }
+
+  function buildPorts(n: UINode) {
+    const off = 6;
+    const half = halfByType(n.type);
+    const h = heightByType(n.type);
+    const span = Math.max(18, h * 0.6);
+
+    const { ins, outs } = getNodePorts(n);
+    const inOffs = spreadOffsets(ins.length, span);
+    const outOffs = spreadOffsets(outs.length, span);
+
+    const inPorts = ins.map((id, i) => ({
+      portId: id,
+      side: "in" as const,
+      x: n.x - half - off,
+      y: n.y + inOffs[i],
+    }));
+    const outPorts = outs.map((id, i) => ({
+      portId: id,
+      side: "out" as const,
+      x: n.x + half + off,
+      y: n.y + outOffs[i],
+    }));
+
+    return { inPorts, outPorts };
+  }
+
   function clientToSvgPoint(e: React.MouseEvent | React.PointerEvent) {
     if (!svgRef.current) return null;
     const pt = svgRef.current.createSVGPoint();
@@ -323,23 +375,74 @@ export default function InfraDiagram() {
     const p = pt.matrixTransform(m.inverse());
     return { x: p.x, y: p.y };
   }
+
   function edgeExists(src: string, dst: string) {
     return edges.some((e) => e.a === src && e.b === dst);
   }
-  async function tryCreateEdge(src: string, dst: string) {
+
+  async function tryCreateEdge(src: string, dst: string, a_port?: string | null, b_port?: string | null) {
     if (src === dst || edgeExists(src, dst)) return;
     try {
+      // ⚠️ backend no conoce puertos -> solo guardamos visual en frontend
       const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
       setEdges((prev) => [
-        { id: created.edge_id, a: created.src_node_id, b: created.dst_node_id, relacion: created.relacion, prioridad: created.prioridad },
+        {
+          id: created.edge_id,
+          a: created.src_node_id,
+          b: created.dst_node_id,
+          relacion: created.relacion,
+          prioridad: created.prioridad,
+          a_port: a_port ?? null,
+          b_port: b_port ?? null,
+        },
         ...prev,
       ]);
-      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
+      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id, a_port, b_port });
     } catch (err: any) {
       console.error(err);
       alert(err?.message || "No se pudo crear la conexión");
     }
   }
+
+  // ✅ auto-asignación de puertos SOLO visual (para que un tanque “salga a muchos”)
+  const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
+    const bySrc: Record<string, UIEdgeWithPorts[]> = {};
+    for (const e of edges) {
+      (bySrc[e.a] ||= []).push(e);
+    }
+
+    const clone = edges.map((e) => ({ ...e }));
+    const idxById: Record<number, number> = {};
+    clone.forEach((e, i) => (idxById[e.id] = i));
+
+    for (const [src, list] of Object.entries(bySrc)) {
+      const n = nodesById[src];
+      if (!n) continue;
+      const { outs } = getNodePorts(n);
+      if (!outs.length) continue;
+
+      // orden estable
+      const sorted = [...list].sort((a, b) => a.id - b.id);
+      sorted.forEach((e, i) => {
+        const k = idxById[e.id];
+        if (k == null) return;
+
+        // a_port
+        if (!clone[k].a_port) {
+          clone[k].a_port = outs[Math.min(i, outs.length - 1)];
+        }
+
+        // b_port (si no tiene, metemos el primer IN del destino)
+        const dstNode = nodesById[e.b];
+        if (dstNode && !clone[k].b_port) {
+          const { ins } = getNodePorts(dstNode);
+          clone[k].b_port = ins[0] ?? "L1";
+        }
+      });
+    }
+
+    return clone;
+  }, [edges, nodesById]);
 
   // Keyboard: Delete para borrar, Esc cancelar
   useEffect(() => {
@@ -433,9 +536,7 @@ export default function InfraDiagram() {
         }}
       >
         {error ? (
-          <span style={{ color: "#b91c1c" }}>
-            Error: {(error as Error)?.message || "Error desconocido"}
-          </span>
+          <span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>
         ) : isFetching ? (
           "Actualizando…"
         ) : (
@@ -443,7 +544,6 @@ export default function InfraDiagram() {
         )}
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {/* ✅ NUEVO: botón Mapa */}
           <button
             onClick={goToMapa}
             title="Abrir Mapa"
@@ -601,22 +701,23 @@ export default function InfraDiagram() {
                   </g>
                 ))}
 
-                {edges.map((e) =>
-                  editMode ? (
-                    <EditableEdge
-                      key={`edge-${e.id}`}
-                      id={e.id}
-                      a={e.a}
-                      b={e.b}
-                      nodesById={nodesById}
-                      editable={editMode}
-                      selected={selectedEdgeId === e.id}
-                      onSelect={(id) => setSelectedEdgeId(id)}
-                    />
-                  ) : (
-                    <Edge key={`edge-${e.id}`} a={e.a} b={e.b} nodesById={nodesById as any} />
-                  )
-                )}
+                {/* ✅ Siempre EditableEdge así soporta a_port/b_port (aunque editable=false) */}
+                {edgesForRender.map((e) => (
+                  <EditableEdge
+                    key={`edge-${e.id}`}
+                    id={e.id}
+                    a={e.a}
+                    b={e.b}
+                    nodesById={nodesById}
+                    editable={editMode}
+                    selected={selectedEdgeId === e.id}
+                    onSelect={(id) => setSelectedEdgeId(id)}
+                    // @ts-expect-error: si tu EditableEdge no tiene props de puertos, igual no rompe (solo las ignora).
+                    a_port={e.a_port}
+                    // @ts-expect-error
+                    b_port={e.b_port}
+                  />
+                ))}
 
                 {nodes.map((n) =>
                   n.type === "tank" ? (
@@ -670,44 +771,52 @@ export default function InfraDiagram() {
                   ) : null
                 )}
 
+                {/* ✅ MULTI-PORTS EN CONNECT MODE */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
-                    const P = portsOf(n);
+                    const { inPorts, outPorts } = buildPorts(n);
                     return (
                       <g key={`ports-${n.id}`}>
-                        <circle
-                          cx={P.in.x}
-                          cy={P.in.y}
-                          r={5}
-                          fill="#ffffff"
-                          stroke="#64748b"
-                          strokeWidth={1.6}
-                          onMouseUp={() => {
-                            if (connectFrom && connectFrom.side === "out") {
-                              tryCreateEdge(connectFrom.nodeId, n.id);
-                              setConnectFrom(null);
-                              setMouseSvg(null);
-                            }
-                          }}
-                        />
-                        <circle
-                          cx={P.out.x}
-                          cy={P.out.y}
-                          r={5}
-                          fill="#ffffff"
-                          stroke="#0ea5e9"
-                          strokeWidth={1.8}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setSelectedEdgeId(null);
-                            setOpsOpen(false);
-                            setLocationDrawerOpen(false);
-                            setConnectFrom({ nodeId: n.id, side: "out", x: P.out.x, y: P.out.y });
-                            const p = clientToSvgPoint(e);
-                            if (p) setMouseSvg(p);
-                          }}
-                        />
+                        {inPorts.map((p) => (
+                          <circle
+                            key={`in-${n.id}-${p.portId}`}
+                            cx={p.x}
+                            cy={p.y}
+                            r={5}
+                            fill="#ffffff"
+                            stroke="#64748b"
+                            strokeWidth={1.6}
+                            onMouseUp={() => {
+                              if (connectFrom && connectFrom.side === "out") {
+                                tryCreateEdge(connectFrom.nodeId, n.id, connectFrom.portId, p.portId);
+                                setConnectFrom(null);
+                                setMouseSvg(null);
+                              }
+                            }}
+                          />
+                        ))}
+
+                        {outPorts.map((p) => (
+                          <circle
+                            key={`out-${n.id}-${p.portId}`}
+                            cx={p.x}
+                            cy={p.y}
+                            r={5}
+                            fill="#ffffff"
+                            stroke="#0ea5e9"
+                            strokeWidth={1.8}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setSelectedEdgeId(null);
+                              setOpsOpen(false);
+                              setLocationDrawerOpen(false);
+                              setConnectFrom({ nodeId: n.id, side: "out", portId: p.portId, x: p.x, y: p.y });
+                              const pt = clientToSvgPoint(e);
+                              if (pt) setMouseSvg(pt);
+                            }}
+                          />
+                        ))}
                       </g>
                     );
                   })}

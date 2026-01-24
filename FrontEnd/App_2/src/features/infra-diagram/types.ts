@@ -1,4 +1,7 @@
+// =======================
 // Tipos backend (DTO)
+// =======================
+
 export type CombinedNodeDTO = {
   node_id: string;
   id: number;
@@ -11,7 +14,7 @@ export type CombinedNodeDTO = {
   level_pct?: number | string | null;
   alarma?: string | null;
 
-  // NUEVO: info de ubicación que viene del backend
+  // info de ubicación (backend)
   location_id?: number | null;
   location_name?: string | null;
 };
@@ -23,9 +26,24 @@ export type EdgeDTO = {
   relacion: string;
   prioridad: number;
   updated_at: string;
+
+  // (FUTURO backend)
+  src_port?: PortId;
+  dst_port?: PortId;
 };
 
+// =======================
 // Tipos UI
+// =======================
+
+// Puertos normalizados (extensible)
+export type PortId =
+  | "L1" | "L2"
+  | "R1" | "R2" | "R3"
+  | "T1"
+  | "B1";
+
+// Info extra UI
 type BaseExtras = {
   online?: boolean | null;
   state?: string | null;
@@ -33,6 +51,7 @@ type BaseExtras = {
   alarma?: string | null;
 };
 
+// Nodo base UI
 export type UINodeBase = {
   id: string; // = node_id
   name: string;
@@ -40,24 +59,110 @@ export type UINodeBase = {
   y: number;
   type: "pump" | "tank" | "manifold" | "valve";
 
-  // NUEVO: info de ubicación para agrupar y dibujar fondos
+  // ubicación
   location_id?: number | null;
   location_name?: string | null;
 } & BaseExtras;
 
-export type TankNode = UINodeBase & { type: "tank" };
-export type PumpNode = UINodeBase & { type: "pump" };
-export type ManifoldNode = UINodeBase & { type: "manifold" };
-export type ValveNode = UINodeBase & { type: "valve" };
+// =======================
+// Puertos por tipo de nodo
+// =======================
+
+export type NodePorts = {
+  in?: PortId[];
+  out?: PortId[];
+};
+
+// 🔹 Tanque: múltiples salidas
+export const TANK_PORTS: NodePorts = {
+  in: ["L1"],
+  out: ["R1", "R2", "R3"],
+};
+
+// 🔹 Bomba: 1 entrada / 1 salida
+export const PUMP_PORTS: NodePorts = {
+  in: ["L1"],
+  out: ["R1"],
+};
+
+// 🔹 Manifold: múltiples entradas y salidas
+export const MANIFOLD_PORTS: NodePorts = {
+  in: ["L1", "L2"],
+  out: ["R1", "R2", "R3"],
+};
+
+// 🔹 Válvula: paso simple
+export const VALVE_PORTS: NodePorts = {
+  in: ["L1"],
+  out: ["R1"],
+};
+
+// Helper general
+export function getNodePorts(type: UINodeBase["type"]): NodePorts {
+  switch (type) {
+    case "tank":
+      return TANK_PORTS;
+    case "pump":
+      return PUMP_PORTS;
+    case "manifold":
+      return MANIFOLD_PORTS;
+    case "valve":
+      return VALVE_PORTS;
+    default:
+      return {};
+  }
+}
+
+// =======================
+// Tipos concretos de nodos
+// =======================
+
+export type TankNode = UINodeBase & {
+  type: "tank";
+  ports?: NodePorts;
+};
+
+export type PumpNode = UINodeBase & {
+  type: "pump";
+  ports?: NodePorts;
+};
+
+export type ManifoldNode = UINodeBase & {
+  type: "manifold";
+  ports?: NodePorts;
+};
+
+export type ValveNode = UINodeBase & {
+  type: "valve";
+  ports?: NodePorts;
+};
+
 export type UINode = TankNode | PumpNode | ManifoldNode | ValveNode;
+
+// =======================
+// Edge UI (con puertos)
+// =======================
 
 export type UIEdge = {
   id: number;        // edge_id
   a: string;         // src node_id
   b: string;         // dst node_id
+
+  // NUEVO: puertos de conexión
+  a_port?: PortId;
+  b_port?: PortId;
+
   relacion?: string;
   prioridad?: number;
 };
 
+// =======================
 // Tooltip
-export type Tip = { title: string; lines: string[]; x: number; y: number };
+// =======================
+
+export type Tip = {
+  title: string;
+  lines: string[];
+  x: number;
+  y: number;
+};

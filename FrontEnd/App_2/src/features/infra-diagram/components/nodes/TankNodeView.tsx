@@ -1,7 +1,8 @@
 import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
-import type { TankNode } from "../../types";
+import type { TankNode, PortId } from "../../types";
+import { getNodePorts } from "../../types";
 
 export default function TankNodeView({
   n,
@@ -33,7 +34,7 @@ export default function TankNodeView({
   const isOnline = n.online === true;
   const alarmaRaw = (n.alarma || "").toLowerCase();
   const isCritical = ["critico", "crítico", "critical"].includes(alarmaRaw);
-  const isWarning  = ["alerta", "warning", "warn"].includes(alarmaRaw);
+  const isWarning = ["alerta", "warning", "warn"].includes(alarmaRaw);
 
   // Borde: si NO está online, gris. Solo rojo/amarillo cuando online.
   const stroke = !isOnline
@@ -52,10 +53,68 @@ export default function TankNodeView({
   const groupOpacity = isOnline ? 1 : 0.55;
 
   const clipId = `clip-${n.id}`;
+
+  // ===== Puertos (para que los caños “salgan” de puntos reales) =====
+  // Por ahora es solo visual (selección de puertos la hacemos después)
+  const ports = n.ports ?? getNodePorts("tank");
+
+  const portPos = (pid: PortId) => {
+    // Coordenadas en el sistema del nodo (0..W, 0..H)
+    // Izquierda:
+    //  L1: medio
+    // Derecha:
+    //  R1: arriba, R2: medio, R3: abajo
+    const midY = H / 2;
+    const topY = P + 12;
+    const botY = H - (P + 12);
+
+    switch (pid) {
+      case "L1":
+        return { x: 0, y: midY };
+      case "L2":
+        return { x: 0, y: botY };
+      case "R1":
+        return { x: W, y: topY };
+      case "R2":
+        return { x: W, y: midY };
+      case "R3":
+        return { x: W, y: botY };
+      case "T1":
+        return { x: W / 2, y: 0 };
+      case "B1":
+        return { x: W / 2, y: H };
+      default:
+        return { x: W, y: midY };
+    }
+  };
+
+  const PortDot = ({ pid }: { pid: PortId }) => {
+    const { x, y } = portPos(pid);
+
+    // “Acople” estilo SCADA: aro oscuro + centro claro
+    // (queda muy bien con la tubería que hicimos)
+    const rOuter = 4.2;
+    const rInner = 2.6;
+
+    return (
+      <g transform={`translate(${x}, ${y})`} opacity={0.95}>
+        <circle r={rOuter} fill="#0f172a" opacity={0.35} />
+        <circle r={rInner} fill="#e2e8f0" opacity={0.98} />
+
+        {/* mini “corte” hacia afuera para que se vea como conector */}
+        {pid.startsWith("L") && <rect x={-6} y={-1.2} width={6} height={2.4} fill="#0f172a" opacity={0.25} />}
+        {pid.startsWith("R") && <rect x={0} y={-1.2} width={6} height={2.4} fill="#0f172a" opacity={0.25} />}
+        {pid.startsWith("T") && <rect x={-1.2} y={-6} width={2.4} height={6} fill="#0f172a" opacity={0.25} />}
+        {pid.startsWith("B") && <rect x={-1.2} y={0} width={2.4} height={6} fill="#0f172a" opacity={0.25} />}
+      </g>
+    );
+  };
+
   const tipLines = [
     `Online: ${isOnline ? "Sí" : "No"}`,
     `Nivel: ${levelRaw != null ? `${level}%` : "—"}`,
     `Alarma: ${n.alarma ?? "—"}`,
+    `Puertos: IN(${(ports.in ?? []).join(", ") || "—"}) / OUT(${(ports.out ?? []).join(", ") || "—"})`,
   ];
 
   const Pulse = ({ color }: { color: string }) => (
@@ -117,6 +176,17 @@ export default function TankNodeView({
         <line x1={P} y1={levelY} x2={P + innerW} y2={levelY} stroke="#60a5fa" strokeWidth={1.5} />
         <rect x={P} y={P} width={innerW} height={innerH / 2.4} fill="url(#lgGlass)" opacity={0.18} />
       </g>
+
+      {/* ===== Puertos visibles (IN/OUT) ===== */}
+      {/* In ports (izquierda) */}
+      {(ports.in ?? []).map((pid) => (
+        <PortDot key={`in-${pid}`} pid={pid} />
+      ))}
+
+      {/* Out ports (derecha / arriba / abajo según pid) */}
+      {(ports.out ?? []).map((pid) => (
+        <PortDot key={`out-${pid}`} pid={pid} />
+      ))}
 
       {/* etiquetas */}
       <text x={W / 2} y={20} textAnchor="middle" fontSize={13} className="node-label">
