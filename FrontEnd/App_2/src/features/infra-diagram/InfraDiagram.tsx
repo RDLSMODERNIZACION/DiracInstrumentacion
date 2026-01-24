@@ -40,17 +40,17 @@ type LocationGroup = {
   location_id: number | null;
 };
 
-// ✅ Extiendo UIEdge localmente (no backend) para puertos + flujo
 type UIEdgeWithPorts = UIEdge & {
   a_port?: string | null;
   b_port?: string | null;
-  // ✅ SOLO UI (simulación)
+  knots?: Array<{ x: number; y: number }> | null;
   flow?: {
     on: boolean;
     dir?: 1 | -1;
     strength?: number;
   };
 };
+
 
 type PortSide = "in" | "out";
 type PortHit = { nodeId: string; side: PortSide; portId: string; x: number; y: number };
@@ -379,16 +379,17 @@ export default function InfraDiagram() {
       return { ...n, x, y } as UINode;
     });
 
-    // ✅ EDGES: ahora vienen con src_port/dst_port desde backend
-    const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e: any) => ({
-      id: e.edge_id,
-      a: e.src_node_id,
-      b: e.dst_node_id,
-      relacion: e.relacion,
-      prioridad: e.prioridad,
-      a_port: e.src_port ?? "R1",
-      b_port: e.dst_port ?? "L1",
-    }));
+  const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e: any) => ({
+  id: e.edge_id,
+  a: e.src_node_id,
+  b: e.dst_node_id,
+  relacion: e.relacion,
+  prioridad: e.prioridad,
+  a_port: e.src_port ?? "R1",
+  b_port: e.dst_port ?? "L1",
+  knots: Array.isArray(e.knots) ? e.knots : [], // ✅ NUEVO
+}));
+
 
     const saved = loadLayoutFromStorage();
     const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
@@ -823,19 +824,21 @@ export default function InfraDiagram() {
 
                 {/* Edges */}
                 {edgesForRender.map((e) => (
-                  <EditableEdge
-                    key={`edge-${e.id}`}
-                    id={e.id}
-                    a={e.a}
-                    b={e.b}
-                    nodesById={nodesById}
-                    editable={editMode}
-                    selected={selectedEdgeId === e.id}
-                    onSelect={(id) => setSelectedEdgeId(id)}
-                    a_port={e.a_port as any}
-                    b_port={e.b_port as any}
-                    flow={e.flow}
-                  />
+              <EditableEdge
+  key={`edge-${e.id}`}
+  id={e.id}
+  a={e.a}
+  b={e.b}
+  nodesById={nodesById}
+  editable={editMode}
+  selected={selectedEdgeId === e.id}
+  onSelect={(id) => setSelectedEdgeId(id)}
+  a_port={e.a_port as any}
+  b_port={e.b_port as any}
+  flow={e.flow}
+  knots={e.knots ?? []}   // ✅ NUEVO
+/>
+
                 ))}
 
                 {/* Nodes */}

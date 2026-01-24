@@ -1,6 +1,9 @@
 // src/features/infra-diagram/components/edges/EditableEdge.tsx
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
+
+type Pt = { x: number; y: number };
+type Side = "in" | "out";
 
 type Props = {
   id: number;
@@ -10,8 +13,11 @@ type Props = {
   a_port?: PortId | null;
   b_port?: PortId | null;
 
-  // ✅ NUEVO: estado de flujo (viene desde InfraDiagram)
+  // ✅ flujo (viene desde InfraDiagram)
   flow?: { on: boolean; dir?: 1 | -1; strength?: number };
+
+  // ✅ NUEVO: knots desde backend (layout_edge_knots)
+  knots?: Pt[] | null;
 
   nodesById: Record<string, UINode>;
   editable: boolean;
@@ -19,52 +25,23 @@ type Props = {
   onSelect?: (edgeId: number) => void;
 };
 
-type Side = "in" | "out";
-type Pt = { x: number; y: number };
-
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-/** ===== LOGS (solo nuevos) ===== */
+// ✅ logs apagados (si querés debug, ponelo true)
+const LOG_ON = false;
 function LOG(tag: string, payload?: any) {
-  const ON = true; // ponelo en false para silenciar
-  if (!ON) return;
+  if (!LOG_ON) return;
+  // eslint-disable-next-line no-console
   console.log(`🧪[Edge ${tag}]`, payload ?? "");
 }
 
-/** =========================
- *  PERSISTENCIA LOCAL DE CODOs
- *  - Sobrevive StrictMode remount
- *  - Sobrevive refresh (localStorage)
- *  ========================= */
-const KNOTS_STORE = new Map<number, Pt[]>();
-const LS_KEY = (edgeId: number) => `dirac_edge_knots:${edgeId}`;
-
-function loadKnots(edgeId: number): Pt[] {
-  const mem = KNOTS_STORE.get(edgeId);
-  if (mem) return mem;
-
-  try {
-    const raw = localStorage.getItem(LS_KEY(edgeId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const cleaned = parsed
-      .filter((p: any) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
-      .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }));
-    KNOTS_STORE.set(edgeId, cleaned);
-    return cleaned;
-  } catch {
-    return [];
-  }
-}
-
-function saveKnots(edgeId: number, pts: Pt[]) {
-  KNOTS_STORE.set(edgeId, pts);
-  try {
-    localStorage.setItem(LS_KEY(edgeId), JSON.stringify(pts));
-  } catch {}
+function normalizeKnots(input: any): Pt[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+    .map((p) => ({ x: Number(p.x), y: Number(p.y) }));
 }
 
 /* =========================
@@ -353,6 +330,7 @@ export default function EditableEdge({
   a_port,
   b_port,
   flow,
+  knots: knotsFromServer,
   nodesById,
   editable,
   selected,
@@ -361,26 +339,64 @@ export default function EditableEdge({
   const A = nodesById[a];
   const B = nodesById[b];
 
-  // ✅ init desde store/localStorage
-  const [knots, _setKnots] = useState<Pt[]>(() => loadKnots(id));
+  // ✅ knots desde backend
+  const [knots, setKnots] = useState<Pt[]>(() => normalizeKnots(knotsFromServer));
 
-  // ✅ wrapper: siempre persiste
-  const setKnots = (updater: Pt[] | ((prev: Pt[]) => Pt[])) => {
-    _setKnots((prev) => {
-      const next = typeof updater === "function" ? (updater as any)(prev) : updater;
-      saveKnots(id, next);
-      LOG("SAVE_KNOTS", { id, count: next.length });
-      return next;
-    });
-  };
-
+  // ✅ sincroniza si llegan knots nuevos desde server (ej: refresh / otro usuario)
+  // pero NO pisa mientras arrastrás
   const dragging = useRef<{ idx: number } | null>(null);
   const hasCapture = useRef(false);
 
   useEffect(() => {
-    LOG("MOUNT", { id, a, b });
-    return () => LOG("UNMOUNT", { id, a, b });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (hasCapture.current) return; // no pisar durante drag
+    setKnots(normalizeKnots(knotsFromServer));
+  }, [knotsFromServer]);
+
+  // -------- persistencia a DB (debounce) --------
+  const saveTimer = useRef<number | null>(null);
+  const lastSavedSig = useRef<string>("");
+
+  const postSave = useCallback(
+    async (pts: Pt[]) => {
+      const clean = normalizeKnots(pts);
+      const sig = JSON.stringify(clean);
+      if (sig === lastSavedSig.current) return;
+
+      try {
+        const res = await fetch("/infraestructura/update_edge_knots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edge_id: id, knots: clean }),
+        });
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          console.error("update_edge_knots failed:", res.status, t);
+          return;
+        }
+        lastSavedSig.current = sig;
+        LOG("SAVED_DB", { id, count: clean.length });
+      } catch (e) {
+        console.error("update_edge_knots error:", e);
+      }
+    },
+    [id]
+  );
+
+  const scheduleSave = useCallback(
+    (pts: Pt[]) => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        postSave(pts);
+      }, 350);
+    },
+    [postSave]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    };
   }, []);
 
   const geom = useMemo(() => {
@@ -411,13 +427,18 @@ export default function EditableEdge({
   const flowStrength = Math.max(0, Math.min(1, Number(flow?.strength ?? (flowOn ? 1 : 0))));
   const FLOW_STROKE = 2.8 + flowStrength * 1.6;
   const FLOW_DASH = "10 14";
-  const FLOW_SPEED = 0.9 - flowStrength * 0.35; // más fuerte = más rápido
+  const FLOW_SPEED = 0.9 - flowStrength * 0.35;
   const FLOW_OFFSET = flowDir === 1 ? -48 : 48;
 
   const addPoint = (e: React.PointerEvent | React.MouseEvent, source: string) => {
     const p = svgPointFromEvent(e);
     LOG("ADD_POINT", { id, source, p, prevKnots: knots.length });
-    if (p) setKnots((prev) => [...prev, p]);
+    if (!p) return;
+    setKnots((prev) => {
+      const next = [...prev, p];
+      scheduleSave(next);
+      return next;
+    });
   };
 
   const showHandles = editable && (selected || knots.length > 0);
@@ -459,7 +480,7 @@ export default function EditableEdge({
         opacity={0.9}
       />
 
-      {/* ✅ FLUJO (animación sobre la tubería) */}
+      {/* flujo */}
       {flowOn && (
         <path
           d={geom.d}
@@ -471,13 +492,7 @@ export default function EditableEdge({
           strokeDasharray={FLOW_DASH}
           style={{ pointerEvents: "none" }}
         >
-          <animate
-            attributeName="stroke-dashoffset"
-            from={0}
-            to={FLOW_OFFSET}
-            dur={`${Math.max(0.35, FLOW_SPEED)}s`}
-            repeatCount="indefinite"
-          />
+          <animate attributeName="stroke-dashoffset" from={0} to={FLOW_OFFSET} dur={`${Math.max(0.35, FLOW_SPEED)}s`} repeatCount="indefinite" />
         </path>
       )}
 
@@ -495,17 +510,13 @@ export default function EditableEdge({
         fill="none"
         style={{ pointerEvents: "stroke", cursor: editable ? "pointer" : "default" }}
         onPointerDown={(e) => {
-          LOG("HIT_POINTERDOWN", { id, editable, selected, shift: (e as any).shiftKey });
           if (!editable) return;
-
           e.preventDefault();
           e.stopPropagation();
           onSelect?.(id);
-
           if ((e as any).shiftKey) addPoint(e, "hit:pointerdown");
         }}
         onClick={(e) => {
-          LOG("HIT_CLICK", { id, editable, selected, shift: (e as any).shiftKey });
           if (!editable) return;
           e.stopPropagation();
           onSelect?.(id);
@@ -524,9 +535,7 @@ export default function EditableEdge({
               fill="transparent"
               style={{ pointerEvents: "all", cursor: "move", touchAction: "none" }}
               onPointerDown={(e) => {
-                LOG("HANDLE_DOWN", { id, idx, p, pointerId: e.pointerId });
                 if (!editable) return;
-
                 e.preventDefault();
                 e.stopPropagation();
                 onSelect?.(id);
@@ -538,17 +547,18 @@ export default function EditableEdge({
               onPointerMove={(e) => {
                 if (!dragging.current || dragging.current.idx !== idx) return;
                 const pt = svgPointFromEvent(e);
-                LOG("HANDLE_MOVE", { id, idx, pointerId: e.pointerId, pt });
                 if (!pt) return;
 
                 e.preventDefault();
                 e.stopPropagation();
-                setKnots((prev) => prev.map((q, i) => (i === idx ? pt : q)));
+                setKnots((prev) => {
+                  const next = prev.map((q, i) => (i === idx ? pt : q));
+                  scheduleSave(next);
+                  return next;
+                });
               }}
               onPointerUp={(e) => {
-                LOG("HANDLE_UP", { id, idx, pointerId: e.pointerId });
                 if (!editable) return;
-
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -572,9 +582,7 @@ export default function EditableEdge({
               opacity={0.95}
               style={{ pointerEvents: "all", cursor: "move", touchAction: "none" }}
               onPointerDown={(e) => {
-                LOG("HANDLE_DOT_DOWN", { id, idx, p, pointerId: e.pointerId });
                 if (!editable) return;
-
                 e.preventDefault();
                 e.stopPropagation();
                 onSelect?.(id);
@@ -586,17 +594,18 @@ export default function EditableEdge({
               onPointerMove={(e) => {
                 if (!dragging.current || dragging.current.idx !== idx) return;
                 const pt = svgPointFromEvent(e);
-                LOG("HANDLE_DOT_MOVE", { id, idx, pointerId: e.pointerId, pt });
                 if (!pt) return;
 
                 e.preventDefault();
                 e.stopPropagation();
-                setKnots((prev) => prev.map((q, i) => (i === idx ? pt : q)));
+                setKnots((prev) => {
+                  const next = prev.map((q, i) => (i === idx ? pt : q));
+                  scheduleSave(next);
+                  return next;
+                });
               }}
               onPointerUp={(e) => {
-                LOG("HANDLE_DOT_UP", { id, idx, pointerId: e.pointerId });
                 if (!editable) return;
-
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -608,10 +617,14 @@ export default function EditableEdge({
                 } catch {}
               }}
               onClick={(e) => {
+                if (!editable) return;
                 if ((e as any).altKey) {
                   e.stopPropagation();
-                  LOG("HANDLE_DELETE", { id, idx });
-                  setKnots((prev) => prev.filter((_, i) => i !== idx));
+                  setKnots((prev) => {
+                    const next = prev.filter((_, i) => i !== idx);
+                    scheduleSave(next);
+                    return next;
+                  });
                 }
               }}
             />
