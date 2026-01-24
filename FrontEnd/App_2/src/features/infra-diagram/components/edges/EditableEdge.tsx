@@ -2,6 +2,11 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 
+// ✅ usar API_BASE + withScope + authHeaders (para que NO pegue al dominio del frontend)
+import { API_BASE } from "@/lib/api";
+import { withScope } from "@/lib/scope";
+import { authHeaders } from "@/lib/http";
+
 type Pt = { x: number; y: number };
 type Side = "in" | "out";
 
@@ -29,12 +34,28 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// ✅ logs apagados (si querés debug, ponelo true)
-const LOG_ON = false;
-function LOG(tag: string, payload?: any) {
-  if (!LOG_ON) return;
+/* =========================
+   DEBUG / LOGS (nuevos)
+   - logs claros y con contexto
+========================= */
+const DEBUG_EDGE = true; // 👈 dejalo true para ver qué pasa, luego pasalo a false
+
+function logEdge(tag: string, payload?: any) {
+  if (!DEBUG_EDGE) return;
   // eslint-disable-next-line no-console
-  console.log(`🧪[Edge ${tag}]`, payload ?? "");
+  console.log(`🧩[EditableEdge] ${tag}`, payload ?? "");
+}
+
+function warnEdge(tag: string, payload?: any) {
+  if (!DEBUG_EDGE) return;
+  // eslint-disable-next-line no-console
+  console.warn(`⚠️[EditableEdge] ${tag}`, payload ?? "");
+}
+
+function errEdge(tag: string, payload?: any) {
+  // errores sí conviene verlos siempre
+  // eslint-disable-next-line no-console
+  console.error(`🧨[EditableEdge] ${tag}`, payload ?? "");
 }
 
 function normalizeKnots(input: any): Pt[] {
@@ -349,48 +370,112 @@ export default function EditableEdge({
 
   useEffect(() => {
     if (hasCapture.current) return; // no pisar durante drag
-    setKnots(normalizeKnots(knotsFromServer));
-  }, [knotsFromServer]);
+    const nk = normalizeKnots(knotsFromServer);
+    setKnots(nk);
+    logEdge("INIT/SYNC_KNOTS_FROM_SERVER", {
+      edge_id: id,
+      server_len: Array.isArray(knotsFromServer) ? knotsFromServer.length : null,
+      normalized_len: nk.length,
+      server_sample: Array.isArray(knotsFromServer) ? knotsFromServer.slice(0, 2) : null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knotsFromServer, id]);
 
   // -------- persistencia a DB (debounce) --------
   const saveTimer = useRef<number | null>(null);
   const lastSavedSig = useRef<string>("");
+  const inFlight = useRef(false);
 
   const postSave = useCallback(
-    async (pts: Pt[]) => {
+    async (pts: Pt[], reason: string) => {
       const clean = normalizeKnots(pts);
       const sig = JSON.stringify(clean);
-      if (sig === lastSavedSig.current) return;
+      const url = withScope(`${API_BASE}/infraestructura/update_edge_knots`);
+      const headers = { "Content-Type": "application/json", ...authHeaders() };
+      const body = { edge_id: id, knots: clean };
+
+      if (sig === lastSavedSig.current) {
+        logEdge("SAVE_SKIP_SAME_SIG", { edge_id: id, reason, len: clean.length });
+        return;
+      }
+      if (inFlight.current) {
+        warnEdge("SAVE_SKIP_INFLIGHT", { edge_id: id, reason, len: clean.length });
+        return;
+      }
+
+      inFlight.current = true;
+      const t0 = performance.now();
+
+      logEdge("SAVE_START", {
+        edge_id: id,
+        reason,
+        url,
+        len: clean.length,
+        headers_has_auth: Object.keys(headers).some((k) => k.toLowerCase().includes("authorization")),
+        sample: clean.slice(0, 2),
+      });
 
       try {
-        const res = await fetch("/infraestructura/update_edge_knots", {
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ edge_id: id, knots: clean }),
+          headers,
+          body: JSON.stringify(body),
         });
+
+        const dt = Math.round(performance.now() - t0);
+
         if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          console.error("update_edge_knots failed:", res.status, t);
+          const text = await res.text().catch(() => "");
+          errEdge("SAVE_FAIL", {
+            edge_id: id,
+            reason,
+            url,
+            status: res.status,
+            ms: dt,
+            resp: text?.slice(0, 300),
+          });
           return;
         }
+
+        let json: any = null;
+        try {
+          json = await res.json();
+        } catch {
+          // puede no devolver json, no pasa nada
+        }
+
         lastSavedSig.current = sig;
-        LOG("SAVED_DB", { id, count: clean.length });
-      } catch (e) {
-        console.error("update_edge_knots error:", e);
+        logEdge("SAVE_OK", { edge_id: id, reason, ms: dt, result: json ?? "(no json)" });
+      } catch (e: any) {
+        const dt = Math.round(performance.now() - t0);
+        errEdge("SAVE_ERROR", { edge_id: id, reason, url, ms: dt, error: String(e?.message ?? e) });
+      } finally {
+        inFlight.current = false;
       }
     },
     [id]
   );
 
   const scheduleSave = useCallback(
-    (pts: Pt[]) => {
+    (pts: Pt[], reason: string) => {
+      const clean = normalizeKnots(pts);
+      const sig = JSON.stringify(clean);
+
+      logEdge("SAVE_SCHEDULE", {
+        edge_id: id,
+        reason,
+        debounce_ms: 350,
+        len: clean.length,
+        sig_changed: sig !== lastSavedSig.current,
+      });
+
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(() => {
         saveTimer.current = null;
-        postSave(pts);
+        postSave(pts, reason);
       }, 350);
     },
-    [postSave]
+    [id, postSave]
   );
 
   useEffect(() => {
@@ -432,11 +517,11 @@ export default function EditableEdge({
 
   const addPoint = (e: React.PointerEvent | React.MouseEvent, source: string) => {
     const p = svgPointFromEvent(e);
-    LOG("ADD_POINT", { id, source, p, prevKnots: knots.length });
+    logEdge("ADD_POINT", { edge_id: id, source, p, prevKnots: knots.length });
     if (!p) return;
     setKnots((prev) => {
       const next = [...prev, p];
-      scheduleSave(next);
+      scheduleSave(next, `add_point:${source}`);
       return next;
     });
   };
@@ -492,7 +577,13 @@ export default function EditableEdge({
           strokeDasharray={FLOW_DASH}
           style={{ pointerEvents: "none" }}
         >
-          <animate attributeName="stroke-dashoffset" from={0} to={FLOW_OFFSET} dur={`${Math.max(0.35, FLOW_SPEED)}s`} repeatCount="indefinite" />
+          <animate
+            attributeName="stroke-dashoffset"
+            from={0}
+            to={FLOW_OFFSET}
+            dur={`${Math.max(0.35, FLOW_SPEED)}s`}
+            repeatCount="indefinite"
+          />
         </path>
       )}
 
@@ -543,6 +634,8 @@ export default function EditableEdge({
                 hasCapture.current = true;
                 (e.currentTarget as SVGCircleElement).setPointerCapture(e.pointerId);
                 dragging.current = { idx };
+
+                logEdge("DRAG_START", { edge_id: id, idx, at: { x: p.x, y: p.y } });
               }}
               onPointerMove={(e) => {
                 if (!dragging.current || dragging.current.idx !== idx) return;
@@ -553,7 +646,7 @@ export default function EditableEdge({
                 e.stopPropagation();
                 setKnots((prev) => {
                   const next = prev.map((q, i) => (i === idx ? pt : q));
-                  scheduleSave(next);
+                  scheduleSave(next, `drag_move:idx=${idx}`);
                   return next;
                 });
               }}
@@ -568,6 +661,8 @@ export default function EditableEdge({
                 try {
                   (e.currentTarget as SVGCircleElement).releasePointerCapture(e.pointerId);
                 } catch {}
+
+                logEdge("DRAG_END", { edge_id: id, idx });
               }}
             />
 
@@ -590,6 +685,8 @@ export default function EditableEdge({
                 hasCapture.current = true;
                 (e.currentTarget as SVGCircleElement).setPointerCapture(e.pointerId);
                 dragging.current = { idx };
+
+                logEdge("DRAG_START(handle)", { edge_id: id, idx, at: { x: p.x, y: p.y } });
               }}
               onPointerMove={(e) => {
                 if (!dragging.current || dragging.current.idx !== idx) return;
@@ -600,7 +697,7 @@ export default function EditableEdge({
                 e.stopPropagation();
                 setKnots((prev) => {
                   const next = prev.map((q, i) => (i === idx ? pt : q));
-                  scheduleSave(next);
+                  scheduleSave(next, `drag_move(handle):idx=${idx}`);
                   return next;
                 });
               }}
@@ -615,6 +712,8 @@ export default function EditableEdge({
                 try {
                   (e.currentTarget as SVGCircleElement).releasePointerCapture(e.pointerId);
                 } catch {}
+
+                logEdge("DRAG_END(handle)", { edge_id: id, idx });
               }}
               onClick={(e) => {
                 if (!editable) return;
@@ -622,7 +721,8 @@ export default function EditableEdge({
                   e.stopPropagation();
                   setKnots((prev) => {
                     const next = prev.filter((_, i) => i !== idx);
-                    scheduleSave(next);
+                    logEdge("REMOVE_POINT", { edge_id: id, idx, new_len: next.length });
+                    scheduleSave(next, `remove_point:idx=${idx}`);
                     return next;
                   });
                 }
