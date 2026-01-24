@@ -30,7 +30,7 @@ async def health_db():
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
     Devuelve conexiones de layout (edges) desde public.v_layout_edges_flow,
-    incluyendo src_port/dst_port (modo simple 1 salida / 1 entrada)
+    incluyendo src_port/dst_port
     y knots desde public.layout_edge_knots (para fijar caños).
     - Sin company_id: todas.
     - Con company_id: sólo aristas cuyos endpoints pertenecen a nodos de esa empresa.
@@ -157,13 +157,10 @@ async def update_edge_knots(request: Request):
 async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve nodos (tank/pump/valve/manifold).
-    Ahora incluye `meta` para valves (desde public.layout_valves.meta).
+    ✅ Incluye `meta` para valves (desde public.layout_valves.meta).
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # ---------------------------------------------------------
-            # SIN company_id: usamos la vista, y le sumamos meta para valves
-            # ---------------------------------------------------------
             if company_id is None:
                 cur.execute(
                     """
@@ -177,9 +174,6 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 )
                 return cur.fetchall()
 
-            # ---------------------------------------------------------
-            # CON company_id: armamos el combined “scoped” y metemos meta en valves
-            # ---------------------------------------------------------
             cur.execute(
                 """
                 WITH t AS (
@@ -207,11 +201,11 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     END::text                           AS alarma,
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
-                    NULL::jsonb                        AS meta
+                    NULL::jsonb                         AS meta
                   FROM public.tanks t
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
-                  LEFT JOIN public.tank_configs   tc ON tc.tank_id = t.id
+                  LEFT JOIN public.tank_configs tc ON tc.tank_id = t.id
                   LEFT JOIN LATERAL (
                     SELECT i.level_pct
                     FROM public.tank_ingest i
@@ -233,7 +227,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::text                           AS alarma,
                     l.id::bigint                         AS location_id,
                     l.name::text                         AS location_name,
-                    NULL::jsonb                         AS meta
+                    NULL::jsonb                          AS meta
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
@@ -270,7 +264,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::text                               AS alarma,
                     l.id::bigint                             AS location_id,
                     l.name::text                             AS location_name,
-                    NULL::jsonb                             AS meta
+                    NULL::jsonb                              AS meta
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
@@ -359,14 +353,22 @@ async def update_layout(request: Request):
 async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
+    ✅ Ahora `nodes` incluye `meta` para valves.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            # ---------------------------------------------------------
+            # SIN company_id
+            # ---------------------------------------------------------
             if company_id is None:
                 cur.execute(
                     """
-                    SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
-                    FROM public.v_layout_combined ORDER BY type,id
+                    SELECT
+                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
+                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta
+                    FROM public.v_layout_combined c
+                    LEFT JOIN public.layout_valves lv ON lv.node_id = c.node_id
+                    ORDER BY c.type, c.id
                     """
                 )
                 nodes = cur.fetchall()
@@ -386,7 +388,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Scoped: nodes (idéntico a tu versión)
+            # ---------------------------------------------------------
+            # CON company_id (scoped)
+            # ---------------------------------------------------------
             cur.execute(
                 """
                 WITH t AS (
@@ -418,7 +422,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       ELSE NULL
                     END::text                           AS alarma,
                     l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name
+                    l.name::text                        AS location_name,
+                    NULL::jsonb                         AS meta
                   FROM public.tanks t
                   JOIN public.locations l ON l.id=t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
@@ -436,7 +441,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric                       AS level_pct,
                     NULL::text                          AS alarma,
                     l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name
+                    l.name::text                        AS location_name,
+                    NULL::jsonb                         AS meta
                   FROM public.pumps p
                   JOIN public.locations l ON l.id=p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
@@ -454,7 +460,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric                       AS level_pct,
                     NULL::text                          AS alarma,
                     l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name
+                    l.name::text                        AS location_name,
+                    lv.meta                             AS meta
                   FROM public.valves v
                   JOIN public.locations l ON l.id=v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
@@ -471,22 +478,24 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric                           AS level_pct,
                     NULL::text                              AS alarma,
                     l.id::bigint                            AS location_id,
-                    l.name::text                            AS location_name
+                    l.name::text                            AS location_name,
+                    NULL::jsonb                             AS meta
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id=m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id=%s
                 ),
                 nodes AS (
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM t
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM t
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM p
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM p
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM v
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM v
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name FROM m
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM m
                 )
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name
+                SELECT
+                  node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta
                 FROM nodes
                 ORDER BY type,id
                 """,
