@@ -27,7 +27,8 @@ async def health_db():
 @router.get("/get_layout_edges", response_model=List[dict])
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
-    Devuelve conexiones de layout (layout_edges).
+    Devuelve conexiones de layout (edges) desde public.v_layout_edges_flow,
+    incluyendo src_port/dst_port (modo simple 1 salida / 1 entrada).
     - Sin company_id: todas.
     - Con company_id: sólo aristas cuyos endpoints pertenecen a nodos de esa empresa.
     Si no hay filas, devolvemos [] (200 OK).
@@ -37,8 +38,8 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
             if company_id is None:
                 cur.execute(
                     """
-                    SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at
-                    FROM public.layout_edges
+                    SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at, src_port, dst_port
+                    FROM public.v_layout_edges_flow
                     ORDER BY updated_at DESC
                     """
                 )
@@ -72,8 +73,8 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   WHERE l.company_id = %s
                 )
-                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at
-                FROM public.layout_edges e
+                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at, e.src_port, e.dst_port
+                FROM public.v_layout_edges_flow e
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
                 ORDER BY e.updated_at DESC
@@ -322,8 +323,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 cur.execute(
                     """
-                    SELECT edge_id,src_node_id,dst_node_id,relacion,prioridad,updated_at
-                    FROM public.layout_edges ORDER BY updated_at DESC
+                    SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at, src_port, dst_port
+                    FROM public.v_layout_edges_flow
+                    ORDER BY updated_at DESC
                     """
                 )
                 edges = cur.fetchall()
@@ -438,7 +440,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
             )
             nodes = cur.fetchall()
 
-            # Scoped: edges
+            # Scoped: edges (desde view con src_port/dst_port)
             cur.execute(
                 """
                 WITH nodes AS (
@@ -466,8 +468,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id=%s
                 )
-                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at
-                FROM public.layout_edges e
+                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at, e.src_port, e.dst_port
+                FROM public.v_layout_edges_flow e
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
                 ORDER BY e.updated_at DESC

@@ -39,9 +39,10 @@ export type EdgeDTO = {
 // Puertos normalizados (extensible)
 export type PortId =
   | "L1" | "L2"
-  | "R1" | "R2" | "R3"
+  | "R1" | "R2" | "R3" | "R4"
   | "T1"
   | "B1";
+
 
 // Info extra UI
 type BaseExtras = {
@@ -88,8 +89,9 @@ export const PUMP_PORTS: NodePorts = {
 // 🔹 Manifold: múltiples entradas y salidas
 export const MANIFOLD_PORTS: NodePorts = {
   in: ["L1", "L2"],
-  out: ["R1", "R2", "R3"],
+  out: ["R1", "R2", "R3", "R4"],
 };
+
 
 // 🔹 Válvula: paso simple
 export const VALVE_PORTS: NodePorts = {

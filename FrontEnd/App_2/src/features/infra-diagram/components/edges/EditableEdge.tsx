@@ -10,6 +10,9 @@ type Props = {
   a_port?: PortId | null;
   b_port?: PortId | null;
 
+  // ✅ NUEVO: estado de flujo (viene desde InfraDiagram)
+  flow?: { on: boolean; dir?: 1 | -1; strength?: number };
+
   nodesById: Record<string, UINode>;
   editable: boolean;
   selected?: boolean;
@@ -23,12 +26,45 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-/** ===== NEW LOGS ONLY ===== */
+/** ===== LOGS (solo nuevos) ===== */
 function LOG(tag: string, payload?: any) {
-  // podés apagar todo con esta bandera
-  const ON = true;
+  const ON = true; // ponelo en false para silenciar
   if (!ON) return;
   console.log(`🧪[Edge ${tag}]`, payload ?? "");
+}
+
+/** =========================
+ *  PERSISTENCIA LOCAL DE CODOs
+ *  - Sobrevive StrictMode remount
+ *  - Sobrevive refresh (localStorage)
+ *  ========================= */
+const KNOTS_STORE = new Map<number, Pt[]>();
+const LS_KEY = (edgeId: number) => `dirac_edge_knots:${edgeId}`;
+
+function loadKnots(edgeId: number): Pt[] {
+  const mem = KNOTS_STORE.get(edgeId);
+  if (mem) return mem;
+
+  try {
+    const raw = localStorage.getItem(LS_KEY(edgeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const cleaned = parsed
+      .filter((p: any) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+      .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }));
+    KNOTS_STORE.set(edgeId, cleaned);
+    return cleaned;
+  } catch {
+    return [];
+  }
+}
+
+function saveKnots(edgeId: number, pts: Pt[]) {
+  KNOTS_STORE.set(edgeId, pts);
+  try {
+    localStorage.setItem(LS_KEY(edgeId), JSON.stringify(pts));
+  } catch {}
 }
 
 /* =========================
@@ -36,6 +72,7 @@ function LOG(tag: string, payload?: any) {
 ========================= */
 function getDefaultPort(n: UINode, side: Side) {
   const t = String(n.type || "").toLowerCase();
+
   let x = n.x;
   let y = n.y;
 
@@ -315,6 +352,7 @@ export default function EditableEdge({
   b,
   a_port,
   b_port,
+  flow,
   nodesById,
   editable,
   selected,
@@ -323,7 +361,19 @@ export default function EditableEdge({
   const A = nodesById[a];
   const B = nodesById[b];
 
-  const [knots, setKnots] = useState<Pt[]>([]);
+  // ✅ init desde store/localStorage
+  const [knots, _setKnots] = useState<Pt[]>(() => loadKnots(id));
+
+  // ✅ wrapper: siempre persiste
+  const setKnots = (updater: Pt[] | ((prev: Pt[]) => Pt[])) => {
+    _setKnots((prev) => {
+      const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+      saveKnots(id, next);
+      LOG("SAVE_KNOTS", { id, count: next.length });
+      return next;
+    });
+  };
+
   const dragging = useRef<{ idx: number } | null>(null);
   const hasCapture = useRef(false);
 
@@ -354,6 +404,15 @@ export default function EditableEdge({
   const COUPLER_R_IN = 2.2;
 
   const HANDLE_R = 6;
+
+  // ✅ Flujo: parámetros visuales
+  const flowOn = !!flow?.on;
+  const flowDir = (flow?.dir ?? 1) as 1 | -1;
+  const flowStrength = Math.max(0, Math.min(1, Number(flow?.strength ?? (flowOn ? 1 : 0))));
+  const FLOW_STROKE = 2.8 + flowStrength * 1.6;
+  const FLOW_DASH = "10 14";
+  const FLOW_SPEED = 0.9 - flowStrength * 0.35; // más fuerte = más rápido
+  const FLOW_OFFSET = flowDir === 1 ? -48 : 48;
 
   const addPoint = (e: React.PointerEvent | React.MouseEvent, source: string) => {
     const p = svgPointFromEvent(e);
@@ -399,6 +458,28 @@ export default function EditableEdge({
         strokeLinejoin="round"
         opacity={0.9}
       />
+
+      {/* ✅ FLUJO (animación sobre la tubería) */}
+      {flowOn && (
+        <path
+          d={geom.d}
+          fill="none"
+          stroke={`rgba(59,130,246,${0.55 + 0.35 * flowStrength})`}
+          strokeWidth={FLOW_STROKE}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={FLOW_DASH}
+          style={{ pointerEvents: "none" }}
+        >
+          <animate
+            attributeName="stroke-dashoffset"
+            from={0}
+            to={FLOW_OFFSET}
+            dur={`${Math.max(0.35, FLOW_SPEED)}s`}
+            repeatCount="indefinite"
+          />
+        </path>
+      )}
 
       {/* acoples */}
       <circle cx={geom.sx} cy={geom.sy} r={COUPLER_R_OUT} fill="#0f172a" opacity={0.35} />

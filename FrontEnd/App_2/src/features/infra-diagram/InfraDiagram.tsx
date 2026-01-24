@@ -29,10 +29,17 @@ type LocationGroup = {
   location_id: number | null;
 };
 
-// ✅ Extiendo UIEdge localmente (no backend) para puertos visuales
+// ✅ Extiendo UIEdge localmente (no backend) para puertos visuales + flujo simulado
 type UIEdgeWithPorts = UIEdge & {
   a_port?: string | null;
   b_port?: string | null;
+
+  // ✅ SOLO UI (simulación)
+  flow?: {
+    on: boolean;
+    dir?: 1 | -1; // 1 = a->b (normal), -1 = b->a
+    strength?: number; // 0..1 opcional
+  };
 };
 
 type PortSide = "in" | "out";
@@ -104,14 +111,16 @@ function heightByType(t?: string) {
   return 40;
 }
 
+import { getNodePorts as getPortsByType } from "./types";
+
 function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
-  const tt = (n.type || "").toLowerCase();
-  if (tt === "tank") return { ins: ["L1"], outs: ["R1", "R2", "R3"] };
-  if (tt === "manifold") return { ins: ["L1"], outs: ["R1", "R2", "R3", "R4"] };
-  if (tt === "pump") return { ins: ["L1"], outs: ["R1"] };
-  if (tt === "valve") return { ins: ["L1"], outs: ["R1"] };
-  return { ins: ["L1"], outs: ["R1"] };
+  const p = getPortsByType(n.type);
+  return {
+    ins: (p.in ?? []) as string[],
+    outs: (p.out ?? []) as string[],
+  };
 }
+
 
 function buildPorts(n: UINode) {
   const off = 6;
@@ -137,6 +146,83 @@ function buildPorts(n: UINode) {
   }));
 
   return { inPorts, outPorts };
+}
+
+/** =========================
+ *  FLOW SIM (helpers)
+ *  ========================= */
+
+// Ajustá estas heurísticas a tu backend si hace falta
+function isPumpOn(n: UINode) {
+  if (n.type !== "pump") return false;
+  const s = String((n as any).state ?? "").trim().toLowerCase();
+  return s === "run" || s === "running" || s === "on" || s === "1" || s === "true";
+}
+
+
+function isValveOpen(n: UINode) {
+  if (n.type !== "valve") return true;
+  const s = String((n as any).state ?? "").toLowerCase();
+  // default: open/on/1/true
+  return s === "open" || s === "on" || s === "1" || s === "true";
+}
+
+function isNodePassable(n: UINode) {
+  // Si querés bloquear offline:
+  if (n.online === false) return false;
+  if (n.type === "valve") return isValveOpen(n);
+  return true;
+}
+
+function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode>) {
+  // Grafo dirigido por edges a -> b
+  const adj: Record<string, UIEdgeWithPorts[]> = {};
+  for (const e of edges) (adj[e.a] ||= []).push(e);
+
+  // Seeds: bombas ON
+  const seeds = Object.values(nodesById).filter(isPumpOn);
+
+  const visitedNode = new Set<string>();
+  const flowOnEdge = new Set<number>();
+  const q: string[] = [];
+
+  for (const p of seeds) {
+    visitedNode.add(p.id);
+    q.push(p.id);
+  }
+
+  while (q.length) {
+    const cur = q.shift()!;
+    const curNode = nodesById[cur];
+    if (!curNode) continue;
+
+    if (!isNodePassable(curNode)) continue;
+
+    const outEdges = adj[cur] || [];
+    for (const e of outEdges) {
+      const nextId = e.b;
+      const nextNode = nodesById[nextId];
+      if (!nextNode) continue;
+
+      if (!isNodePassable(nextNode)) continue;
+
+      flowOnEdge.add(e.id);
+
+      if (!visitedNode.has(nextId)) {
+        visitedNode.add(nextId);
+        q.push(nextId);
+      }
+    }
+  }
+
+  return edges.map((e) => ({
+    ...e,
+    flow: {
+      on: flowOnEdge.has(e.id),
+      dir: 1,
+      strength: flowOnEdge.has(e.id) ? 1 : 0,
+    },
+  }));
 }
 
 /** =========================
@@ -296,6 +382,7 @@ export default function InfraDiagram() {
       prioridad: e.prioridad,
       a_port: null,
       b_port: null,
+      flow: { on: false, dir: 1, strength: 0 },
     }));
 
     const saved = loadLayoutFromStorage();
@@ -447,10 +534,17 @@ export default function InfraDiagram() {
             prioridad: created.prioridad,
             a_port: a_port ?? null,
             b_port: b_port ?? null,
+            flow: { on: false, dir: 1, strength: 0 },
           },
           ...prev,
         ]);
-        log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id, a_port, b_port });
+        log("EDGE CREATED", {
+          id: created.edge_id,
+          src: created.src_node_id,
+          dst: created.dst_node_id,
+          a_port,
+          b_port,
+        });
       } catch (err: any) {
         console.error(err);
         alert(err?.message || "No se pudo crear la conexión");
@@ -542,7 +636,7 @@ export default function InfraDiagram() {
   }, []);
 
   /** =========================
-   *  Auto-asignación de puertos SOLO visual
+   *  Auto-asignación de puertos SOLO visual + Flow sim
    *  ========================= */
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
     const bySrc: Record<string, UIEdgeWithPorts[]> = {};
@@ -574,7 +668,8 @@ export default function InfraDiagram() {
       });
     }
 
-    return clone;
+    // ✅ SIMULACIÓN DE FLUJO (prende edges desde bombas ON)
+    return simulateFlow(clone, nodesById);
   }, [edges, nodesById]);
 
   /** =========================
@@ -779,6 +874,8 @@ export default function InfraDiagram() {
                     a_port={e.a_port}
                     // @ts-expect-error
                     b_port={e.b_port}
+                    // ✅ NUEVO: flujo simulado (requiere update en EditableEdge.tsx)
+                    flow={e.flow}
                   />
                 ))}
 
