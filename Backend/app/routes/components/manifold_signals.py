@@ -1,13 +1,9 @@
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from psycopg.rows import dict_row
-
 from app.db import get_conn
-from app.security import require_user  # si tu admin usa auth
-
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-manifold-signals"])
-
 
 def _get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
     sql = """
@@ -31,7 +27,6 @@ def _get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, (manifold_id,))
             return cur.fetchall()
-
 
 def _upsert_signals_by_manifold(
     manifold_id: int,
@@ -83,43 +78,31 @@ def _upsert_signals_by_manifold(
             for s in signals:
                 st = (s.get("signal_type") or "").strip().lower()
                 if st not in ("pressure", "flow"):
-                    raise ValueError("signal_type debe ser 'pressure' o 'flow'")
+                    raise HTTPException(status_code=400, detail="signal_type debe ser 'pressure' o 'flow'")
 
-                cur.execute(
-                    sql,
-                    {
-                        "manifold_id": manifold_id,
-                        "signal_type": st,
-                        "node_id": s.get("node_id"),
-                        "tag": s.get("tag"),
-                        "unit": s.get("unit"),
-                        "scale_mult": s.get("scale_mult"),
-                        "scale_add": s.get("scale_add"),
-                        "min_value": s.get("min_value"),
-                        "max_value": s.get("max_value"),
-                    },
-                )
+                cur.execute(sql, {
+                    "manifold_id": manifold_id,
+                    "signal_type": st,
+                    "node_id": s.get("node_id"),
+                    "tag": s.get("tag"),
+                    "unit": s.get("unit"),
+                    "scale_mult": s.get("scale_mult"),
+                    "scale_add": s.get("scale_add"),
+                    "min_value": s.get("min_value"),
+                    "max_value": s.get("max_value"),
+                })
                 out.append(cur.fetchone())
+
         conn.commit()
 
     return out
 
 
 @router.get("/manifolds/{manifold_id}/signals")
-def read_manifold_signals(
-    manifold_id: int,
-    user: Dict[str, Any] = Depends(require_user),  # sacalo si querés público
-):
+def read_manifold_signals(manifold_id: int):
     return _get_signals_by_manifold(manifold_id)
 
 
 @router.put("/manifolds/{manifold_id}/signals")
-def save_manifold_signals(
-    manifold_id: int,
-    signals: List[Dict[str, Any]],
-    user: Dict[str, Any] = Depends(require_user),  # sacalo si querés público
-):
-    try:
-        return _upsert_signals_by_manifold(manifold_id, signals)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def save_manifold_signals(manifold_id: int, signals: List[Dict[str, Any]]):
+    return _upsert_signals_by_manifold(manifold_id, signals)
