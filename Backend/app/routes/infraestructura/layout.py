@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
+import json
+
 from app.db import get_conn
 from psycopg.rows import dict_row
 
@@ -28,19 +30,23 @@ async def health_db():
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
     Devuelve conexiones de layout (edges) desde public.v_layout_edges_flow,
-    incluyendo src_port/dst_port (modo simple 1 salida / 1 entrada).
+    incluyendo src_port/dst_port (modo simple 1 salida / 1 entrada)
+    y knots desde public.layout_edge_knots (para fijar caños).
     - Sin company_id: todas.
     - Con company_id: sólo aristas cuyos endpoints pertenecen a nodos de esa empresa.
-    Si no hay filas, devolvemos [] (200 OK).
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
                 cur.execute(
                     """
-                    SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at, src_port, dst_port
-                    FROM public.v_layout_edges_flow
-                    ORDER BY updated_at DESC
+                    SELECT
+                      e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at,
+                      e.src_port, e.dst_port,
+                      COALESCE(k.knots, '[]'::jsonb) AS knots
+                    FROM public.v_layout_edges_flow e
+                    LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
+                    ORDER BY e.updated_at DESC
                     """
                 )
                 return cur.fetchall()
@@ -73,10 +79,14 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   WHERE l.company_id = %s
                 )
-                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at, e.src_port, e.dst_port
+                SELECT
+                  e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at,
+                  e.src_port, e.dst_port,
+                  COALESCE(k.knots, '[]'::jsonb) AS knots
                 FROM public.v_layout_edges_flow e
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
+                LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
                 ORDER BY e.updated_at DESC
                 """,
                 (company_id, company_id, company_id, company_id),
@@ -89,29 +99,68 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
 
 
 # -------------------------------------------------------------------
+# POST /infraestructura/update_edge_knots
+# -------------------------------------------------------------------
+@router.post("/update_edge_knots")
+async def update_edge_knots(request: Request):
+    """
+    Guarda la forma (knots) de un edge para que quede fijo en cualquier PC.
+
+    Body:
+    {
+      "edge_id": 138,
+      "knots": [{"x":123.4,"y":56.7}, ...]
+    }
+    """
+    data = await request.json()
+    edge_id = data.get("edge_id")
+    knots = data.get("knots")
+
+    if not isinstance(edge_id, int):
+        raise HTTPException(status_code=400, detail="edge_id requerido (int)")
+    if not isinstance(knots, list):
+        raise HTTPException(status_code=400, detail="knots debe ser una lista [{x,y},...]")
+
+    # Validación liviana
+    for p in knots:
+        if not isinstance(p, dict) or "x" not in p or "y" not in p:
+            raise HTTPException(status_code=400, detail="knots inválido: cada punto debe tener x,y")
+        try:
+            float(p["x"])
+            float(p["y"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="knots inválido: x/y deben ser numéricos")
+
+    try:
+        with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                INSERT INTO public.layout_edge_knots (edge_id, knots, updated_at)
+                VALUES (%s, %s::jsonb, now())
+                ON CONFLICT (edge_id)
+                DO UPDATE SET knots = excluded.knots, updated_at = now()
+                RETURNING edge_id, knots, updated_at
+                """,
+                (edge_id, json.dumps(knots)),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return {"ok": True, "saved": row}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error (edge_knots): {e}")
+
+
+# -------------------------------------------------------------------
 # GET /infraestructura/get_layout_combined
 # -------------------------------------------------------------------
 @router.get("/get_layout_combined", response_model=List[dict])
 async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve nodos (tank/pump/valve/manifold).
-    - Sin company_id: usa v_layout_combined (tal cual).
-    - Con company_id:
-        * LEFT JOIN a layout_* para no perder nodos sin layout
-        * level_pct = último tank_ingest
-        * online (tanques) = último ingest ≤ 60s
-        * alarma (tanques) = eval de level_pct contra tank_configs:
-            - ≤ low_low_pct   -> 'critico'
-            - ≤ low_pct       -> 'alerta'
-            - ≥ high_high_pct -> 'critico'
-            - ≥ high_pct      -> 'alerta'
-          (si faltan umbrales o nivel => NULL)
-        * Además devuelve location_id / location_name para agrupar por ubicación en el front.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
-                # Ojo: esta vista no incluye location_id/name.
                 cur.execute(
                     """
                     SELECT node_id, id, type, x, y, updated_at, online, state, level_pct, alarma
@@ -121,7 +170,6 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 )
                 return cur.fetchall()
 
-            # Scoped por empresa con cálculo de online/alarma y ubicación
             cur.execute(
                 """
                 WITH t AS (
@@ -130,7 +178,6 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     t.id::bigint                        AS id,
                     'tank'::text                        AS type,
                     lt.x, lt.y, lt.updated_at,
-                    /* ONLINE tanque: último ingest ≤ 60s */
                     COALESCE((
                       SELECT (now() - i.created_at) <= interval '60 seconds'
                       FROM public.tank_ingest i
@@ -139,9 +186,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       LIMIT 1
                     ), false)                           AS online,
                     NULL::text                          AS state,
-                    /* Último nivel vía LATERAL para reusar en alarma */
                     lvl.level_pct::numeric              AS level_pct,
-                    /* Alarma por thresholds de tank_configs */
                     CASE
                       WHEN lvl.level_pct IS NULL THEN NULL
                       WHEN tc.low_low_pct   IS NOT NULL AND lvl.level_pct <= tc.low_low_pct   THEN 'critico'
@@ -240,10 +285,6 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
 # -------------------------------------------------------------------
 @router.post("/update_layout")
 async def update_layout(request: Request):
-    """
-    Actualiza la posición (x,y) de un nodo de layout.
-    Acepta node_id 'tank:21' o literal (usa node_id). 404 sólo si no existe.
-    """
     data = await request.json()
     node_id = data.get("node_id")
     x = data.get("x")
@@ -265,13 +306,11 @@ async def update_layout(request: Request):
 
     table, id_col = meta
 
-    # Si el sufijo es numérico, actualizamos por *_id (coincide con vistas/joins)
     try:
         id_numeric = int(sufijo)
         where = f"{id_col} = %s"
         params = (x, y, id_numeric)
     except ValueError:
-        # Si no es numérico, caemos a node_id
         where = "node_id = %s"
         params = (x, y, node_id)
 
@@ -305,14 +344,10 @@ async def update_layout(request: Request):
 async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
-    NO devolvemos 404 por listas vacías: [] (200 OK).
-    También aplica el cálculo de online/alarma de tanques (umbral 60s).
-    Ahora, en modo scoped, también incluye location_id / location_name en cada nodo.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
-                # Vista global (sin location_id/name)
                 cur.execute(
                     """
                     SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma
@@ -323,16 +358,20 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 cur.execute(
                     """
-                    SELECT edge_id, src_node_id, dst_node_id, relacion, prioridad, updated_at, src_port, dst_port
-                    FROM public.v_layout_edges_flow
-                    ORDER BY updated_at DESC
+                    SELECT
+                      e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at,
+                      e.src_port, e.dst_port,
+                      COALESCE(k.knots, '[]'::jsonb) AS knots
+                    FROM public.v_layout_edges_flow e
+                    LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
+                    ORDER BY e.updated_at DESC
                     """
                 )
                 edges = cur.fetchall()
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Scoped: nodos (con online/alarma tanque = 60s) + ubicación
+            # Scoped: nodes (idéntico a tu versión)
             cur.execute(
                 """
                 WITH t AS (
@@ -440,7 +479,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
             )
             nodes = cur.fetchall()
 
-            # Scoped: edges (desde view con src_port/dst_port)
+            # Scoped: edges + knots
             cur.execute(
                 """
                 WITH nodes AS (
@@ -468,10 +507,14 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id=%s
                 )
-                SELECT e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at, e.src_port, e.dst_port
+                SELECT
+                  e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at,
+                  e.src_port, e.dst_port,
+                  COALESCE(k.knots, '[]'::jsonb) AS knots
                 FROM public.v_layout_edges_flow e
                 JOIN nodes a ON a.node_id = e.src_node_id
                 JOIN nodes b ON b.node_id = e.dst_node_id
+                LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
                 ORDER BY e.updated_at DESC
                 """,
                 (company_id, company_id, company_id, company_id),
