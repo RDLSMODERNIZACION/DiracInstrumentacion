@@ -2,6 +2,19 @@
 // Tipos backend (DTO)
 // =======================
 
+export type ValveMeta = {
+  // 2way = 1 entrada + 1 salida
+  // 3way = 1 entrada + 2 salidas (R1 y R2)
+  model?: "2way" | "3way";
+
+  // orientación del símbolo/puertos
+  rot?: 0 | 90 | 180 | 270;
+  flipX?: boolean;
+
+  // estado por puerto
+  ports?: Partial<Record<PortId, "open" | "closed">>;
+};
+
 export type CombinedNodeDTO = {
   node_id: string;
   id: number;
@@ -13,6 +26,9 @@ export type CombinedNodeDTO = {
   state?: string | null;
   level_pct?: number | string | null;
   alarma?: string | null;
+
+  // ✅ NUEVO: meta viene solo en valves (pero lo declaramos opcional)
+  meta?: ValveMeta | null;
 
   // info de ubicación (backend)
   location_id?: number | null;
@@ -38,9 +54,12 @@ export type EdgeDTO = {
   prioridad: number | null;
   updated_at: string;
 
-  // ✅ AHORA backend real (v_layout_edges_flow / layout_edges)
+  // ✅ backend real (v_layout_edges_flow / layout_edges)
   src_port?: PortId | null;
   dst_port?: PortId | null;
+
+  // (si usás knots desde el mismo endpoint)
+  knots?: Array<{ x: number; y: number }> | null;
 };
 
 // =======================
@@ -95,13 +114,18 @@ export const MANIFOLD_PORTS: NodePorts = {
   out: ["R1", "R2", "R3", "R4"],
 };
 
-// 🔹 Válvula: paso simple
-export const VALVE_PORTS: NodePorts = {
+// 🔹 Válvula: por defecto 2way (pero puede ser 3way por meta.model)
+export const VALVE_2WAY_PORTS: NodePorts = {
   in: ["L1"],
   out: ["R1"],
 };
 
-// Helper general
+export const VALVE_3WAY_PORTS: NodePorts = {
+  in: ["L1"],
+  out: ["R1", "R2"],
+};
+
+// Helper general por type (sin meta)
 export function getNodePorts(type: UINodeBase["type"]): NodePorts {
   switch (type) {
     case "tank":
@@ -111,10 +135,16 @@ export function getNodePorts(type: UINodeBase["type"]): NodePorts {
     case "manifold":
       return MANIFOLD_PORTS;
     case "valve":
-      return VALVE_PORTS;
+      return VALVE_2WAY_PORTS;
     default:
       return {};
   }
+}
+
+// Helper para válvulas (con meta.model)
+export function getValvePorts(meta?: ValveMeta | null): NodePorts {
+  const model = meta?.model ?? "2way";
+  return model === "3way" ? VALVE_3WAY_PORTS : VALVE_2WAY_PORTS;
 }
 
 // =======================
@@ -138,6 +168,11 @@ export type ManifoldNode = UINodeBase & {
 
 export type ValveNode = UINodeBase & {
   type: "valve";
+
+  // ✅ NUEVO: meta viene del backend y define 2way/3way + rot/flip + open/closed
+  meta?: ValveMeta | null;
+
+  // puertos calculados (si querés guardarlos en el node al armar UI)
   ports?: NodePorts;
 };
 
@@ -153,11 +188,14 @@ export type UIEdge = {
   b: string; // dst node_id
 
   // puertos de conexión (para dibujo)
-  a_port?: PortId;
-  b_port?: PortId;
+  a_port?: PortId | null;
+  b_port?: PortId | null;
 
   relacion?: string;
   prioridad?: number | null;
+
+  // (si lo usás en el front)
+  knots?: Array<{ x: number; y: number }> | null;
 };
 
 // =======================

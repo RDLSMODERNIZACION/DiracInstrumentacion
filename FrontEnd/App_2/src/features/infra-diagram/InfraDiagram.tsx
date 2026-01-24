@@ -343,19 +343,23 @@ export default function InfraDiagram() {
   useEffect(() => {
     if (!data) return;
 
-    let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
-      id: n.node_id,
-      type: n.type,
-      name: `${n.type} ${n.id}`,
-      x: numberOr(n.x, 0),
-      y: numberOr(n.y, 0),
-      online: n.online ?? null,
-      state: n.state ?? null,
-      level_pct: toNumber(n.level_pct),
-      alarma: n.alarma ?? null,
-      location_id: n.location_id ?? null,
-      location_name: n.location_name ?? null,
-    })) as UINode[];
+  let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
+  id: n.node_id,
+  type: n.type,
+  name: `${n.type} ${n.id}`,
+  x: numberOr(n.x, 0),
+  y: numberOr(n.y, 0),
+  online: n.online ?? null,
+  state: n.state ?? null,
+  level_pct: toNumber(n.level_pct),
+  alarma: n.alarma ?? null,
+  location_id: n.location_id ?? null,
+  location_name: n.location_name ?? null,
+
+  // ✅ CLAVE: no perder meta (rot/flip/model/ports)
+  ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
+})) as UINode[];
+
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
