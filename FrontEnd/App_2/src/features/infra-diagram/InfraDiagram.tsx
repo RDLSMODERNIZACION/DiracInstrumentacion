@@ -427,7 +427,7 @@ export default function InfraDiagram() {
   useEffect(() => {
     if (!nodes.length) return;
 
-    const pad = 90;
+    const pad = 120;
     const bb = computeBBox(nodes, pad);
 
     const safe = {
@@ -738,7 +738,9 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={1} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+         <TransformWrapper initialScale={3.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+
+
 
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
