@@ -13,6 +13,61 @@ function formatValue(v: any, decimals = 1) {
   return n.toFixed(decimals);
 }
 
+function Flange({
+  x,
+  y,
+  side,
+  r = 10,
+  neck = 10,
+  active,
+  alarm,
+}: {
+  x: number;
+  y: number;
+  side: "left" | "right";
+  r?: number;
+  neck?: number;
+  active: boolean;
+  alarm: boolean;
+}) {
+  const stroke = alarm ? "#ef4444" : active ? "#22c55e" : "#64748b";
+  const neckX = side === "left" ? x : x - neck;
+
+  return (
+    <g>
+      {/* cuello */}
+      <rect
+        x={neckX}
+        y={y - 5}
+        width={neck}
+        height={10}
+        rx={3}
+        ry={3}
+        fill="#94a3b8"
+        opacity={0.9}
+      />
+      {/* brida */}
+      <circle cx={x} cy={y} r={r} fill="#e5e7eb" stroke={stroke} strokeWidth={2.5} />
+      {/* aro interior */}
+      <circle cx={x} cy={y} r={r - 3.5} fill="none" stroke="#94a3b8" strokeWidth={1.5} opacity={0.9} />
+      {/* tornillos */}
+      {[0, 60, 120, 180, 240, 300].map((a) => {
+        const rad = (a * Math.PI) / 180;
+        return (
+          <circle
+            key={a}
+            cx={x + Math.cos(rad) * (r - 2.6)}
+            cy={y + Math.sin(rad) * (r - 2.6)}
+            r={1.6}
+            fill="#475569"
+            opacity={0.95}
+          />
+        );
+      })}
+    </g>
+  );
+}
+
 export default function ManifoldNodeView({
   n,
   getPos,
@@ -35,14 +90,14 @@ export default function ManifoldNodeView({
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
 
   // ✅ MÁS GRANDE (legible)
-  const w = 210;
-  const h = 78;
+  const w = 230;
+  const h = 86;
 
   // --- Datos (si existen) ---
   const pUnit = (n.signals?.pressure?.unit ?? "bar").trim() || "bar";
   const qUnit = (n.signals?.flow?.unit ?? "mts3/h").trim() || "mts3/h";
 
-  // Si tu backend ya manda .value / .ts, esto lo toma. Si no, cae en "--"
+  // si tu backend manda .value / .ts, esto lo toma. Si no, cae en "--"
   const pValRaw = (n as any).signals?.pressure?.value ?? (n as any).signals?.pressure?.v ?? null;
   const qValRaw = (n as any).signals?.flow?.value ?? (n as any).signals?.flow?.v ?? null;
 
@@ -52,7 +107,7 @@ export default function ManifoldNodeView({
   const pText = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
   const qText = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
 
-  // timestamp (opcional). si no existe, igual funciona
+  // timestamp (opcional)
   const pTs = (n as any).signals?.pressure?.ts ?? (n as any).signals?.pressure?.updated_at ?? null;
   const qTs = (n as any).signals?.flow?.ts ?? (n as any).signals?.flow?.updated_at ?? null;
 
@@ -98,25 +153,20 @@ export default function ManifoldNodeView({
   // --- Estilos por estado ---
   const stroke = alarm ? "#ef4444" : connected ? "#22c55e" : "#475569";
   const strokeW = alarm ? 3 : connected ? 3 : 2;
-
   const fill = connected ? "url(#lgSteel)" : "url(#lgSteelDim)";
-  // Si no tenés lgSteelDim en defs, podés dejar lgSteel y listo.
-
-  // Glow suave si conectado/alarma (SVG filter opcional)
   const filterId = alarm ? "glowRed" : connected ? "glowGreen" : undefined;
 
   // Layout filas
-  const rowH = 26;
-  const gapY = 8;
+  const rowH = 28;
+  const gapY = 10;
   const startY = (h - (rowH * 2 + gapY)) / 2;
 
-  const leftPad = 14;
-  const badgeW = 34;
+  const leftPad = 18;
+  const badgeW = 36;
   const badgeH = 22;
-  const valueX = leftPad + badgeW + 10;
+  const valueX = leftPad + badgeW + 12;
 
-  // Fuente más grande
-  const valueFont = 18;
+  const valueFont = 19;
   const badgeFont = 13;
 
   return (
@@ -132,7 +182,7 @@ export default function ManifoldNodeView({
       className="node-shadow"
       style={{ cursor: enabled ? "move" : "default" }}
     >
-      {/* Opcional: defs para glow + dim */}
+      {/* defs: dim + glow */}
       <defs>
         <linearGradient id="lgSteelDim" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#cbd5e1" stopOpacity="0.55" />
@@ -176,6 +226,10 @@ export default function ManifoldNodeView({
         </filter>
       </defs>
 
+      {/* Bridas (conexión al caño) */}
+      <Flange x={0} y={h / 2} side="left" active={connected} alarm={alarm} />
+      <Flange x={w} y={h / 2} side="right" active={connected} alarm={alarm} />
+
       {/* Base */}
       <rect
         width={w}
@@ -188,14 +242,14 @@ export default function ManifoldNodeView({
         filter={filterId ? `url(#${filterId})` : undefined}
       />
 
-      {/* Indicador mini (punto) */}
+      {/* indicador mini */}
       <circle
-        cx={w - 16}
-        cy={16}
-        r={6}
+        cx={w - 18}
+        cy={18}
+        r={6.5}
         fill={alarm ? "#ef4444" : connected ? "#22c55e" : "#94a3b8"}
         stroke="#0f172a"
-        strokeOpacity={0.25}
+        strokeOpacity={0.22}
       />
 
       {/* Fila P */}
@@ -223,7 +277,7 @@ export default function ManifoldNodeView({
 
         <text
           x={valueX}
-          y={rowH / 2 + 6}
+          y={rowH / 2 + 7}
           textAnchor="start"
           className="select-none"
           fill="#0f172a"
@@ -258,7 +312,7 @@ export default function ManifoldNodeView({
 
         <text
           x={valueX}
-          y={rowH / 2 + 6}
+          y={rowH / 2 + 7}
           textAnchor="start"
           className="select-none"
           fill="#0f172a"

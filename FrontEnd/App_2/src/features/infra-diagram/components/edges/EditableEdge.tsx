@@ -128,13 +128,14 @@ function getDefaultPort(n: UINode, side: Side) {
     return { x, y };
   }
 
-  if (t === "manifold") {
-    const halfW = 55;
-    const portOffset = 6;
-    x = side === "in" ? (n as any).x - halfW - portOffset : (n as any).x + halfW + portOffset;
-    y = (n as any).y;
-    return { x, y };
-  }
+ if (t === "manifold") {
+  const W = 230;     // mismo que el nodo
+  const portOffset = 6;
+  x = side === "in" ? (n as any).x - W / 2 - portOffset : (n as any).x + W / 2 + portOffset;
+  y = (n as any).y;  // ✅ centro
+  return { x, y };
+}
+
 
   // ✅ valve: default depende de model (2way vs 3way) y se transforma por rot/flip
   if (t === "valve") {
@@ -201,37 +202,42 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   }
 
   if ((n as any).type === "manifold") {
-    const halfW = 55;
-    const OUT = 6;
+  // ✅ mismos tamaños que ManifoldNodeView
+  const W = 230;
+  const H = 86;
 
-    const leftX = (n as any).x - halfW - OUT;
-    const rightX = (n as any).x + halfW + OUT;
+  // ✅ si la brida la dibujaste “afuera”, sumá ese extra.
+  // (en mi versión anterior la brida está justo en el borde: x=0 y x=w)
+  // si la moviste afuera con flangeR=10, dejá OUT = 10
+  const OUT = 6; // probá 6…12 según dónde esté la brida
 
-    const topY = (n as any).y - 14;
-    const midY = (n as any).y;
-    const botY = (n as any).y + 14;
+  const leftX = (n as any).x - W / 2 - OUT;
+  const rightX = (n as any).x + W / 2 + OUT;
 
-    switch (pid) {
-      case "L1":
-        return { x: leftX, y: topY };
-      case "L2":
-        return { x: leftX, y: botY };
-      case "R1":
-        return { x: rightX, y: topY };
-      case "R2":
-        return { x: rightX, y: midY };
-      case "R3":
-        return { x: rightX, y: botY };
-      case "R4":
-        return { x: rightX, y: botY + 14 };
-      case "T1":
-        return { x: (n as any).x, y: (n as any).y - 22 - OUT };
-      case "B1":
-        return { x: (n as any).x, y: (n as any).y + 22 + OUT };
-      default:
-        return getDefaultPort(n, side);
-    }
+  const midY = (n as any).y;
+
+  // ✅ TODO AL MEDIO para que “pegue” en la brida central
+  switch (pid) {
+    case "L1":
+    case "L2":
+      return { x: leftX, y: midY };
+
+    case "R1":
+    case "R2":
+    case "R3":
+    case "R4":
+      return { x: rightX, y: midY };
+
+    case "T1":
+      return { x: (n as any).x, y: (n as any).y - H / 2 - OUT };
+    case "B1":
+      return { x: (n as any).x, y: (n as any).y + H / 2 + OUT };
+
+    default:
+      return getDefaultPort(n, side);
   }
+}
+
 
   // ✅ VALVE (2way/3way con rot/flip)
   if ((n as any).type === "valve") {
