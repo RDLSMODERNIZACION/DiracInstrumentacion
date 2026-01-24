@@ -1,14 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
-import Edge from "@/components/diagram/Edge";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
 import { computeBBox, isSet, layoutRow, nodesByIdAsArray, numberOr, toNumber } from "./layout";
-
 import { CombinedNodeDTO, EdgeDTO, Tip, UINode, UIEdge, TankNode, PumpNode, ManifoldNode, ValveNode } from "./types";
 
 import { loadLayoutFromStorage, saveLayoutToStorage, importLayout as importLayoutLS } from "@/layout/layoutIO";
-
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 
@@ -20,6 +17,10 @@ import ValveNodeView from "./components/nodes/ValveNodeView";
 import EditableEdge from "./components/edges/EditableEdge";
 import OpsDrawer from "./components/OpsDrawer";
 import LocationDrawer from "./components/LocationDrawer";
+
+/** =========================
+ *  Types
+ *  ========================= */
 
 type LocationGroup = {
   key: string;
@@ -37,6 +38,22 @@ type UIEdgeWithPorts = UIEdge & {
 type PortSide = "in" | "out";
 type PortHit = { nodeId: string; side: PortSide; portId: string; x: number; y: number };
 
+/** =========================
+ *  Constantes
+ *  ========================= */
+
+const TOPBAR_H = 44;
+const ZOOM_MAX = 5;
+const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
+
+const VIEWBOX_DEFAULT = { minx: 0, miny: 0, w: 1000, h: 520 };
+const MAX_VIEWBOX_W = 6000;
+const MAX_VIEWBOX_H = 3500;
+
+/** =========================
+ *  Helpers (fuera del componente)
+ *  ========================= */
+
 function spreadOffsets(count: number, span: number) {
   if (count <= 1) return [0];
   const step = span / (count - 1);
@@ -44,43 +61,100 @@ function spreadOffsets(count: number, span: number) {
   return Array.from({ length: count }, (_, i) => start + i * step);
 }
 
+function getCompanyIdFromQuery(): number | null {
+  const qs = new URLSearchParams(window.location.search);
+  const raw = qs.get("company_id");
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const v = Number(trimmed);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return v;
+}
+
+function isDebugEnabled(): boolean {
+  const qs = new URLSearchParams(window.location.search);
+  return qs.get("debug") === "1" || import.meta.env.DEV;
+}
+
+function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
+  const out: Record<string, number> = {};
+  for (const r of rows || []) {
+    const t = String((r as any).type ?? "").toLowerCase() || "unknown";
+    out[t] = (out[t] ?? 0) + 1;
+  }
+  return out;
+}
+
+function halfByType(t?: string) {
+  const tt = (t || "").toLowerCase();
+  if (tt === "tank") return 66;
+  if (tt === "pump") return 26;
+  if (tt === "manifold") return 55;
+  if (tt === "valve") return 14;
+  return 20;
+}
+
+function heightByType(t?: string) {
+  const tt = (t || "").toLowerCase();
+  if (tt === "tank") return 92;
+  if (tt === "pump") return 52;
+  if (tt === "manifold") return 74;
+  if (tt === "valve") return 28;
+  return 40;
+}
+
+function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
+  const tt = (n.type || "").toLowerCase();
+  if (tt === "tank") return { ins: ["L1"], outs: ["R1", "R2", "R3"] };
+  if (tt === "manifold") return { ins: ["L1"], outs: ["R1", "R2", "R3", "R4"] };
+  if (tt === "pump") return { ins: ["L1"], outs: ["R1"] };
+  if (tt === "valve") return { ins: ["L1"], outs: ["R1"] };
+  return { ins: ["L1"], outs: ["R1"] };
+}
+
+function buildPorts(n: UINode) {
+  const off = 6;
+  const half = halfByType(n.type);
+  const h = heightByType(n.type);
+  const span = Math.max(18, h * 0.6);
+
+  const { ins, outs } = getNodePorts(n);
+  const inOffs = spreadOffsets(ins.length, span);
+  const outOffs = spreadOffsets(outs.length, span);
+
+  const inPorts = ins.map((id, i) => ({
+    portId: id,
+    side: "in" as const,
+    x: n.x - half - off,
+    y: n.y + inOffs[i],
+  }));
+  const outPorts = outs.map((id, i) => ({
+    portId: id,
+    side: "out" as const,
+    x: n.x + half + off,
+    y: n.y + outOffs[i],
+  }));
+
+  return { inPorts, outPorts };
+}
+
+/** =========================
+ *  Component
+ *  ========================= */
+
 export default function InfraDiagram() {
-  // altura de la barra superior (en px)
-  const TOPBAR_H = 44;
-
-  // ✅ Zoom máximo inicial (arranca “cerca”)
-  const ZOOM_MAX = 5;
-
-  // ✅ URL del mapa (full page)
-  const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
-
-  const [nodes, setNodes] = useState<UINode[]>([]);
-  const [edges, setEdges] = useState<UIEdgeWithPorts[]>([]);
-
-  // viewBox dinámico
-  const [viewBoxStr, setViewBoxStr] = useState("0 0 1000 520");
-  const [vb, setVb] = useState({ minx: 0, miny: 0, w: 1000, h: 520 });
-
-  // === DEBUG TOOLS ===
-  const DEBUG = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search);
-    return qs.get("debug") === "1" || import.meta.env.DEV;
-  }, []);
-  const log = (...args: any[]) => {
-    if (DEBUG) console.log("[InfraDiagram]", ...args);
-  };
+  // === Debug ===
+  const DEBUG = useMemo(() => isDebugEnabled(), []);
+  const log = useCallback(
+    (...args: any[]) => {
+      if (DEBUG) console.log("[InfraDiagram]", ...args);
+    },
+    [DEBUG]
+  );
 
   // Company scope leído del querystring (?company_id=XX)
-  const companyId = useMemo(() => {
-    const qs = new URLSearchParams(window.location.search);
-    const raw = qs.get("company_id");
-    if (raw == null) return null;
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const v = Number(trimmed);
-    if (!Number.isFinite(v) || v <= 0) return null;
-    return v;
-  }, []);
+  const companyId = useMemo(() => getCompanyIdFromQuery(), []);
 
   useEffect(() => {
     log("href:", window.location.href);
@@ -88,23 +162,22 @@ export default function InfraDiagram() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Ir a mapa saliendo del iframe si existe
-  const goToMapa = () => {
-    try {
-      const w: any = window;
-      const topWin = w.top || w;
-      topWin.location.href = MAPA_URL;
-    } catch {
-      window.open(MAPA_URL, "_blank", "noopener,noreferrer");
-    }
-  };
+  // State principal
+  const [nodes, setNodes] = useState<UINode[]>([]);
+  const [edges, setEdges] = useState<UIEdgeWithPorts[]>([]);
 
-  // Edit/Connect mode
+  // viewBox dinámico
+  const [viewBoxStr, setViewBoxStr] = useState(
+    `${VIEWBOX_DEFAULT.minx} ${VIEWBOX_DEFAULT.miny} ${VIEWBOX_DEFAULT.w} ${VIEWBOX_DEFAULT.h}`
+  );
+  const [vb, setVb] = useState(VIEWBOX_DEFAULT);
+
+  // Modes
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
-  // Ports state
+  // Connect ports (modo conectar)
   const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -120,7 +193,8 @@ export default function InfraDiagram() {
   // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
-  const showTip = (e: React.MouseEvent, content: { title: string; lines: string[] }) => {
+
+  const showTip = useCallback((e: React.MouseEvent, content: { title: string; lines: string[] }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTip({
@@ -129,10 +203,26 @@ export default function InfraDiagram() {
       x: e.clientX - rect.left + 12,
       y: e.clientY - rect.top + 12,
     });
-  };
-  const hideTip = () => setTip(null);
+  }, []);
 
-  // Consulta viva
+  const hideTip = useCallback(() => setTip(null), []);
+
+  /** =========================
+   *  Navegar a mapa
+   *  ========================= */
+  const goToMapa = useCallback(() => {
+    try {
+      const w: any = window;
+      const topWin = w.top || w;
+      topWin.location.href = MAPA_URL;
+    } catch {
+      window.open(MAPA_URL, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
+  /** =========================
+   *  Query live
+   *  ========================= */
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
@@ -156,7 +246,9 @@ export default function InfraDiagram() {
     (raw) => raw
   );
 
-  // Transformar a UI
+  /** =========================
+   *  Transformar backend → UI
+   *  ========================= */
   useEffect(() => {
     if (!data) return;
 
@@ -221,7 +313,9 @@ export default function InfraDiagram() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // Mapa por id
+  /** =========================
+   *  nodesById
+   *  ========================= */
   const nodesById = useMemo(() => {
     const m: Record<string, UINode> = {};
     for (const n of nodes) {
@@ -230,28 +324,29 @@ export default function InfraDiagram() {
     return m;
   }, [nodes]);
 
-  // viewBox y fondo dinámicos + CLAMP (evita “zoom microscópico”)
+  /** =========================
+   *  viewBox clamp
+   *  ========================= */
   useEffect(() => {
     if (!nodes.length) return;
 
     const pad = 90;
     const bb = computeBBox(nodes, pad);
 
-    const MAX_W = 6000;
-    const MAX_H = 3500;
-
     const safe = {
       minx: bb.minx,
       miny: bb.miny,
-      w: Math.min(bb.w, MAX_W),
-      h: Math.min(bb.h, MAX_H),
+      w: Math.min(bb.w, MAX_VIEWBOX_W),
+      h: Math.min(bb.h, MAX_VIEWBOX_H),
     };
 
     setVb(safe);
     setViewBoxStr(`${safe.minx} ${safe.miny} ${safe.w} ${safe.h}`);
   }, [nodes]);
 
-  // ===== Fondos por ubicación =====
+  /** =========================
+   *  Fondos por ubicación
+   *  ========================= */
   const locationGroups: LocationGroup[] = useMemo(() => {
     if (!nodes.length) return [];
 
@@ -259,11 +354,7 @@ export default function InfraDiagram() {
 
     for (const n of nodes) {
       const key =
-        n.location_id != null
-          ? String(n.location_id)
-          : n.location_name
-          ? `name:${n.location_name}`
-          : "unknown";
+        n.location_id != null ? String(n.location_id) : n.location_name ? `name:${n.location_name}` : "unknown";
 
       const locName = n.location_name || (n.location_id != null ? `Ubicación ${n.location_id}` : "Sin ubicación");
 
@@ -281,89 +372,50 @@ export default function InfraDiagram() {
       });
   }, [nodes]);
 
-  const getPos = (id: string) => {
-    const n = nodesById[id];
-    return n ? { x: n.x, y: n.y } : null;
-  };
-  const setPos = (id: string, x: number, y: number) => {
+  /** =========================
+   *  Get/Set pos
+   *  ========================= */
+  const getPos = useCallback(
+    (id: string) => {
+      const n = nodesById[id];
+      return n ? { x: n.x, y: n.y } : null;
+    },
+    [nodesById]
+  );
+
+  const setPos = useCallback((id: string, x: number, y: number) => {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
-  };
+  }, []);
 
-  const saveNodePosition = async (id: string) => {
-    try {
-      const pos = getPos(id);
-      if (!pos) return;
-      saveLayoutToStorage(nodesByIdAsArray(nodesById));
-      await updateLayout(id, pos.x, pos.y);
-      log("POSITION SAVED", { id, x: pos.x, y: pos.y });
-    } catch (e) {
-      console.error("Error al actualizar layout:", e);
-    }
-  };
+  const saveNodePosition = useCallback(
+    async (id: string) => {
+      try {
+        const pos = getPos(id);
+        if (!pos) return;
+        saveLayoutToStorage(nodesByIdAsArray(nodesById));
+        await updateLayout(id, pos.x, pos.y);
+        log("POSITION SAVED", { id, x: pos.x, y: pos.y });
+      } catch (e) {
+        console.error("Error al actualizar layout:", e);
+      }
+    },
+    [getPos, nodesById, log]
+  );
 
-  // ====== Edit / Connect ======
-  const toggleEdit = () => {
-    const next = !editMode;
-    setEditMode(next);
-    if (!next) {
-      setConnectMode(false);
-      setConnectFrom(null);
-      setSelectedEdgeId(null);
-    }
-  };
-
-  // ====== Ports (multi) ======
-  function halfByType(t?: string) {
-    const tt = (t || "").toLowerCase();
-    if (tt === "tank") return 66;
-    if (tt === "pump") return 26;
-    if (tt === "manifold") return 55;
-    if (tt === "valve") return 14;
-    return 20;
-  }
-  function heightByType(t?: string) {
-    const tt = (t || "").toLowerCase();
-    if (tt === "tank") return 92;
-    if (tt === "pump") return 52;
-    if (tt === "manifold") return 74;
-    if (tt === "valve") return 28;
-    return 40;
-  }
-
-  function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
-    const tt = (n.type || "").toLowerCase();
-    if (tt === "tank") return { ins: ["L1"], outs: ["R1", "R2", "R3"] }; // ✅ tanque con 3 salidas
-    if (tt === "manifold") return { ins: ["L1"], outs: ["R1", "R2", "R3", "R4"] };
-    if (tt === "pump") return { ins: ["L1"], outs: ["R1"] };
-    if (tt === "valve") return { ins: ["L1"], outs: ["R1"] };
-    return { ins: ["L1"], outs: ["R1"] };
-  }
-
-  function buildPorts(n: UINode) {
-    const off = 6;
-    const half = halfByType(n.type);
-    const h = heightByType(n.type);
-    const span = Math.max(18, h * 0.6);
-
-    const { ins, outs } = getNodePorts(n);
-    const inOffs = spreadOffsets(ins.length, span);
-    const outOffs = spreadOffsets(outs.length, span);
-
-    const inPorts = ins.map((id, i) => ({
-      portId: id,
-      side: "in" as const,
-      x: n.x - half - off,
-      y: n.y + inOffs[i],
-    }));
-    const outPorts = outs.map((id, i) => ({
-      portId: id,
-      side: "out" as const,
-      x: n.x + half + off,
-      y: n.y + outOffs[i],
-    }));
-
-    return { inPorts, outPorts };
-  }
+  /** =========================
+   *  UI actions
+   *  ========================= */
+  const toggleEdit = useCallback(() => {
+    setEditMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setConnectMode(false);
+        setConnectFrom(null);
+        setSelectedEdgeId(null);
+      }
+      return next;
+    });
+  }, []);
 
   function clientToSvgPoint(e: React.MouseEvent | React.PointerEvent) {
     if (!svgRef.current) return null;
@@ -376,73 +428,51 @@ export default function InfraDiagram() {
     return { x: p.x, y: p.y };
   }
 
-  function edgeExists(src: string, dst: string) {
-    return edges.some((e) => e.a === src && e.b === dst);
-  }
+  const edgeExists = useCallback(
+    (src: string, dst: string) => edges.some((e) => e.a === src && e.b === dst),
+    [edges]
+  );
 
-  async function tryCreateEdge(src: string, dst: string, a_port?: string | null, b_port?: string | null) {
-    if (src === dst || edgeExists(src, dst)) return;
-    try {
-      // ⚠️ backend no conoce puertos -> solo guardamos visual en frontend
-      const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
-      setEdges((prev) => [
-        {
-          id: created.edge_id,
-          a: created.src_node_id,
-          b: created.dst_node_id,
-          relacion: created.relacion,
-          prioridad: created.prioridad,
-          a_port: a_port ?? null,
-          b_port: b_port ?? null,
-        },
-        ...prev,
-      ]);
-      log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id, a_port, b_port });
-    } catch (err: any) {
-      console.error(err);
-      alert(err?.message || "No se pudo crear la conexión");
-    }
-  }
+  const tryCreateEdge = useCallback(
+    async (src: string, dst: string, a_port?: string | null, b_port?: string | null) => {
+      if (src === dst || edgeExists(src, dst)) return;
+      try {
+        const created = await apiCreateEdge({ src_node_id: src, dst_node_id: dst });
+        setEdges((prev) => [
+          {
+            id: created.edge_id,
+            a: created.src_node_id,
+            b: created.dst_node_id,
+            relacion: created.relacion,
+            prioridad: created.prioridad,
+            a_port: a_port ?? null,
+            b_port: b_port ?? null,
+          },
+          ...prev,
+        ]);
+        log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id, a_port, b_port });
+      } catch (err: any) {
+        console.error(err);
+        alert(err?.message || "No se pudo crear la conexión");
+      }
+    },
+    [edgeExists, log]
+  );
 
-  // ✅ auto-asignación de puertos SOLO visual (para que un tanque “salga a muchos”)
-  const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
-    const bySrc: Record<string, UIEdgeWithPorts[]> = {};
-    for (const e of edges) {
-      (bySrc[e.a] ||= []).push(e);
-    }
-
-    const clone = edges.map((e) => ({ ...e }));
-    const idxById: Record<number, number> = {};
-    clone.forEach((e, i) => (idxById[e.id] = i));
-
-    for (const [src, list] of Object.entries(bySrc)) {
-      const n = nodesById[src];
-      if (!n) continue;
-      const { outs } = getNodePorts(n);
-      if (!outs.length) continue;
-
-      // orden estable
-      const sorted = [...list].sort((a, b) => a.id - b.id);
-      sorted.forEach((e, i) => {
-        const k = idxById[e.id];
-        if (k == null) return;
-
-        // a_port
-        if (!clone[k].a_port) {
-          clone[k].a_port = outs[Math.min(i, outs.length - 1)];
-        }
-
-        // b_port (si no tiene, metemos el primer IN del destino)
-        const dstNode = nodesById[e.b];
-        if (dstNode && !clone[k].b_port) {
-          const { ins } = getNodePorts(dstNode);
-          clone[k].b_port = ins[0] ?? "L1";
-        }
-      });
-    }
-
-    return clone;
-  }, [edges, nodesById]);
+  const handleDeleteEdge = useCallback(
+    async (edgeId: number) => {
+      try {
+        await apiDeleteEdge(edgeId);
+        setEdges((prev) => prev.filter((e) => e.id !== edgeId));
+        setSelectedEdgeId(null);
+        log("EDGE DELETED", { edgeId });
+      } catch (err: any) {
+        console.error(err);
+        alert(err?.message || "No se pudo borrar la conexión");
+      }
+    },
+    [log]
+  );
 
   // Keyboard: Delete para borrar, Esc cancelar
   useEffect(() => {
@@ -460,21 +490,9 @@ export default function InfraDiagram() {
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [editMode, selectedEdgeId]);
+  }, [editMode, selectedEdgeId, handleDeleteEdge]);
 
-  const handleDeleteEdge = async (edgeId: number) => {
-    try {
-      await apiDeleteEdge(edgeId);
-      setEdges((prev) => prev.filter((e) => e.id !== edgeId));
-      setSelectedEdgeId(null);
-      log("EDGE DELETED", { edgeId });
-    } catch (err: any) {
-      console.error(err);
-      alert(err?.message || "No se pudo borrar la conexión");
-    }
-  };
-
-  const applyAutoLayout = async () => {
+  const applyAutoLayout = useCallback(async () => {
     const pumps = nodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = nodes.filter((n) => n.type === "tank") as TankNode[];
     const manifolds = nodes.filter((n) => n.type === "manifold") as ManifoldNode[];
@@ -498,31 +516,73 @@ export default function InfraDiagram() {
       console.error(err);
       alert("No se pudo guardar el auto-orden.");
     }
-  };
+  }, [nodes, log]);
 
   // preview path para cable fantasma
-  function previewPath(sx: number, sy: number, ex: number, ey: number) {
+  const previewPath = useCallback((sx: number, sy: number, ex: number, ey: number) => {
     const mx = (sx + ex) / 2;
     return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ey} L ${ex} ${ey}`;
-  }
+  }, []);
 
   // abrir operación por nodo
-  function maybeOpenOps(n: UINode) {
-    if (editMode || connectMode) return;
-    if (n.online !== true) return;
-    setOpsNode(n);
-    setOpsOpen(true);
-  }
+  const maybeOpenOps = useCallback(
+    (n: UINode) => {
+      if (editMode || connectMode) return;
+      if (n.online !== true) return;
+      setOpsNode(n);
+      setOpsOpen(true);
+    },
+    [editMode, connectMode]
+  );
 
-  // abrir drawer de localidad al hacer click en el fondo
-  function handleLocationClick(g: LocationGroup) {
+  // abrir drawer de localidad
+  const handleLocationClick = useCallback((g: LocationGroup) => {
     setSelectedLocation({ id: g.location_id, name: g.name });
     setLocationDrawerOpen(true);
-  }
+  }, []);
 
+  /** =========================
+   *  Auto-asignación de puertos SOLO visual
+   *  ========================= */
+  const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
+    const bySrc: Record<string, UIEdgeWithPorts[]> = {};
+    for (const e of edges) (bySrc[e.a] ||= []).push(e);
+
+    const clone = edges.map((e) => ({ ...e }));
+    const idxById: Record<number, number> = {};
+    clone.forEach((e, i) => (idxById[e.id] = i));
+
+    for (const [src, list] of Object.entries(bySrc)) {
+      const n = nodesById[src];
+      if (!n) continue;
+
+      const { outs } = getNodePorts(n);
+      if (!outs.length) continue;
+
+      const sorted = [...list].sort((a, b) => a.id - b.id);
+      sorted.forEach((e, i) => {
+        const k = idxById[e.id];
+        if (k == null) return;
+
+        if (!clone[k].a_port) clone[k].a_port = outs[Math.min(i, outs.length - 1)];
+
+        const dstNode = nodesById[e.b];
+        if (dstNode && !clone[k].b_port) {
+          const { ins } = getNodePorts(dstNode);
+          clone[k].b_port = ins[0] ?? "L1";
+        }
+      });
+    }
+
+    return clone;
+  }, [edges, nodesById]);
+
+  /** =========================
+   *  Render
+   *  ========================= */
   return (
     <div style={{ width: "100%", padding: 0 }}>
-      {/* barra superior */}
+      {/* Barra superior */}
       <div
         style={{
           height: TOPBAR_H,
@@ -629,8 +689,10 @@ export default function InfraDiagram() {
                   const p = clientToSvgPoint(e);
                   if (p) setMouseSvg(p);
                 }}
-                onMouseDown={() => {
-                  if (editMode) setSelectedEdgeId(null);
+                onMouseDown={(e) => {
+                  // ✅ NO borres selección si clickeaste en un edge/handle. Solo si tocaste fondo del SVG.
+                  if (!editMode) return;
+                  if (e.target === e.currentTarget) setSelectedEdgeId(null);
                 }}
               >
                 <defs>
@@ -671,6 +733,7 @@ export default function InfraDiagram() {
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
+                {/* Fondos por localidad */}
                 {locationGroups.map((g) => (
                   <g
                     key={`loc-bg-${g.key}`}
@@ -701,7 +764,7 @@ export default function InfraDiagram() {
                   </g>
                 ))}
 
-                {/* ✅ Siempre EditableEdge así soporta a_port/b_port (aunque editable=false) */}
+                {/* Edges */}
                 {edgesForRender.map((e) => (
                   <EditableEdge
                     key={`edge-${e.id}`}
@@ -712,13 +775,14 @@ export default function InfraDiagram() {
                     editable={editMode}
                     selected={selectedEdgeId === e.id}
                     onSelect={(id) => setSelectedEdgeId(id)}
-                    // @ts-expect-error: si tu EditableEdge no tiene props de puertos, igual no rompe (solo las ignora).
+                    // @ts-expect-error
                     a_port={e.a_port}
                     // @ts-expect-error
                     b_port={e.b_port}
                   />
                 ))}
 
+                {/* Nodes */}
                 {nodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -771,7 +835,7 @@ export default function InfraDiagram() {
                   ) : null
                 )}
 
-                {/* ✅ MULTI-PORTS EN CONNECT MODE */}
+                {/* Puertos para modo conectar */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
@@ -821,6 +885,7 @@ export default function InfraDiagram() {
                     );
                   })}
 
+                {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
                     d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
@@ -851,14 +916,4 @@ export default function InfraDiagram() {
       />
     </div>
   );
-}
-
-// util de debug para contar tipos
-function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
-  const out: Record<string, number> = {};
-  for (const r of rows || []) {
-    const t = String((r as any).type ?? "").toLowerCase() || "unknown";
-    out[t] = (out[t] ?? 0) + 1;
-  }
-  return out;
 }

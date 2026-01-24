@@ -1,5 +1,5 @@
 // src/features/infra-diagram/components/edges/EditableEdge.tsx
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import type { UINode, PortId } from "../../types";
 
 type Props = {
@@ -23,9 +23,12 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function dbg(...args: any[]) {
+/** ===== NEW LOGS ONLY ===== */
+function LOG(tag: string, payload?: any) {
+  // podés apagar todo con esta bandera
   const ON = true;
-  if (ON) console.log("[EditableEdge]", ...args);
+  if (!ON) return;
+  console.log(`🧪[Edge ${tag}]`, payload ?? "");
 }
 
 /* =========================
@@ -33,7 +36,6 @@ function dbg(...args: any[]) {
 ========================= */
 function getDefaultPort(n: UINode, side: Side) {
   const t = String(n.type || "").toLowerCase();
-
   let x = n.x;
   let y = n.y;
 
@@ -233,11 +235,8 @@ function orthogonalPath(points: Pt[]) {
     }
     const colX = Math.abs(a.x - b.x) < 0.001 && Math.abs(b.x - p.x) < 0.001;
     const colY = Math.abs(a.y - b.y) < 0.001 && Math.abs(b.y - p.y) < 0.001;
-    if (colX || colY) {
-      cleaned[cleaned.length - 1] = p;
-    } else {
-      cleaned.push(p);
-    }
+    if (colX || colY) cleaned[cleaned.length - 1] = p;
+    else cleaned.push(p);
   }
 
   let d = `M ${cleaned[0].x} ${cleaned[0].y}`;
@@ -298,9 +297,7 @@ function basePath(A: UINode, B: UINode, aPort?: PortId | null, bPort?: PortId | 
   const dx = Math.abs(ex - sx);
   const dy = Math.abs(ey - sy);
 
-  if (dy < 2 || dx < 2) {
-    return { sx, sy, ex, ey, d: `M ${sx} ${sy} L ${ex} ${ey}` };
-  }
+  if (dy < 2 || dx < 2) return { sx, sy, ex, ey, d: `M ${sx} ${sy} L ${ex} ${ey}` };
 
   const mx = (sx + ex) / 2;
   const pts: Pt[] = [
@@ -328,6 +325,13 @@ export default function EditableEdge({
 
   const [knots, setKnots] = useState<Pt[]>([]);
   const dragging = useRef<{ idx: number } | null>(null);
+  const hasCapture = useRef(false);
+
+  useEffect(() => {
+    LOG("MOUNT", { id, a, b });
+    return () => LOG("UNMOUNT", { id, a, b });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const geom = useMemo(() => {
     if (!A || !B) return null;
@@ -336,10 +340,8 @@ export default function EditableEdge({
     const pts: Pt[] = [{ x: base.sx, y: base.sy }, ...knots, { x: base.ex, y: base.ey }];
     const d = knots.length ? orthogonalPath(pts) : base.d;
 
-    dbg("GEOM", id, { editable, selected, knots: knots.length });
-
     return { ...base, d };
-  }, [A, B, a_port, b_port, knots, editable, selected, id]);
+  }, [A, B, a_port, b_port, knots]);
 
   if (!A || !B || !geom) return null;
 
@@ -353,21 +355,50 @@ export default function EditableEdge({
 
   const HANDLE_R = 6;
 
-  const forceAddPoint = (e: React.PointerEvent | React.MouseEvent) => {
+  const addPoint = (e: React.PointerEvent | React.MouseEvent, source: string) => {
     const p = svgPointFromEvent(e);
-    dbg("ADD (force)", id, p);
+    LOG("ADD_POINT", { id, source, p, prevKnots: knots.length });
     if (p) setKnots((prev) => [...prev, p]);
   };
 
-  // ✅ MOSTRAR HANDLES SI HAY CODO, AUNQUE selected SE PIERDA
   const showHandles = editable && (selected || knots.length > 0);
 
+  const stopIfDragging = (e: React.SyntheticEvent) => {
+    if (!hasCapture.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return (
-    <g>
+    <g onPointerDown={stopIfDragging} onPointerMove={stopIfDragging} onPointerUp={stopIfDragging}>
       {/* tubería */}
-      <path d={geom.d} fill="none" stroke="#0f172a" strokeWidth={STROKE_OUTER} strokeLinecap="round" strokeLinejoin="round" opacity={0.55} />
-      <path d={geom.d} fill="none" stroke="#cbd5e1" strokeWidth={STROKE_BODY} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
-      <path d={geom.d} fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={STROKE_HL} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+      <path
+        d={geom.d}
+        fill="none"
+        stroke="#0f172a"
+        strokeWidth={STROKE_OUTER}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.55}
+      />
+      <path
+        d={geom.d}
+        fill="none"
+        stroke="#cbd5e1"
+        strokeWidth={STROKE_BODY}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.95}
+      />
+      <path
+        d={geom.d}
+        fill="none"
+        stroke="rgba(255,255,255,0.45)"
+        strokeWidth={STROKE_HL}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.9}
+      />
 
       {/* acoples */}
       <circle cx={geom.sx} cy={geom.sy} r={COUPLER_R_OUT} fill="#0f172a" opacity={0.35} />
@@ -383,23 +414,24 @@ export default function EditableEdge({
         fill="none"
         style={{ pointerEvents: "stroke", cursor: editable ? "pointer" : "default" }}
         onPointerDown={(e) => {
-          dbg("HIT pointerdown", id, { editable, selected, shiftKey: (e as any).shiftKey });
+          LOG("HIT_POINTERDOWN", { id, editable, selected, shift: (e as any).shiftKey });
           if (!editable) return;
 
           e.preventDefault();
           e.stopPropagation();
           onSelect?.(id);
 
-          if ((e as any).shiftKey) forceAddPoint(e);
+          if ((e as any).shiftKey) addPoint(e, "hit:pointerdown");
         }}
         onClick={(e) => {
+          LOG("HIT_CLICK", { id, editable, selected, shift: (e as any).shiftKey });
           if (!editable) return;
           e.stopPropagation();
           onSelect?.(id);
         }}
       />
 
-      {/* ✅ HANDLES (drag) */}
+      {/* HANDLES */}
       {showHandles &&
         knots.map((p, idx) => (
           <g key={`knot-${id}-${idx}`}>
@@ -407,29 +439,41 @@ export default function EditableEdge({
             <circle
               cx={p.x}
               cy={p.y}
-              r={HANDLE_R + 8}
+              r={HANDLE_R + 10}
               fill="transparent"
-              style={{ pointerEvents: "all", cursor: "move", touchAction: "none" as any }}
+              style={{ pointerEvents: "all", cursor: "move", touchAction: "none" }}
               onPointerDown={(e) => {
-                dbg("HANDLE down", id, { idx, p });
+                LOG("HANDLE_DOWN", { id, idx, p, pointerId: e.pointerId });
+                if (!editable) return;
+
                 e.preventDefault();
                 e.stopPropagation();
-                onSelect?.(id); // mantiene selección
+                onSelect?.(id);
+
+                hasCapture.current = true;
                 (e.currentTarget as SVGCircleElement).setPointerCapture(e.pointerId);
                 dragging.current = { idx };
               }}
               onPointerMove={(e) => {
                 if (!dragging.current || dragging.current.idx !== idx) return;
                 const pt = svgPointFromEvent(e);
+                LOG("HANDLE_MOVE", { id, idx, pointerId: e.pointerId, pt });
                 if (!pt) return;
-                dbg("HANDLE move", id, { idx, pt });
+
+                e.preventDefault();
+                e.stopPropagation();
                 setKnots((prev) => prev.map((q, i) => (i === idx ? pt : q)));
               }}
               onPointerUp={(e) => {
-                dbg("HANDLE up", id, { idx });
+                LOG("HANDLE_UP", { id, idx, pointerId: e.pointerId });
+                if (!editable) return;
+
                 e.preventDefault();
                 e.stopPropagation();
+
                 dragging.current = null;
+                hasCapture.current = false;
+
                 try {
                   (e.currentTarget as SVGCircleElement).releasePointerCapture(e.pointerId);
                 } catch {}
@@ -445,12 +489,47 @@ export default function EditableEdge({
               stroke="#0ea5e9"
               strokeWidth={2}
               opacity={0.95}
-              style={{ pointerEvents: "all", cursor: "move", touchAction: "none" as any }}
+              style={{ pointerEvents: "all", cursor: "move", touchAction: "none" }}
+              onPointerDown={(e) => {
+                LOG("HANDLE_DOT_DOWN", { id, idx, p, pointerId: e.pointerId });
+                if (!editable) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+                onSelect?.(id);
+
+                hasCapture.current = true;
+                (e.currentTarget as SVGCircleElement).setPointerCapture(e.pointerId);
+                dragging.current = { idx };
+              }}
+              onPointerMove={(e) => {
+                if (!dragging.current || dragging.current.idx !== idx) return;
+                const pt = svgPointFromEvent(e);
+                LOG("HANDLE_DOT_MOVE", { id, idx, pointerId: e.pointerId, pt });
+                if (!pt) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+                setKnots((prev) => prev.map((q, i) => (i === idx ? pt : q)));
+              }}
+              onPointerUp={(e) => {
+                LOG("HANDLE_DOT_UP", { id, idx, pointerId: e.pointerId });
+                if (!editable) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                dragging.current = null;
+                hasCapture.current = false;
+
+                try {
+                  (e.currentTarget as SVGCircleElement).releasePointerCapture(e.pointerId);
+                } catch {}
+              }}
               onClick={(e) => {
-                // ALT + click borra
                 if ((e as any).altKey) {
                   e.stopPropagation();
-                  dbg("HANDLE delete", id, { idx });
+                  LOG("HANDLE_DELETE", { id, idx });
                   setKnots((prev) => prev.filter((_, i) => i !== idx));
                 }
               }}
@@ -461,8 +540,24 @@ export default function EditableEdge({
       {/* selección visual */}
       {selected && (
         <>
-          <path d={geom.d} fill="none" stroke="#38bdf8" strokeWidth={STROKE_OUTER + 2} strokeLinecap="round" strokeLinejoin="round" opacity={0.22} />
-          <path d={geom.d} fill="none" stroke="#0ea5e9" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.95} />
+          <path
+            d={geom.d}
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth={STROKE_OUTER + 2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.22}
+          />
+          <path
+            d={geom.d}
+            fill="none"
+            stroke="#0ea5e9"
+            strokeWidth={3.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.95}
+          />
         </>
       )}
     </g>
