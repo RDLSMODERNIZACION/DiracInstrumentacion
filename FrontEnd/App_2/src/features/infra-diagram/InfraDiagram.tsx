@@ -738,14 +738,16 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={ZOOM_MAX} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+          <TransformWrapper initialScale={1} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
                 width="100%"
                 height="100%"
                 viewBox={viewBoxStr}
-                preserveAspectRatio="none"
+                preserveAspectRatio="xMidYMid meet"
+
                 style={{ display: "block" }}
                 onMouseMove={(e) => {
                   if (!connectFrom) return;
