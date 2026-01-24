@@ -3,7 +3,18 @@ import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
 import { computeBBox, isSet, layoutRow, nodesByIdAsArray, numberOr, toNumber } from "./layout";
-import { CombinedNodeDTO, EdgeDTO, Tip, UINode, UIEdge, TankNode, PumpNode, ManifoldNode, ValveNode } from "./types";
+import {
+  CombinedNodeDTO,
+  EdgeDTO,
+  Tip,
+  UINode,
+  UIEdge,
+  TankNode,
+  PumpNode,
+  ManifoldNode,
+  ValveNode,
+  getNodePorts as getPortsByType,
+} from "./types";
 
 import { loadLayoutFromStorage, saveLayoutToStorage, importLayout as importLayoutLS } from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
@@ -29,16 +40,15 @@ type LocationGroup = {
   location_id: number | null;
 };
 
-// ✅ Extiendo UIEdge localmente (no backend) para puertos visuales + flujo simulado
+// ✅ Extiendo UIEdge localmente (no backend) para puertos + flujo
 type UIEdgeWithPorts = UIEdge & {
   a_port?: string | null;
   b_port?: string | null;
-
   // ✅ SOLO UI (simulación)
   flow?: {
     on: boolean;
-    dir?: 1 | -1; // 1 = a->b (normal), -1 = b->a
-    strength?: number; // 0..1 opcional
+    dir?: 1 | -1;
+    strength?: number;
   };
 };
 
@@ -111,8 +121,7 @@ function heightByType(t?: string) {
   return 40;
 }
 
-import { getNodePorts as getPortsByType } from "./types";
-
+// ✅ Unificado: puertos por tipo desde ./types (para modo conectar)
 function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
   const p = getPortsByType(n.type);
   return {
@@ -120,7 +129,6 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
     outs: (p.out ?? []) as string[],
   };
 }
-
 
 function buildPorts(n: UINode) {
   const off = 6;
@@ -149,37 +157,33 @@ function buildPorts(n: UINode) {
 }
 
 /** =========================
- *  FLOW SIM (helpers)
+ *  FLOW SIM (simple, dirigido)
  *  ========================= */
 
-// Ajustá estas heurísticas a tu backend si hace falta
 function isPumpOn(n: UINode) {
   if (n.type !== "pump") return false;
   const s = String((n as any).state ?? "").trim().toLowerCase();
   return s === "run" || s === "running" || s === "on" || s === "1" || s === "true";
 }
 
-
 function isValveOpen(n: UINode) {
   if (n.type !== "valve") return true;
-  const s = String((n as any).state ?? "").toLowerCase();
-  // default: open/on/1/true
+  const s = String((n as any).state ?? "").trim().toLowerCase();
+  // cuando tengas "closed", esto corta el flujo
   return s === "open" || s === "on" || s === "1" || s === "true";
 }
 
 function isNodePassable(n: UINode) {
-  // Si querés bloquear offline:
   if (n.online === false) return false;
   if (n.type === "valve") return isValveOpen(n);
   return true;
 }
 
+// ✅ Flujo: dirigido por a->b (src->dst) usando edges del backend
 function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode>) {
-  // Grafo dirigido por edges a -> b
   const adj: Record<string, UIEdgeWithPorts[]> = {};
   for (const e of edges) (adj[e.a] ||= []).push(e);
 
-  // Seeds: bombas ON
   const seeds = Object.values(nodesById).filter(isPumpOn);
 
   const visitedNode = new Set<string>();
@@ -204,6 +208,7 @@ function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode
       const nextNode = nodesById[nextId];
       if (!nextNode) continue;
 
+      // ✅ si una válvula está cerrada, no pasa
       if (!isNodePassable(nextNode)) continue;
 
       flowOnEdge.add(e.id);
@@ -239,7 +244,6 @@ export default function InfraDiagram() {
     [DEBUG]
   );
 
-  // Company scope leído del querystring (?company_id=XX)
   const companyId = useMemo(() => getCompanyIdFromQuery(), []);
 
   useEffect(() => {
@@ -374,15 +378,15 @@ export default function InfraDiagram() {
       return { ...n, x, y } as UINode;
     });
 
-    const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e) => ({
+    // ✅ EDGES: ahora vienen con src_port/dst_port desde backend
+    const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e: any) => ({
       id: e.edge_id,
       a: e.src_node_id,
       b: e.dst_node_id,
       relacion: e.relacion,
       prioridad: e.prioridad,
-      a_port: null,
-      b_port: null,
-      flow: { on: false, dir: 1, strength: 0 },
+      a_port: e.src_port ?? "R1",
+      b_port: e.dst_port ?? "L1",
     }));
 
     const saved = loadLayoutFromStorage();
@@ -515,10 +519,7 @@ export default function InfraDiagram() {
     return { x: p.x, y: p.y };
   }
 
-  const edgeExists = useCallback(
-    (src: string, dst: string) => edges.some((e) => e.a === src && e.b === dst),
-    [edges]
-  );
+  const edgeExists = useCallback((src: string, dst: string) => edges.some((e) => e.a === src && e.b === dst), [edges]);
 
   const tryCreateEdge = useCallback(
     async (src: string, dst: string, a_port?: string | null, b_port?: string | null) => {
@@ -532,19 +533,13 @@ export default function InfraDiagram() {
             b: created.dst_node_id,
             relacion: created.relacion,
             prioridad: created.prioridad,
-            a_port: a_port ?? null,
-            b_port: b_port ?? null,
-            flow: { on: false, dir: 1, strength: 0 },
+            // ✅ modo simple: si el backend todavía no devuelve puertos en create, default
+            a_port: (created as any).src_port ?? a_port ?? "R1",
+            b_port: (created as any).dst_port ?? b_port ?? "L1",
           },
           ...prev,
         ]);
-        log("EDGE CREATED", {
-          id: created.edge_id,
-          src: created.src_node_id,
-          dst: created.dst_node_id,
-          a_port,
-          b_port,
-        });
+        log("EDGE CREATED", { id: created.edge_id, src: created.src_node_id, dst: created.dst_node_id });
       } catch (err: any) {
         console.error(err);
         alert(err?.message || "No se pudo crear la conexión");
@@ -612,13 +607,11 @@ export default function InfraDiagram() {
     }
   }, [nodes, log]);
 
-  // preview path para cable fantasma
   const previewPath = useCallback((sx: number, sy: number, ex: number, ey: number) => {
     const mx = (sx + ex) / 2;
     return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ey} L ${ex} ${ey}`;
   }, []);
 
-  // abrir operación por nodo
   const maybeOpenOps = useCallback(
     (n: UINode) => {
       if (editMode || connectMode) return;
@@ -629,47 +622,16 @@ export default function InfraDiagram() {
     [editMode, connectMode]
   );
 
-  // abrir drawer de localidad
   const handleLocationClick = useCallback((g: LocationGroup) => {
     setSelectedLocation({ id: g.location_id, name: g.name });
     setLocationDrawerOpen(true);
   }, []);
 
   /** =========================
-   *  Auto-asignación de puertos SOLO visual + Flow sim
+   *  edgesForRender: SIN auto-asignación (ya viene de backend)
    *  ========================= */
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
-    const bySrc: Record<string, UIEdgeWithPorts[]> = {};
-    for (const e of edges) (bySrc[e.a] ||= []).push(e);
-
-    const clone = edges.map((e) => ({ ...e }));
-    const idxById: Record<number, number> = {};
-    clone.forEach((e, i) => (idxById[e.id] = i));
-
-    for (const [src, list] of Object.entries(bySrc)) {
-      const n = nodesById[src];
-      if (!n) continue;
-
-      const { outs } = getNodePorts(n);
-      if (!outs.length) continue;
-
-      const sorted = [...list].sort((a, b) => a.id - b.id);
-      sorted.forEach((e, i) => {
-        const k = idxById[e.id];
-        if (k == null) return;
-
-        if (!clone[k].a_port) clone[k].a_port = outs[Math.min(i, outs.length - 1)];
-
-        const dstNode = nodesById[e.b];
-        if (dstNode && !clone[k].b_port) {
-          const { ins } = getNodePorts(dstNode);
-          clone[k].b_port = ins[0] ?? "L1";
-        }
-      });
-    }
-
-    // ✅ SIMULACIÓN DE FLUJO (prende edges desde bombas ON)
-    return simulateFlow(clone, nodesById);
+    return simulateFlow(edges, nodesById);
   }, [edges, nodesById]);
 
   /** =========================
@@ -785,7 +747,6 @@ export default function InfraDiagram() {
                   if (p) setMouseSvg(p);
                 }}
                 onMouseDown={(e) => {
-                  // ✅ NO borres selección si clickeaste en un edge/handle. Solo si tocaste fondo del SVG.
                   if (!editMode) return;
                   if (e.target === e.currentTarget) setSelectedEdgeId(null);
                 }}
@@ -870,11 +831,8 @@ export default function InfraDiagram() {
                     editable={editMode}
                     selected={selectedEdgeId === e.id}
                     onSelect={(id) => setSelectedEdgeId(id)}
-                    // @ts-expect-error
-                    a_port={e.a_port}
-                    // @ts-expect-error
-                    b_port={e.b_port}
-                    // ✅ NUEVO: flujo simulado (requiere update en EditableEdge.tsx)
+                    a_port={e.a_port as any}
+                    b_port={e.b_port as any}
                     flow={e.flow}
                   />
                 ))}
