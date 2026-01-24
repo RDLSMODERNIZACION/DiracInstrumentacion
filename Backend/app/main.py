@@ -47,8 +47,7 @@ from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
-# ✅ NUEVO: Manifold signals (caudal/presión) - router separado (NO toca manifolds.py)
-from app.routes.dirac_admin.manifold_signals import router as admin_manifold_signals_router
+
 
 # ===== Mapa =====
 from app.routes.mapa.mapasagua import router as mapasagua_router
