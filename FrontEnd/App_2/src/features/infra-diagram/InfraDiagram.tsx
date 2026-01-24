@@ -167,17 +167,18 @@ function isPumpOn(n: UINode) {
 }
 
 function isValveOpen(n: UINode) {
-  if (n.type !== "valve") return true;
-  const s = String((n as any).state ?? "").trim().toLowerCase();
-  // cuando tengas "closed", esto corta el flujo
+  const s = String((n as any).state ?? "").toLowerCase();
   return s === "open" || s === "on" || s === "1" || s === "true";
 }
 
+
 function isNodePassable(n: UINode) {
+  // 🔹 por ahora NO cortamos flujo por válvulas
+  // 🔹 solo podrías cortar si un nodo estuviera offline
   if (n.online === false) return false;
-  if (n.type === "valve") return isValveOpen(n);
   return true;
 }
+
 
 // ✅ Flujo: dirigido por a->b (src->dst) usando edges del backend
 function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode>) {

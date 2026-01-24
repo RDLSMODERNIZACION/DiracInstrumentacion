@@ -19,30 +19,33 @@ export type CombinedNodeDTO = {
   location_name?: string | null;
 };
 
+// Puertos normalizados (extensible)
+export type PortId =
+  | "L1"
+  | "L2"
+  | "R1"
+  | "R2"
+  | "R3"
+  | "R4"
+  | "T1"
+  | "B1";
+
 export type EdgeDTO = {
   edge_id: number;
   src_node_id: string;
   dst_node_id: string;
   relacion: string;
-  prioridad: number;
+  prioridad: number | null;
   updated_at: string;
 
-  // (FUTURO backend)
-  src_port?: PortId;
-  dst_port?: PortId;
+  // ✅ AHORA backend real (v_layout_edges_flow / layout_edges)
+  src_port?: PortId | null;
+  dst_port?: PortId | null;
 };
 
 // =======================
 // Tipos UI
 // =======================
-
-// Puertos normalizados (extensible)
-export type PortId =
-  | "L1" | "L2"
-  | "R1" | "R2" | "R3" | "R4"
-  | "T1"
-  | "B1";
-
 
 // Info extra UI
 type BaseExtras = {
@@ -91,7 +94,6 @@ export const MANIFOLD_PORTS: NodePorts = {
   in: ["L1", "L2"],
   out: ["R1", "R2", "R3", "R4"],
 };
-
 
 // 🔹 Válvula: paso simple
 export const VALVE_PORTS: NodePorts = {
@@ -146,16 +148,16 @@ export type UINode = TankNode | PumpNode | ManifoldNode | ValveNode;
 // =======================
 
 export type UIEdge = {
-  id: number;        // edge_id
-  a: string;         // src node_id
-  b: string;         // dst node_id
+  id: number; // edge_id
+  a: string; // src node_id
+  b: string; // dst node_id
 
-  // NUEVO: puertos de conexión
+  // puertos de conexión (para dibujo)
   a_port?: PortId;
   b_port?: PortId;
 
   relacion?: string;
-  prioridad?: number;
+  prioridad?: number | null;
 };
 
 // =======================
