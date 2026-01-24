@@ -33,7 +33,7 @@ export default function InfraDiagram() {
   const TOPBAR_H = 44;
 
   // ✅ Zoom máximo inicial (arranca “cerca”)
-  const ZOOM_MAX = 2.5;
+  const ZOOM_MAX = 5;
 
   // ✅ URL del mapa (full page)
   const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
