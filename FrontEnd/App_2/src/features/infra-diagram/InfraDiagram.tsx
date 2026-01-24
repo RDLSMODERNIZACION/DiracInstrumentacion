@@ -738,7 +738,7 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-         <TransformWrapper initialScale={3.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+         <TransformWrapper initialScale={4.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
 
 
 
