@@ -2,6 +2,13 @@ import React, { useId, useMemo } from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ValveNode } from "../../types";
 
+type ValveMeta = {
+  model?: "2way" | "3way";
+  rot?: 0 | 90 | 180 | 270;
+  flipX?: boolean;
+  ports?: Record<string, "open" | "closed">;
+};
+
 export default function ValveNodeView({
   n,
   getPos,
@@ -23,6 +30,19 @@ export default function ValveNodeView({
 }) {
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
 
+  const meta = (n as any).meta as ValveMeta | undefined;
+  const model = (meta?.model ?? "2way") as "2way" | "3way";
+  const rot = (meta?.rot ?? 0) as 0 | 90 | 180 | 270;
+  const flipX = Boolean(meta?.flipX ?? false);
+  const ports = meta?.ports ?? {};
+
+  const r1Closed = ports?.R1 === "closed";
+  const r2Closed = ports?.R2 === "closed";
+
+  // Transform para que el símbolo acompañe a los puertos (getPortPos ya rota/flippea)
+  // OJO: el order importa: primero rotar y después flip en el eje X del símbolo
+  const xform = `rotate(${rot}) scale(${flipX ? -1 : 1} 1)`;
+
   // === dimensiones ===
   const W = 34; // ancho total del cuerpo
   const H = 18; // alto del cuerpo
@@ -34,6 +54,7 @@ export default function ValveNodeView({
   const strokeDark = "#c2410c";
   const fillBase = "#fff7ed";
   const pipe = "#64748b";
+  const closedPipe = "#94a3b8";
 
   const uid = useId().replace(/:/g, "_");
   const gradBody = `valveBodyGrad_${uid}`;
@@ -41,9 +62,14 @@ export default function ValveNodeView({
   const shadow = `valveShadow_${uid}`;
   const shine = `valveShine_${uid}`;
 
-  const tipLines: string[] = ["Tipo: válvula (gate)"];
+  const tipLines: string[] = [
+    model === "3way" ? "Tipo: válvula (3 vías)" : "Tipo: válvula (2 vías)",
+    `Rot: ${rot}°`,
+    `FlipX: ${flipX ? "sí" : "no"}`,
+    model === "3way" ? `R2: ${r2Closed ? "cerrada" : "abierta"}` : "",
+  ].filter(Boolean);
 
-  // dos triángulos enfrentados, pero con “bisel” (se ve más pro)
+  // cuerpo base (gate)
   const leftTri = `${-halfW + 3},${-halfH} ${-halfW + 3},${halfH} -1,0`;
   const rightTri = `${halfW - 3},${-halfH} ${halfW - 3},${halfH} 1,0`;
 
@@ -66,6 +92,14 @@ export default function ValveNodeView({
     }
     return arr;
   }, [halfH]);
+
+  // helper “X” para marcar salida cerrada
+  const ClosedX = ({ x, y }: { x: number; y: number }) => (
+    <g opacity={0.95}>
+      <line x1={x - 5} y1={y - 5} x2={x + 5} y2={y + 5} stroke="#ef4444" strokeWidth={2.2} strokeLinecap="round" />
+      <line x1={x - 5} y1={y + 5} x2={x + 5} y2={y - 5} stroke="#ef4444" strokeWidth={2.2} strokeLinecap="round" />
+    </g>
+  );
 
   return (
     <g
@@ -106,107 +140,141 @@ export default function ValveNodeView({
         </linearGradient>
       </defs>
 
-      {/* CAÑO (más real) */}
-      <g filter={`url(#${shadow})`}>
-        <rect
-          x={-halfW - 18}
-          y={-3.2}
-          width={W + 36}
-          height={6.4}
-          rx={3.2}
-          fill={`url(#${gradPipe})`}
-          opacity={0.95}
-        />
-        {/* un “filete” de luz */}
-        <rect
-          x={-halfW - 17}
-          y={-2.6}
-          width={W + 34}
-          height={1.6}
-          rx={0.8}
-          fill="#ffffff"
-          opacity={0.18}
-        />
-      </g>
-
-      {/* CUERPO VÁLVULA */}
-      <g filter={`url(#${shadow})`}>
-        {/* triángulos enfrentados (gate) */}
-        <polygon
-          points={leftTri}
-          fill={`url(#${gradBody})`}
-          stroke={strokeDark}
-          strokeWidth={2}
-          strokeLinejoin="round"
-        />
-        <polygon
-          points={rightTri}
-          fill={`url(#${gradBody})`}
-          stroke={strokeDark}
-          strokeWidth={2}
-          strokeLinejoin="round"
-        />
-
-        {/* brillo superior del cuerpo */}
-        <path
-          d={`M ${-halfW + 4} ${-halfH + 1} L ${-2} ${-2} L ${2} ${-2} L ${halfW - 4} ${-halfH + 1}`}
-          fill="none"
-          stroke={`url(#${shine})`}
-          strokeWidth={3.2}
-          strokeLinecap="round"
-          opacity={0.9}
-        />
-
-        {/* centro con doble anillo */}
-        <circle cx={0} cy={0} r={4.0} fill="#fff" opacity={0.65} />
-        <circle cx={0} cy={0} r={3.0} fill="none" stroke={strokeDark} strokeWidth={1.8} opacity={0.85} />
-        <circle cx={0} cy={0} r={1.8} fill={stroke} opacity={0.95} />
-
-        {/* “bonete” (pieza entre cuerpo y vástago) */}
-        <rect
-          x={-5.2}
-          y={-halfH - 6.8}
-          width={10.4}
-          height={6.8}
-          rx={2.6}
-          fill={`url(#${gradBody})`}
-          stroke={strokeDark}
-          strokeWidth={1.6}
-        />
-
-        {/* vástago */}
-        <line
-          x1={0}
-          y1={-halfH - 6.6}
-          x2={0}
-          y2={-halfH - 12.5}
-          stroke={strokeDark}
-          strokeWidth={2.2}
-          strokeLinecap="round"
-        />
-      </g>
-
-      {/* VOLANTE (mejor) */}
-      <g filter={`url(#${shadow})`}>
-        <circle cx={0} cy={-halfH - 16} r={6.8} fill="#ffffff" stroke={strokeDark} strokeWidth={2} />
-        <circle cx={0} cy={-halfH - 16} r={2.4} fill={fillBase} stroke={strokeDark} strokeWidth={1.6} />
-        {spokes.map((s, i) => (
-          <line
-            key={i}
-            x1={s.x1}
-            y1={s.y1}
-            x2={s.x2}
-            y2={s.y2}
-            stroke={stroke}
-            strokeWidth={1.6}
-            strokeLinecap="round"
+      {/* ✅ Todo el símbolo adentro del xform para rot/flip */}
+      <g transform={xform}>
+        {/* CAÑO */}
+        <g filter={`url(#${shadow})`}>
+          {/* Entrada / línea principal */}
+          <rect
+            x={-halfW - 18}
+            y={-3.2}
+            width={W + 36}
+            height={6.4}
+            rx={3.2}
+            fill={`url(#${gradPipe})`}
             opacity={0.95}
           />
-        ))}
+          {/* filete de luz */}
+          <rect
+            x={-halfW - 17}
+            y={-2.6}
+            width={W + 34}
+            height={1.6}
+            rx={0.8}
+            fill="#ffffff"
+            opacity={0.18}
+          />
+
+          {/* Si es 3 vías: agregamos la segunda salida (ramal inferior) */}
+          {model === "3way" && (
+            <>
+              {/* ramal superior (R1) */}
+              <line
+                x1={halfW + 2}
+                y1={0}
+                x2={halfW + 18}
+                y2={-12}
+                stroke={r1Closed ? closedPipe : pipe}
+                strokeWidth={6.2}
+                strokeLinecap="round"
+                opacity={r1Closed ? 0.55 : 0.95}
+              />
+              {/* ramal inferior (R2) */}
+              <line
+                x1={halfW + 2}
+                y1={0}
+                x2={halfW + 18}
+                y2={12}
+                stroke={r2Closed ? closedPipe : pipe}
+                strokeWidth={6.2}
+                strokeLinecap="round"
+                opacity={r2Closed ? 0.55 : 0.95}
+              />
+              {/* X en la salida cerrada */}
+              {r2Closed && <ClosedX x={halfW + 18} y={12} />}
+              {r1Closed && <ClosedX x={halfW + 18} y={-12} />}
+            </>
+          )}
+        </g>
+
+        {/* CUERPO VÁLVULA */}
+        <g filter={`url(#${shadow})`}>
+          <polygon
+            points={leftTri}
+            fill={`url(#${gradBody})`}
+            stroke={strokeDark}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+          <polygon
+            points={rightTri}
+            fill={`url(#${gradBody})`}
+            stroke={strokeDark}
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+
+          {/* brillo superior */}
+          <path
+            d={`M ${-halfW + 4} ${-halfH + 1} L ${-2} ${-2} L ${2} ${-2} L ${halfW - 4} ${-halfH + 1}`}
+            fill="none"
+            stroke={`url(#${shine})`}
+            strokeWidth={3.2}
+            strokeLinecap="round"
+            opacity={0.9}
+          />
+
+          {/* centro con doble anillo */}
+          <circle cx={0} cy={0} r={4.0} fill="#fff" opacity={0.65} />
+          <circle cx={0} cy={0} r={3.0} fill="none" stroke={strokeDark} strokeWidth={1.8} opacity={0.85} />
+          <circle cx={0} cy={0} r={1.8} fill={stroke} opacity={0.95} />
+
+          {/* bonete */}
+          <rect
+            x={-5.2}
+            y={-halfH - 6.8}
+            width={10.4}
+            height={6.8}
+            rx={2.6}
+            fill={`url(#${gradBody})`}
+            stroke={strokeDark}
+            strokeWidth={1.6}
+          />
+
+          {/* vástago */}
+          <line
+            x1={0}
+            y1={-halfH - 6.6}
+            x2={0}
+            y2={-halfH - 12.5}
+            stroke={strokeDark}
+            strokeWidth={2.2}
+            strokeLinecap="round"
+          />
+        </g>
+
+        {/* VOLANTE */}
+        <g filter={`url(#${shadow})`}>
+          <circle cx={0} cy={-halfH - 16} r={6.8} fill="#ffffff" stroke={strokeDark} strokeWidth={2} />
+          <circle cx={0} cy={-halfH - 16} r={2.4} fill={fillBase} stroke={strokeDark} strokeWidth={1.6} />
+          {spokes.map((s, i) => (
+            <line
+              key={i}
+              x1={s.x1}
+              y1={s.y1}
+              x2={s.x2}
+              y2={s.y2}
+              stroke={stroke}
+              strokeWidth={1.6}
+              strokeLinecap="round"
+              opacity={0.95}
+            />
+          ))}
+        </g>
       </g>
 
-      {/* “hit area” opcional (si querés que sea más fácil clickear): */}
-      {/* <rect x={-halfW-22} y={-halfH-26} width={W+44} height={H+44} fill="transparent" /> */}
+      {/* hit-area opcional */}
+      {/* <rect x={-halfW-26} y={-halfH-30} width={W+52} height={H+60} fill="transparent" /> */}
     </g>
   );
 }

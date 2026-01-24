@@ -35,8 +35,7 @@ function clamp(n: number, lo: number, hi: number) {
 }
 
 /* =========================
-   DEBUG / LOGS (nuevos)
-   - logs claros y con contexto
+   DEBUG / LOGS
 ========================= */
 const DEBUG_EDGE = true; // 👈 dejalo true para ver qué pasa, luego pasalo a false
 
@@ -45,15 +44,13 @@ function logEdge(tag: string, payload?: any) {
   // eslint-disable-next-line no-console
   console.log(`🧩[EditableEdge] ${tag}`, payload ?? "");
 }
-
 function warnEdge(tag: string, payload?: any) {
   if (!DEBUG_EDGE) return;
   // eslint-disable-next-line no-console
   console.warn(`⚠️[EditableEdge] ${tag}`, payload ?? "");
 }
-
 function errEdge(tag: string, payload?: any) {
-  // errores sí conviene verlos siempre
+  // errores conviene verlos siempre
   // eslint-disable-next-line no-console
   console.error(`🧨[EditableEdge] ${tag}`, payload ?? "");
 }
@@ -66,44 +63,92 @@ function normalizeKnots(input: any): Pt[] {
 }
 
 /* =========================
-   PORTS
+   PORTS (con rot/flip para válvulas 2way/3way)
 ========================= */
-function getDefaultPort(n: UINode, side: Side) {
-  const t = String(n.type || "").toLowerCase();
+type ValveMeta = {
+  model?: "2way" | "3way";
+  rot?: 0 | 90 | 180 | 270;
+  flipX?: boolean;
+  ports?: Record<string, "open" | "closed">;
+};
 
-  let x = n.x;
-  let y = n.y;
+function getValveMeta(n: any): Required<Pick<ValveMeta, "model" | "rot" | "flipX">> {
+  const m = (n?.meta ?? {}) as ValveMeta;
+  const model = (m.model ?? "2way") as "2way" | "3way";
+  const rot = (m.rot ?? 0) as 0 | 90 | 180 | 270;
+  const flipX = Boolean(m.flipX ?? false);
+  return { model, rot, flipX };
+}
+
+function applyValveXForm(n: any, local: Pt): Pt {
+  const { rot, flipX } = getValveMeta(n);
+
+  let x = local.x;
+  let y = local.y;
+
+  // flip horizontal local
+  if (flipX) x = -x;
+
+  // rotate around (0,0)
+  let xr = x,
+    yr = y;
+  if (rot === 90) {
+    xr = -y;
+    yr = x;
+  } else if (rot === 180) {
+    xr = -x;
+    yr = -y;
+  } else if (rot === 270) {
+    xr = y;
+    yr = -x;
+  }
+
+  return { x: n.x + xr, y: n.y + yr };
+}
+
+function getDefaultPort(n: UINode, side: Side) {
+  const t = String((n as any).type || "").toLowerCase();
+
+  let x = (n as any).x;
+  let y = (n as any).y;
 
   if (t === "pump") {
     const rOuter = 26;
     const portOffset = 6;
-    x = side === "in" ? n.x - rOuter - portOffset : n.x + rOuter + portOffset;
-    y = n.y;
+    x = side === "in" ? (n as any).x - rOuter - portOffset : (n as any).x + rOuter + portOffset;
+    y = (n as any).y;
     return { x, y };
   }
 
   if (t === "tank") {
     const halfW = 66;
     const portOffset = 6;
-    x = side === "in" ? n.x - halfW - portOffset : n.x + halfW + portOffset;
-    y = n.y;
+    x = side === "in" ? (n as any).x - halfW - portOffset : (n as any).x + halfW + portOffset;
+    y = (n as any).y;
     return { x, y };
   }
 
   if (t === "manifold") {
     const halfW = 55;
     const portOffset = 6;
-    x = side === "in" ? n.x - halfW - portOffset : n.x + halfW + portOffset;
-    y = n.y;
+    x = side === "in" ? (n as any).x - halfW - portOffset : (n as any).x + halfW + portOffset;
+    y = (n as any).y;
     return { x, y };
   }
 
+  // ✅ valve: default depende de model (2way vs 3way) y se transforma por rot/flip
   if (t === "valve") {
-    const half = 14;
-    const portOffset = 6;
-    x = side === "in" ? n.x - half - portOffset : n.x + half + portOffset;
-    y = n.y;
-    return { x, y };
+    const { model } = getValveMeta(n as any);
+    const half = 16;
+    const OUT = 8;
+
+    const L1: Pt = { x: -half - OUT, y: 0 }; // entrada
+    const R_2WAY: Pt = { x: half + OUT, y: 0 };
+    const R1: Pt = { x: half + OUT, y: -12 };
+    const R2: Pt = { x: half + OUT, y: 12 };
+
+    const local = side === "in" ? L1 : model === "3way" ? R1 : R_2WAY;
+    return applyValveXForm(n as any, local);
   }
 
   return { x, y };
@@ -113,17 +158,17 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   if (!portId) return getDefaultPort(n, side);
   const pid = String(portId);
 
-  if (n.type === "tank") {
+  if ((n as any).type === "tank") {
     const W = 132;
     const H = 100;
     const OUT = 6;
 
-    const leftX = n.x - W / 2 - OUT;
-    const rightX = n.x + W / 2 + OUT;
+    const leftX = (n as any).x - W / 2 - OUT;
+    const rightX = (n as any).x + W / 2 + OUT;
 
-    const topY = n.y - H * 0.22;
-    const midY = n.y;
-    const botY = n.y + H * 0.22;
+    const topY = (n as any).y - H * 0.22;
+    const midY = (n as any).y;
+    const botY = (n as any).y + H * 0.22;
 
     switch (pid) {
       case "L1":
@@ -137,34 +182,34 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
       case "R3":
         return { x: rightX, y: botY };
       case "T1":
-        return { x: n.x, y: n.y - H / 2 - OUT };
+        return { x: (n as any).x, y: (n as any).y - H / 2 - OUT };
       case "B1":
-        return { x: n.x, y: n.y + H / 2 + OUT };
+        return { x: (n as any).x, y: (n as any).y + H / 2 + OUT };
       default:
         return getDefaultPort(n, side);
     }
   }
 
-  if (n.type === "pump") {
+  if ((n as any).type === "pump") {
     const rOuter = 26;
     const portOffset = 6;
-    if (pid.startsWith("L")) return { x: n.x - rOuter - portOffset, y: n.y };
-    if (pid.startsWith("R")) return { x: n.x + rOuter + portOffset, y: n.y };
-    if (pid === "T1") return { x: n.x, y: n.y - rOuter - portOffset };
-    if (pid === "B1") return { x: n.x, y: n.y + rOuter + portOffset };
+    if (pid.startsWith("L")) return { x: (n as any).x - rOuter - portOffset, y: (n as any).y };
+    if (pid.startsWith("R")) return { x: (n as any).x + rOuter + portOffset, y: (n as any).y };
+    if (pid === "T1") return { x: (n as any).x, y: (n as any).y - rOuter - portOffset };
+    if (pid === "B1") return { x: (n as any).x, y: (n as any).y + rOuter + portOffset };
     return getDefaultPort(n, side);
   }
 
-  if (n.type === "manifold") {
+  if ((n as any).type === "manifold") {
     const halfW = 55;
     const OUT = 6;
 
-    const leftX = n.x - halfW - OUT;
-    const rightX = n.x + halfW + OUT;
+    const leftX = (n as any).x - halfW - OUT;
+    const rightX = (n as any).x + halfW + OUT;
 
-    const topY = n.y - 14;
-    const midY = n.y;
-    const botY = n.y + 14;
+    const topY = (n as any).y - 14;
+    const midY = (n as any).y;
+    const botY = (n as any).y + 14;
 
     switch (pid) {
       case "L1":
@@ -180,36 +225,43 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
       case "R4":
         return { x: rightX, y: botY + 14 };
       case "T1":
-        return { x: n.x, y: n.y - 22 - OUT };
+        return { x: (n as any).x, y: (n as any).y - 22 - OUT };
       case "B1":
-        return { x: n.x, y: n.y + 22 + OUT };
+        return { x: (n as any).x, y: (n as any).y + 22 + OUT };
       default:
         return getDefaultPort(n, side);
     }
   }
 
-  if (n.type === "valve") {
-    const half = 14;
-    const OUT = 6;
+  // ✅ VALVE (2way/3way con rot/flip)
+  if ((n as any).type === "valve") {
+    const { model } = getValveMeta(n as any);
+    const half = 16;
+    const OUT = 8;
 
-    const leftX = n.x - half - OUT;
-    const rightX = n.x + half + OUT;
+    // locales
+    const L1: Pt = { x: -half - OUT, y: 0 };
 
-    switch (pid) {
-      case "L1":
-      case "L2":
-        return { x: leftX, y: n.y };
-      case "R1":
-      case "R2":
-      case "R3":
-        return { x: rightX, y: n.y };
-      case "T1":
-        return { x: n.x, y: n.y - half - OUT };
-      case "B1":
-        return { x: n.x, y: n.y + half + OUT };
-      default:
-        return getDefaultPort(n, side);
+    // 2way
+    const R_2WAY: Pt = { x: half + OUT, y: 0 };
+
+    // 3way
+    const R1: Pt = { x: half + OUT, y: -12 };
+    const R2: Pt = { x: half + OUT, y: 12 };
+
+    let local: Pt;
+
+    if (model === "3way") {
+      if (pid === "L1") local = L1;
+      else if (pid === "R2") local = R2;
+      else local = R1; // default salida
+    } else {
+      // 2way
+      if (pid === "L1" || pid === "L2") local = L1;
+      else local = R_2WAY;
     }
+
+    return applyValveXForm(n as any, local);
   }
 
   return getDefaultPort(n, side);
@@ -437,15 +489,15 @@ export default function EditableEdge({
           return;
         }
 
-        let json: any = null;
+        let jsonOut: any = null;
         try {
-          json = await res.json();
+          jsonOut = await res.json();
         } catch {
-          // puede no devolver json, no pasa nada
+          // ok
         }
 
         lastSavedSig.current = sig;
-        logEdge("SAVE_OK", { edge_id: id, reason, ms: dt, result: json ?? "(no json)" });
+        logEdge("SAVE_OK", { edge_id: id, reason, ms: dt, result: jsonOut ?? "(no json)" });
       } catch (e: any) {
         const dt = Math.round(performance.now() - t0);
         errEdge("SAVE_ERROR", { edge_id: id, reason, url, ms: dt, error: String(e?.message ?? e) });
