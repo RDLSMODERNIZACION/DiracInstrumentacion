@@ -1,9 +1,15 @@
 from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
 from psycopg.rows import dict_row
+
 from app.db import get_conn
+from app.security import require_user  # si tu admin usa auth
 
 
-def get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
+router = APIRouter(prefix="/dirac/admin", tags=["admin-manifold-signals"])
+
+
+def _get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
     sql = """
         SELECT
             id,
@@ -21,14 +27,13 @@ def get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
         WHERE manifold_id = %s
         ORDER BY signal_type;
     """
-
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, (manifold_id,))
             return cur.fetchall()
 
 
-def upsert_signals_by_manifold(
+def _upsert_signals_by_manifold(
     manifold_id: int,
     signals: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -95,7 +100,26 @@ def upsert_signals_by_manifold(
                     },
                 )
                 out.append(cur.fetchone())
-
         conn.commit()
 
     return out
+
+
+@router.get("/manifolds/{manifold_id}/signals")
+def read_manifold_signals(
+    manifold_id: int,
+    user: Dict[str, Any] = Depends(require_user),  # sacalo si querés público
+):
+    return _get_signals_by_manifold(manifold_id)
+
+
+@router.put("/manifolds/{manifold_id}/signals")
+def save_manifold_signals(
+    manifold_id: int,
+    signals: List[Dict[str, Any]],
+    user: Dict[str, Any] = Depends(require_user),  # sacalo si querés público
+):
+    try:
+        return _upsert_signals_by_manifold(manifold_id, signals)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
