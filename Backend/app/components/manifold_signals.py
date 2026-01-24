@@ -1,9 +1,9 @@
-from typing import List, Dict
+from typing import List, Dict, Any
 from psycopg.rows import dict_row
 from app.db import get_conn
 
 
-def get_signals_by_manifold(manifold_id: int) -> List[Dict]:
+def get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
     sql = """
         SELECT
             id,
@@ -30,8 +30,10 @@ def get_signals_by_manifold(manifold_id: int) -> List[Dict]:
 
 def upsert_signals_by_manifold(
     manifold_id: int,
-    signals: List[Dict]
-) -> List[Dict]:
+    signals: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not signals:
+        return []
 
     sql = """
         INSERT INTO public.manifold_signals (
@@ -69,23 +71,31 @@ def upsert_signals_by_manifold(
         RETURNING *;
     """
 
-    out = []
+    out: List[Dict[str, Any]] = []
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             for s in signals:
-                cur.execute(sql, {
-                    "manifold_id": manifold_id,
-                    "signal_type": s["signal_type"],   # pressure | flow
-                    "node_id": s.get("node_id"),
-                    "tag": s.get("tag"),
-                    "unit": s.get("unit"),
-                    "scale_mult": s.get("scale_mult"),
-                    "scale_add": s.get("scale_add"),
-                    "min_value": s.get("min_value"),
-                    "max_value": s.get("max_value"),
-                })
+                st = (s.get("signal_type") or "").strip().lower()
+                if st not in ("pressure", "flow"):
+                    raise ValueError("signal_type debe ser 'pressure' o 'flow'")
+
+                cur.execute(
+                    sql,
+                    {
+                        "manifold_id": manifold_id,
+                        "signal_type": st,
+                        "node_id": s.get("node_id"),
+                        "tag": s.get("tag"),
+                        "unit": s.get("unit"),
+                        "scale_mult": s.get("scale_mult"),
+                        "scale_add": s.get("scale_add"),
+                        "min_value": s.get("min_value"),
+                        "max_value": s.get("max_value"),
+                    },
+                )
                 out.append(cur.fetchone())
+
         conn.commit()
 
     return out
