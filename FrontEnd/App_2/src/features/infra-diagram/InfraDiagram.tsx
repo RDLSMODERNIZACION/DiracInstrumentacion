@@ -60,7 +60,7 @@ type PortHit = { nodeId: string; side: PortSide; portId: string; x: number; y: n
  *  ========================= */
 
 const TOPBAR_H = 44;
-const ZOOM_MAX = 5;
+const ZOOM_MAX = 15;
 const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
 
 const VIEWBOX_DEFAULT = { minx: 0, miny: 0, w: 1000, h: 520 };
