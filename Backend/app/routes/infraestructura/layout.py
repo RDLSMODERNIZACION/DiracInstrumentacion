@@ -226,25 +226,31 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   WHERE l.company_id = %s
                 ),
                 p AS (
-                  SELECT
-                    COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
-                    p.id::bigint                         AS id,
-                    'pump'::text                         AS type,
-                    lp.x, lp.y, lp.updated_at,
-                    s.online                             AS online,
-                    s.state                              AS state,
-                    NULL::numeric                        AS level_pct,
-                    NULL::text                           AS alarma,
-                    l.id::bigint                         AS location_id,
-                    l.name::text                         AS location_name,
-                    NULL::jsonb                          AS meta,
-                    NULL::jsonb                          AS signals
-                  FROM public.pumps p
-                  JOIN public.locations l ON l.id = p.location_id
-                  LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
-                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
-                  WHERE l.company_id = %s
-                ),
+                 SELECT
+  COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
+  p.id::bigint                         AS id,
+  'pump'::text                         AS type,
+  lp.x, lp.y, lp.updated_at,
+
+  COALESCE(s.online, false)            AS online,
+  CASE
+    WHEN COALESCE(s.online, false) = true THEN s.state
+    ELSE NULL
+  END                                  AS state,
+
+  NULL::numeric                        AS level_pct,
+  NULL::text                           AS alarma,
+  l.id::bigint                         AS location_id,
+  l.name::text                         AS location_name,
+  NULL::jsonb                          AS meta,
+  NULL::jsonb                          AS signals
+FROM public.pumps p
+JOIN public.locations l ON l.id = p.location_id
+LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
+LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+WHERE l.company_id = %s
+),
+
                 v AS (
                   SELECT
                     COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
@@ -488,25 +494,31 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   WHERE l.company_id=%s
                 ),
                 p AS (
-                  SELECT
-                    COALESCE(lp.node_id,'pump:'||p.id)  AS node_id,
-                    p.id::bigint                        AS id,
-                    'pump'::text                        AS type,
-                    lp.x, lp.y, lp.updated_at,
-                    s.online                            AS online,
-                    s.state                             AS state,
-                    NULL::numeric                       AS level_pct,
-                    NULL::text                          AS alarma,
-                    l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
-                  FROM public.pumps p
-                  JOIN public.locations l ON l.id=p.location_id
-                  LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
-                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id=p.id
-                  WHERE l.company_id=%s
-                ),
+               SELECT
+  COALESCE(lp.node_id,'pump:'||p.id)  AS node_id,
+  p.id::bigint                        AS id,
+  'pump'::text                        AS type,
+  lp.x, lp.y, lp.updated_at,
+
+  COALESCE(s.online, false)            AS online,
+  CASE
+    WHEN COALESCE(s.online, false) = true THEN s.state
+    ELSE NULL
+  END                                  AS state,
+
+  NULL::numeric                       AS level_pct,
+  NULL::text                          AS alarma,
+  l.id::bigint                        AS location_id,
+  l.name::text                        AS location_name,
+  NULL::jsonb                         AS meta,
+  NULL::jsonb                         AS signals
+FROM public.pumps p
+JOIN public.locations l ON l.id=p.location_id
+LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
+LEFT JOIN public.v_pumps_with_status s ON s.pump_id=p.id
+WHERE l.company_id=%s
+),
+
                 v AS (
                   SELECT
                     COALESCE(lv.node_id,'valve:'||v.id) AS node_id,
