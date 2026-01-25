@@ -158,21 +158,15 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve nodos (tank/pump/valve/manifold).
     ✅ Incluye `meta` para valves (desde public.layout_valves.meta).
-    ✅ Incluye `signals` para manifolds (pressure/flow + última lectura).
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # ---------------------------------------------------------
-            # SIN company_id: leemos desde la VIEW (ya trae signals)
-            # ---------------------------------------------------------
             if company_id is None:
                 cur.execute(
                     """
                     SELECT
-                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at,
-                      c.online, c.state, c.level_pct, c.alarma,
-                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
-                      c.signals
+                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
+                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta
                     FROM public.v_layout_combined c
                     LEFT JOIN public.layout_valves lv ON lv.node_id = c.node_id
                     ORDER BY c.type, c.id
@@ -180,9 +174,6 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 )
                 return cur.fetchall()
 
-            # ---------------------------------------------------------
-            # CON company_id (scoped): armamos nodes + location, y signals para manifolds
-            # ---------------------------------------------------------
             cur.execute(
                 """
                 WITH t AS (
@@ -210,8 +201,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     END::text                           AS alarma,
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
+                    NULL::jsonb                         AS meta
                   FROM public.tanks t
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
@@ -237,8 +227,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::text                           AS alarma,
                     l.id::bigint                         AS location_id,
                     l.name::text                         AS location_name,
-                    NULL::jsonb                          AS meta,
-                    NULL::jsonb                          AS signals
+                    NULL::jsonb                          AS meta
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
@@ -257,8 +246,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::text                            AS alarma,
                     l.id::bigint                          AS location_id,
                     l.name::text                          AS location_name,
-                    lv.meta                               AS meta,
-                    NULL::jsonb                           AS signals
+                    lv.meta                               AS meta
                   FROM public.valves v
                   JOIN public.locations l ON l.id = v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
@@ -270,66 +258,25 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     m.id::bigint                             AS id,
                     'manifold'::text                         AS type,
                     lm.x, lm.y, lm.updated_at,
-
-                    -- ✅ online: última lectura (cualquier señal) en los últimos 10 minutos
-                    CASE
-                      WHEN ms.last_ts IS NOT NULL
-                           AND (now() - ms.last_ts) <= interval '00:10:00'
-                      THEN true ELSE false
-                    END AS online,
-
+                    NULL::boolean                            AS online,
                     NULL::text                               AS state,
                     NULL::numeric                            AS level_pct,
                     NULL::text                               AS alarma,
                     l.id::bigint                             AS location_id,
                     l.name::text                             AS location_name,
-                    NULL::jsonb                              AS meta,
-
-                    COALESCE(ms.signals, '{}'::jsonb)         AS signals
-
+                    NULL::jsonb                              AS meta
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
-
-                  LEFT JOIN LATERAL (
-                    SELECT
-                      MAX(r.created_at) AS last_ts,
-                      jsonb_object_agg(
-                        s.signal_type,
-                        jsonb_build_object(
-                          'id', s.id,
-                          'signal_type', s.signal_type,
-                          'node_id', s.node_id,
-                          'tag', s.tag,
-                          'unit', s.unit,
-                          'scale_mult', s.scale_mult,
-                          'scale_add', s.scale_add,
-                          'min_value', s.min_value,
-                          'max_value', s.max_value,
-                          'value', r.value,
-                          'ts', r.created_at
-                        )
-                      ) AS signals
-                    FROM public.manifold_signals s
-                    LEFT JOIN LATERAL (
-                      SELECT value, created_at
-                      FROM public.manifold_signal_readings r
-                      WHERE r.manifold_signal_id = s.id
-                      ORDER BY r.created_at DESC
-                      LIMIT 1
-                    ) r ON TRUE
-                    WHERE s.manifold_id = m.id
-                  ) ms ON TRUE
-
                   WHERE l.company_id = %s
                 )
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM m
                 ORDER BY type,id
                 """,
                 (company_id, company_id, company_id, company_id),
@@ -406,8 +353,7 @@ async def update_layout(request: Request):
 async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
-    ✅ `nodes` incluye `meta` para valves.
-    ✅ `nodes` incluye `signals` para manifolds.
+    ✅ Ahora `nodes` incluye `meta` para valves.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -418,10 +364,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 cur.execute(
                     """
                     SELECT
-                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at,
-                      c.online, c.state, c.level_pct, c.alarma,
-                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
-                      c.signals
+                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
+                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta
                     FROM public.v_layout_combined c
                     LEFT JOIN public.layout_valves lv ON lv.node_id = c.node_id
                     ORDER BY c.type, c.id
@@ -479,8 +423,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     END::text                           AS alarma,
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
+                    NULL::jsonb                         AS meta
                   FROM public.tanks t
                   JOIN public.locations l ON l.id=t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
@@ -499,8 +442,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::text                          AS alarma,
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
+                    NULL::jsonb                         AS meta
                   FROM public.pumps p
                   JOIN public.locations l ON l.id=p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
@@ -519,8 +461,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::text                          AS alarma,
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
-                    lv.meta                             AS meta,
-                    NULL::jsonb                         AS signals
+                    lv.meta                             AS meta
                   FROM public.valves v
                   JOIN public.locations l ON l.id=v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
@@ -532,68 +473,29 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     m.id::bigint                            AS id,
                     'manifold'::text                        AS type,
                     lm.x, lm.y, lm.updated_at,
-
-                    CASE
-                      WHEN ms.last_ts IS NOT NULL
-                           AND (now() - ms.last_ts) <= interval '00:10:00'
-                      THEN true ELSE false
-                    END AS online,
-
+                    NULL::boolean                           AS online,
                     NULL::text                              AS state,
                     NULL::numeric                           AS level_pct,
                     NULL::text                              AS alarma,
                     l.id::bigint                            AS location_id,
                     l.name::text                            AS location_name,
-                    NULL::jsonb                             AS meta,
-                    COALESCE(ms.signals, '{}'::jsonb)        AS signals
-
+                    NULL::jsonb                             AS meta
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id=m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
-
-                  LEFT JOIN LATERAL (
-                    SELECT
-                      MAX(r.created_at) AS last_ts,
-                      jsonb_object_agg(
-                        s.signal_type,
-                        jsonb_build_object(
-                          'id', s.id,
-                          'signal_type', s.signal_type,
-                          'node_id', s.node_id,
-                          'tag', s.tag,
-                          'unit', s.unit,
-                          'scale_mult', s.scale_mult,
-                          'scale_add', s.scale_add,
-                          'min_value', s.min_value,
-                          'max_value', s.max_value,
-                          'value', r.value,
-                          'ts', r.created_at
-                        )
-                      ) AS signals
-                    FROM public.manifold_signals s
-                    LEFT JOIN LATERAL (
-                      SELECT value, created_at
-                      FROM public.manifold_signal_readings r
-                      WHERE r.manifold_signal_id = s.id
-                      ORDER BY r.created_at DESC
-                      LIMIT 1
-                    ) r ON TRUE
-                    WHERE s.manifold_id = m.id
-                  ) ms ON TRUE
-
                   WHERE l.company_id=%s
                 ),
                 nodes AS (
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM t
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM p
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM p
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM v
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM v
                   UNION ALL
-                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
+                  SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta FROM m
                 )
                 SELECT
-                  node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals
+                  node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta
                 FROM nodes
                 ORDER BY type,id
                 """,
