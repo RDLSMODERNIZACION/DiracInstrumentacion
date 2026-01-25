@@ -5,28 +5,43 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-manifold-signals"])
 
+
 def _get_signals_by_manifold(manifold_id: int) -> List[Dict[str, Any]]:
+    # ✅ Config + ÚLTIMA LECTURA (value/ts) desde public.manifold_signal_readings
     sql = """
         SELECT
-            id,
-            manifold_id,
-            signal_type,
-            node_id,
-            tag,
-            unit,
-            scale_mult,
-            scale_add,
-            min_value,
-            max_value,
-            updated_at
-        FROM public.manifold_signals
-        WHERE manifold_id = %s
-        ORDER BY signal_type;
+            s.id,
+            s.manifold_id,
+            s.signal_type,
+            s.node_id,
+            s.tag,
+            s.unit,
+            s.scale_mult,
+            s.scale_add,
+            s.min_value,
+            s.max_value,
+            s.updated_at,
+
+            r.value      AS value,
+            r.created_at AS ts
+
+        FROM public.manifold_signals s
+        LEFT JOIN LATERAL (
+            SELECT value, created_at
+            FROM public.manifold_signal_readings r
+            WHERE r.manifold_signal_id = s.id
+            ORDER BY r.created_at DESC
+            LIMIT 1
+        ) r ON TRUE
+
+        WHERE s.manifold_id = %s
+        ORDER BY s.signal_type;
     """
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, (manifold_id,))
             return cur.fetchall()
+
 
 def _upsert_signals_by_manifold(
     manifold_id: int,
@@ -80,17 +95,20 @@ def _upsert_signals_by_manifold(
                 if st not in ("pressure", "flow"):
                     raise HTTPException(status_code=400, detail="signal_type debe ser 'pressure' o 'flow'")
 
-                cur.execute(sql, {
-                    "manifold_id": manifold_id,
-                    "signal_type": st,
-                    "node_id": s.get("node_id"),
-                    "tag": s.get("tag"),
-                    "unit": s.get("unit"),
-                    "scale_mult": s.get("scale_mult"),
-                    "scale_add": s.get("scale_add"),
-                    "min_value": s.get("min_value"),
-                    "max_value": s.get("max_value"),
-                })
+                cur.execute(
+                    sql,
+                    {
+                        "manifold_id": manifold_id,
+                        "signal_type": st,
+                        "node_id": s.get("node_id"),
+                        "tag": s.get("tag"),
+                        "unit": s.get("unit"),
+                        "scale_mult": s.get("scale_mult"),
+                        "scale_add": s.get("scale_add"),
+                        "min_value": s.get("min_value"),
+                        "max_value": s.get("max_value"),
+                    },
+                )
                 out.append(cur.fetchone())
 
         conn.commit()
