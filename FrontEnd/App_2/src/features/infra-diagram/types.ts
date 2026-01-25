@@ -15,6 +15,25 @@ export type ValveMeta = {
   ports?: Partial<Record<PortId, "open" | "closed">>;
 };
 
+// ✅ NUEVO: Señal de manifold (viene dentro de `signals`)
+export type ManifoldSignalDTO = {
+  id?: number | null;
+  signal_type?: "pressure" | "flow" | string | null;
+
+  node_id?: string | null;
+  tag?: string | null;
+
+  unit?: string | null;
+  scale_mult?: number | null;
+  scale_add?: number | null;
+
+  min_value?: number | null;
+  max_value?: number | null;
+
+  value?: number | string | null; // ej: 7.2
+  ts?: string | null; // ISO timestamp o null
+};
+
 export type CombinedNodeDTO = {
   node_id: string;
   id: number;
@@ -27,8 +46,11 @@ export type CombinedNodeDTO = {
   level_pct?: number | string | null;
   alarma?: string | null;
 
-  // ✅ NUEVO: meta viene solo en valves (pero lo declaramos opcional)
+  // ✅ meta viene solo en valves (pero lo declaramos opcional)
   meta?: ValveMeta | null;
+
+  // ✅ NUEVO: signals viene solo en manifolds (pero lo declaramos opcional)
+  signals?: Record<string, ManifoldSignalDTO> | null;
 
   // info de ubicación (backend)
   location_id?: number | null;
@@ -164,12 +186,15 @@ export type PumpNode = UINodeBase & {
 export type ManifoldNode = UINodeBase & {
   type: "manifold";
   ports?: NodePorts;
+
+  // ✅ NUEVO: señales (pressure/flow)
+  signals?: Record<string, ManifoldSignalDTO> | null;
 };
 
 export type ValveNode = UINodeBase & {
   type: "valve";
 
-  // ✅ NUEVO: meta viene del backend y define 2way/3way + rot/flip + open/closed
+  // ✅ meta viene del backend y define 2way/3way + rot/flip + open/closed
   meta?: ValveMeta | null;
 
   // puertos calculados (si querés guardarlos en el node al armar UI)

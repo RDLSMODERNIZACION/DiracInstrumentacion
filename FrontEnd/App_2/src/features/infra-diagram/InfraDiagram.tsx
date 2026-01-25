@@ -343,7 +343,7 @@ export default function InfraDiagram() {
   useEffect(() => {
     if (!data) return;
 
-  let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
+let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   id: n.node_id,
   type: n.type,
   name: `${n.type} ${n.id}`,
@@ -356,9 +356,13 @@ export default function InfraDiagram() {
   location_id: n.location_id ?? null,
   location_name: n.location_name ?? null,
 
-  // ✅ CLAVE: no perder meta (rot/flip/model/ports)
+  // ✅ NUEVO: no perder signals en manifolds (P/Q)
+  ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
+
+  // ✅ CLAVE: no perder meta (rot/flip/model/ports) en valves
   ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
 })) as UINode[];
+
 
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];

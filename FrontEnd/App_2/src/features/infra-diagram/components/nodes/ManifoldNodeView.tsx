@@ -36,16 +36,7 @@ function Flange({
   return (
     <g>
       {/* cuello */}
-      <rect
-        x={neckX}
-        y={y - 5}
-        width={neck}
-        height={10}
-        rx={3}
-        ry={3}
-        fill="#94a3b8"
-        opacity={0.9}
-      />
+      <rect x={neckX} y={y - 5} width={neck} height={10} rx={3} ry={3} fill="#94a3b8" opacity={0.9} />
       {/* brida */}
       <circle cx={x} cy={y} r={r} fill="#e5e7eb" stroke={stroke} strokeWidth={2.5} />
       {/* aro interior */}
@@ -93,13 +84,16 @@ export default function ManifoldNodeView({
   const w = 230;
   const h = 86;
 
-  // --- Datos (si existen) ---
-  const pUnit = (n.signals?.pressure?.unit ?? "bar").trim() || "bar";
-  const qUnit = (n.signals?.flow?.unit ?? "mts3/h").trim() || "mts3/h";
+  // --- Datos (desde backend: signals.pressure / signals.flow) ---
+  const pSig = (n as any).signals?.pressure ?? null;
+  const qSig = (n as any).signals?.flow ?? null;
 
-  // si tu backend manda .value / .ts, esto lo toma. Si no, cae en "--"
-  const pValRaw = (n as any).signals?.pressure?.value ?? (n as any).signals?.pressure?.v ?? null;
-  const qValRaw = (n as any).signals?.flow?.value ?? (n as any).signals?.flow?.v ?? null;
+  const pUnit = String(pSig?.unit ?? "bar").trim() || "bar";
+  const qUnit = String(qSig?.unit ?? "mts3/h").trim() || "mts3/h";
+
+  // values
+  const pValRaw = pSig?.value ?? pSig?.v ?? null;
+  const qValRaw = qSig?.value ?? qSig?.v ?? null;
 
   const pVal = formatValue(pValRaw, 1);
   const qVal = formatValue(qValRaw, 1);
@@ -107,18 +101,20 @@ export default function ManifoldNodeView({
   const pText = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
   const qText = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
 
-  // timestamp (opcional)
-  const pTs = (n as any).signals?.pressure?.ts ?? (n as any).signals?.pressure?.updated_at ?? null;
-  const qTs = (n as any).signals?.flow?.ts ?? (n as any).signals?.flow?.updated_at ?? null;
+  // timestamps
+  const pTs = pSig?.ts ?? pSig?.updated_at ?? null;
+  const qTs = qSig?.ts ?? qSig?.updated_at ?? null;
 
-  // “Conectado”: al menos uno tiene valor numérico
-  const connected = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
+  // ✅ Estado conectado: preferimos online (viene del backend con regla 10 min).
+  // Fallback: si hay valor numérico.
+  const hasValue = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
+  const connected = (n as any).online === true ? true : (n as any).online === false ? false : hasValue;
 
   // Alarma por min/max si existen (opcional)
-  const pMin = (n as any).signals?.pressure?.min_value;
-  const pMax = (n as any).signals?.pressure?.max_value;
-  const qMin = (n as any).signals?.flow?.min_value;
-  const qMax = (n as any).signals?.flow?.max_value;
+  const pMin = pSig?.min_value;
+  const pMax = pSig?.max_value;
+  const qMin = qSig?.min_value;
+  const qMax = qSig?.max_value;
 
   const pNum = typeof pValRaw === "string" ? Number(pValRaw) : pValRaw;
   const qNum = typeof qValRaw === "string" ? Number(qValRaw) : qValRaw;
@@ -136,8 +132,8 @@ export default function ManifoldNodeView({
   const alarm = !!(pAlarm || qAlarm);
 
   // Tags para tooltip
-  const pTag = (n.signals?.pressure?.tag ?? "").trim();
-  const qTag = (n.signals?.flow?.tag ?? "").trim();
+  const pTag = String(pSig?.tag ?? "").trim();
+  const qTag = String(qSig?.tag ?? "").trim();
 
   const tipLines = useMemo(() => {
     const lines: string[] = [];
@@ -145,7 +141,7 @@ export default function ManifoldNodeView({
     lines.push(`Q: ${qText}${qTag ? ` (${qTag})` : ""}`);
     if (pTs) lines.push(`P ts: ${String(pTs)}`);
     if (qTs) lines.push(`Q ts: ${String(qTs)}`);
-    lines.push(connected ? "Estado: Conectado" : "Estado: Sin datos");
+    lines.push(connected ? "Estado: Online (≤10 min)" : "Estado: Offline / sin datos");
     if (alarm) lines.push("⚠️ Alarma: fuera de rango");
     return lines;
   }, [pText, qText, pTag, qTag, pTs, qTs, connected, alarm]);
@@ -254,16 +250,7 @@ export default function ManifoldNodeView({
 
       {/* Fila P */}
       <g transform={`translate(0, ${startY})`}>
-        <rect
-          x={leftPad}
-          y={(rowH - badgeH) / 2}
-          width={badgeW}
-          height={badgeH}
-          rx={10}
-          ry={10}
-          fill="#e2e8f0"
-          stroke="#94a3b8"
-        />
+        <rect x={leftPad} y={(rowH - badgeH) / 2} width={badgeW} height={badgeH} rx={10} ry={10} fill="#e2e8f0" stroke="#94a3b8" />
         <text
           x={leftPad + badgeW / 2}
           y={rowH / 2 + 5}
@@ -289,16 +276,7 @@ export default function ManifoldNodeView({
 
       {/* Fila Q */}
       <g transform={`translate(0, ${startY + rowH + gapY})`}>
-        <rect
-          x={leftPad}
-          y={(rowH - badgeH) / 2}
-          width={badgeW}
-          height={badgeH}
-          rx={10}
-          ry={10}
-          fill="#e2e8f0"
-          stroke="#94a3b8"
-        />
+        <rect x={leftPad} y={(rowH - badgeH) / 2} width={badgeW} height={badgeH} rx={10} ry={10} fill="#e2e8f0" stroke="#94a3b8" />
         <text
           x={leftPad + badgeW / 2}
           y={rowH / 2 + 5}
