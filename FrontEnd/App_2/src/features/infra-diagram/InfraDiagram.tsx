@@ -323,8 +323,10 @@ export default function InfraDiagram() {
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
-      const urlNodes = `/infraestructura/get_layout_combined`;
-      const urlEdges = `/infraestructura/get_layout_edges`;
+      const qs = companyId ? `?company_id=${companyId}` : "";
+      const urlNodes = `/infraestructura/get_layout_combined${qs}`;
+      const urlEdges = `/infraestructura/get_layout_edges${qs}`;
+
       log("FETCH ->", urlNodes, "&&", urlEdges);
 
       const [nodesRaw, edgesRaw] = await Promise.all([
