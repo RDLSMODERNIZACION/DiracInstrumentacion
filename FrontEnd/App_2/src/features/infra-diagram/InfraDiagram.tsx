@@ -173,11 +173,17 @@ function isValveOpen(n: UINode) {
 
 
 function isNodePassable(n: UINode) {
-  // 🔹 por ahora NO cortamos flujo por válvulas
-  // 🔹 solo podrías cortar si un nodo estuviera offline
+  // ✅ OPCIÓN B:
+  // El manifold NO corta el flujo aunque esté offline
+  // (solo mide, no actúa)
+  if (n.type === "manifold") return true;
+
+  // Otros nodos: si están offline, cortan
   if (n.online === false) return false;
+
   return true;
 }
+
 
 
 // ✅ Flujo: dirigido por a->b (src->dst) usando edges del backend
