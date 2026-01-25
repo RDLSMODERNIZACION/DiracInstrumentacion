@@ -1,3 +1,4 @@
+// src/features/infra-diagram/components/nodes/ManifoldNodeView.tsx
 import React, { useMemo } from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ManifoldNode } from "../../types";
@@ -98,17 +99,22 @@ export default function ManifoldNodeView({
   const pVal = formatValue(pValRaw, 1);
   const qVal = formatValue(qValRaw, 1);
 
-  const pText = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
-  const qText = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
-
-  // timestamps
+  // timestamps (para tooltip)
   const pTs = pSig?.ts ?? pSig?.updated_at ?? null;
   const qTs = qSig?.ts ?? qSig?.updated_at ?? null;
 
   // ✅ Estado conectado: preferimos online (viene del backend con regla 10 min).
-  // Fallback: si hay valor numérico.
+  // Fallback: si no viene online, inferimos por "tiene algún valor numérico".
   const hasValue = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
   const connected = (n as any).online === true ? true : (n as any).online === false ? false : hasValue;
+
+  // ✅ Texto base (solo valida número)
+  const pTextVal = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
+  const qTextVal = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
+
+  // ✅ Texto a mostrar: si está OFFLINE => siempre "--" (aunque haya último valor guardado)
+  const pTextShow = connected ? pTextVal : `-- ${pUnit}`;
+  const qTextShow = connected ? qTextVal : `-- ${qUnit}`;
 
   // Alarma por min/max si existen (opcional)
   const pMin = pSig?.min_value;
@@ -137,14 +143,14 @@ export default function ManifoldNodeView({
 
   const tipLines = useMemo(() => {
     const lines: string[] = [];
-    lines.push(`P: ${pText}${pTag ? ` (${pTag})` : ""}`);
-    lines.push(`Q: ${qText}${qTag ? ` (${qTag})` : ""}`);
+    lines.push(`P: ${pTextShow}${pTag ? ` (${pTag})` : ""}`);
+    lines.push(`Q: ${qTextShow}${qTag ? ` (${qTag})` : ""}`);
     if (pTs) lines.push(`P ts: ${String(pTs)}`);
     if (qTs) lines.push(`Q ts: ${String(qTs)}`);
     lines.push(connected ? "Estado: Online (≤10 min)" : "Estado: Offline / sin datos");
     if (alarm) lines.push("⚠️ Alarma: fuera de rango");
     return lines;
-  }, [pText, qText, pTag, qTag, pTs, qTs, connected, alarm]);
+  }, [pTextShow, qTextShow, pTag, qTag, pTs, qTs, connected, alarm]);
 
   // --- Estilos por estado ---
   const stroke = alarm ? "#ef4444" : connected ? "#22c55e" : "#475569";
@@ -184,6 +190,8 @@ export default function ManifoldNodeView({
           <stop offset="0%" stopColor="#cbd5e1" stopOpacity="0.55" />
           <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.55" />
         </linearGradient>
+
+        {/* OJO: lgSteel ya existe en tu SVG global (si no, definilo ahí). */}
 
         <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
           <feGaussianBlur stdDeviation="2.2" result="blur" />
@@ -250,7 +258,16 @@ export default function ManifoldNodeView({
 
       {/* Fila P */}
       <g transform={`translate(0, ${startY})`}>
-        <rect x={leftPad} y={(rowH - badgeH) / 2} width={badgeW} height={badgeH} rx={10} ry={10} fill="#e2e8f0" stroke="#94a3b8" />
+        <rect
+          x={leftPad}
+          y={(rowH - badgeH) / 2}
+          width={badgeW}
+          height={badgeH}
+          rx={10}
+          ry={10}
+          fill="#e2e8f0"
+          stroke="#94a3b8"
+        />
         <text
           x={leftPad + badgeW / 2}
           y={rowH / 2 + 5}
@@ -270,13 +287,22 @@ export default function ManifoldNodeView({
           fill="#0f172a"
           style={{ fontSize: valueFont, fontWeight: 900, letterSpacing: 0.2 }}
         >
-          {pText}
+          {pTextShow}
         </text>
       </g>
 
       {/* Fila Q */}
       <g transform={`translate(0, ${startY + rowH + gapY})`}>
-        <rect x={leftPad} y={(rowH - badgeH) / 2} width={badgeW} height={badgeH} rx={10} ry={10} fill="#e2e8f0" stroke="#94a3b8" />
+        <rect
+          x={leftPad}
+          y={(rowH - badgeH) / 2}
+          width={badgeW}
+          height={badgeH}
+          rx={10}
+          ry={10}
+          fill="#e2e8f0"
+          stroke="#94a3b8"
+        />
         <text
           x={leftPad + badgeW / 2}
           y={rowH / 2 + 5}
@@ -296,7 +322,7 @@ export default function ManifoldNodeView({
           fill="#0f172a"
           style={{ fontSize: valueFont, fontWeight: 900, letterSpacing: 0.2 }}
         >
-          {qText}
+          {qTextShow}
         </text>
       </g>
     </g>
