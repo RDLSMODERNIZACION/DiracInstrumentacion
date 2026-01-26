@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -30,13 +31,10 @@ function buildBasicToken(email: string, password: string) {
 }
 
 function getApiBase() {
-  // 1) Vite env si está seteado en Vercel
   const env = (import.meta as any)?.env?.VITE_API_BASE?.trim?.();
   if (env) return env;
-  // 2) Flag global opcional
   const g = (window as any).__API_BASE__;
   if (typeof g === "string" && g.length > 0) return g;
-  // 3) Fallback seguro a Render (tu backend)
   return "https://diracinstrumentacion.onrender.com";
 }
 
@@ -45,15 +43,31 @@ function isGetLike(method?: string) {
   return m === "GET" || m === "HEAD";
 }
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+async function readJsonOrThrow(res: Response, pathForMsg: string) {
+  if (res.status === 401) throw new Error("Credenciales inválidas");
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(
+      `${pathForMsg} -> ${res.status} ${res.statusText}${txt ? ` | ${txt.slice(0, 200)}` : ""}`
+    );
+  }
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.toLowerCase().includes("application/json")) {
+    throw new Error("La URL de API no devuelve JSON. Configurá VITE_API_BASE hacia el backend.");
+  }
+  return res.json();
+}
+
+/** Cache + dedupe simple para catálogos públicos (evita dobles /locations, /companies) */
+type CacheEntry = { ts: number; data: any; inflight?: Promise<any> | null };
+const PUBLIC_CACHE: Record<string, CacheEntry> = Object.create(null);
+const PUBLIC_TTL_MS = 5 * 60 * 1000; // 5 min (ajustá)
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>(() => {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
-      return raw
-        ? (JSON.parse(raw) as AuthState)
-        : { email: null, basicToken: null };
+      return raw ? (JSON.parse(raw) as AuthState) : { email: null, basicToken: null };
     } catch {
       return { email: null, basicToken: null };
     }
@@ -69,43 +83,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     return state.basicToken ? { Authorization: state.basicToken } : {};
   }, [state.basicToken]);
 
-  /**
-   * Login: acá SÍ usamos Authorization porque justamente estamos validando credenciales.
-   * Ojo: NO conviene enviar Content-Type en un GET si querés evitar preflight,
-   * pero como es una llamada “de login” no importa tanto.
-   */
+  /** Dedupe de login (si se toca el botón 2 veces) */
+  const loginInflightRef = useRef<Promise<void> | null>(null);
+
   const login = useCallback(
     async (email: string, password: string) => {
-      const token = buildBasicToken(email.trim(), password);
+      if (loginInflightRef.current) return loginInflightRef.current;
 
-      const res = await fetch(`${apiBase}/dirac/me/locations`, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: token,
-        },
-        cache: "no-store",
+      const p = (async () => {
+        const token = buildBasicToken(email.trim(), password);
+
+        // Validación de credenciales: usamos un endpoint privado que ya existe
+        const res = await fetch(`${apiBase}/dirac/me/locations`, {
+          method: "GET",
+          headers: { Accept: "application/json", Authorization: token },
+          cache: "no-store",
+        });
+
+        const data = await readJsonOrThrow(res, "GET /dirac/me/locations");
+        if (!Array.isArray(data)) {
+          throw new Error("Respuesta inesperada del backend en /dirac/me/locations");
+        }
+
+        setState({ email: email.trim(), basicToken: token });
+      })().finally(() => {
+        loginInflightRef.current = null;
       });
 
-      if (res.status === 401) {
-        throw new Error("Credenciales inválidas");
-      }
-      if (!res.ok) {
-        throw new Error(`Error de autenticación (${res.status})`);
-      }
-      const ct = res.headers.get("content-type") || "";
-      if (!ct.toLowerCase().includes("application/json")) {
-        throw new Error(
-          "La URL de API no devuelve JSON. Configurá VITE_API_BASE hacia el backend."
-        );
-      }
-
-      const data = await res.json().catch(() => null);
-      if (!Array.isArray(data)) {
-        throw new Error("Respuesta inesperada del backend en /dirac/me/locations");
-      }
-
-      setState({ email, basicToken: token });
+      loginInflightRef.current = p;
+      return p;
     },
     [apiBase]
   );
@@ -143,7 +149,9 @@ export function useAuth() {
  * - /pumps/config
  * - /tanks/config
  *
- * Esto evita preflight CORS.
+ * Mejoras:
+ * - No manda Content-Type en GET/HEAD (evita preflight)
+ * - Cache + dedupe opcional por path (evita duplicados x2 en StrictMode)
  */
 export function usePublicFetch() {
   const { apiBase } = useAuth();
@@ -152,8 +160,6 @@ export function usePublicFetch() {
     async (path: string, init: RequestInit = {}) => {
       const method = (init.method || "GET").toUpperCase();
 
-      // Para GET/HEAD: NO mandamos Content-Type (evita preflight)
-      // Para POST/PUT/PATCH: si mandás JSON, sí corresponde Content-Type
       const headers: Record<string, string> = {
         Accept: "application/json",
         ...(init.headers as any),
@@ -163,14 +169,43 @@ export function usePublicFetch() {
         headers["Content-Type"] = "application/json";
       }
 
-      const res = await fetch(`${apiBase}${path}`, {
-        ...init,
-        method,
-        headers,
-        // NO forzamos no-store: dejamos que el browser/cache/ETag funcione
-      });
+      const useCache = isGetLike(method) && (init.cache == null || init.cache === "default");
+      if (useCache) {
+        const now = Date.now();
+        const ent = PUBLIC_CACHE[path];
 
-      return res;
+        if (ent?.data !== undefined && now - ent.ts < PUBLIC_TTL_MS) {
+          return new Response(JSON.stringify(ent.data), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (ent?.inflight) return ent.inflight;
+
+        const inflight = fetch(`${apiBase}${path}`, { ...init, method, headers })
+          .then(async (res) => {
+            // Si no es JSON, devolvemos tal cual
+            const ct = res.headers.get("content-type") || "";
+            if (!res.ok || !ct.toLowerCase().includes("application/json")) return res;
+
+            const data = await res.json();
+            PUBLIC_CACHE[path] = { ts: Date.now(), data, inflight: null };
+
+            return new Response(JSON.stringify(data), {
+              status: res.status,
+              headers: { "Content-Type": "application/json" },
+            });
+          })
+          .finally(() => {
+            if (PUBLIC_CACHE[path]) PUBLIC_CACHE[path].inflight = null;
+          });
+
+        PUBLIC_CACHE[path] = { ts: ent?.ts ?? 0, data: ent?.data, inflight };
+        return inflight;
+      }
+
+      return fetch(`${apiBase}${path}`, { ...init, method, headers });
     },
     [apiBase]
   );
@@ -178,9 +213,10 @@ export function usePublicFetch() {
 
 /**
  * ✅ Fetch con auth (Authorization) SOLO cuando lo necesitás.
- * Además:
+ * Mejoras:
  * - No mete Content-Type en GET/HEAD (reduce preflight)
- * - No fuerza cache: "no-store" por defecto (lo podés pasar por init si querés)
+ * - No fuerza cache: "no-store" por defecto
+ * - Maneja 401 devolviendo error útil (opcional: podés logout afuera)
  */
 export function useAuthedFetch() {
   const { getAuthHeader, apiBase } = useAuth();
@@ -192,19 +228,14 @@ export function useAuthedFetch() {
       const headers: Record<string, string> = {
         Accept: "application/json",
         ...(init.headers as any),
-        ...getAuthHeader(), // Authorization
+        ...getAuthHeader(),
       };
 
-      // Content-Type solo para métodos con body
       if (!isGetLike(method) && !headers["Content-Type"]) {
         headers["Content-Type"] = "application/json";
       }
 
-      const res = await fetch(`${apiBase}${path}`, {
-        ...init,
-        method,
-        headers,
-      });
+      const res = await fetch(`${apiBase}${path}`, { ...init, method, headers });
 
       return res;
     },
