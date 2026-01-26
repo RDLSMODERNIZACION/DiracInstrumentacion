@@ -1,18 +1,11 @@
 import React, { useMemo } from "react";
-import useNodeDragCommon from "../../useNodeDragCommon";
-import type { UINode } from "../../types";
+import type { UINode, Tip } from "../../types";
 
 /**
- * NetworkAnalyzerNodeView (ABB / Analizador de Red)
- * - Solo visual (pantallazo): kW, cosφ, kWh hoy
- * - Si no hay datos => "--"
- *
- * Espera que el node tenga señales en alguna de estas formas:
- * 1) node.signals = { power_kw, pf, kwh_today }  (o equivalentes)
- * 2) node.data?.signals = { ... }
- * 3) node.values = { ... }
- *
- * Después lo atamos al backend como quieras.
+ * NetworkAnalyzerNodeView (ABB)
+ * - Render en SVG (<g>) para que funcione dentro del <svg> del diagrama.
+ * - Muestra pantallazo: kW, cosφ, kWh hoy (o "--").
+ * - Compatible con el patrón de props de tus otros NodeView (drag + tooltip + enabled).
  */
 
 function toNum(v: any): number | null {
@@ -37,113 +30,94 @@ function pickSignal(signals: any, keys: string[]) {
 
 export default function NetworkAnalyzerNodeView({
   n,
-  editable,
-  selected,
-  onSelect,
+  getPos,
+  setPos,
+  onDragEnd,
+  showTip,
+  hideTip,
+  enabled,
+  onClick,
 }: {
-  n: UINode & {
-    // opcional, no rompe tipos existentes
-    signals?: Record<string, any>;
-    data?: any;
-    values?: any;
-  };
-  editable: boolean;
-  selected?: boolean;
-  onSelect?: () => void;
+  n: UINode & { signals?: Record<string, any> };
+  getPos: (id: string) => { x: number; y: number } | null;
+  setPos: (id: string, x: number, y: number) => void;
+  onDragEnd?: () => void;
+  showTip?: (e: React.MouseEvent, content: { title: string; lines: string[] }) => void;
+  hideTip?: () => void;
+  enabled: boolean;
+  onClick?: () => void;
 }) {
-  const drag = useNodeDragCommon({ id: String((n as any).id ?? n.node_id ?? n.name ?? "na") });
+  const pos = getPos(n.id) ?? { x: n.x, y: n.y };
 
-  const signals = (n as any).signals ?? (n as any).data?.signals ?? (n as any).values ?? (n as any).data ?? null;
+  // tamaño del cuadrito
+  const W = 150;
+  const H = 70;
+
+  const x0 = pos.x - W / 2;
+  const y0 = pos.y - H / 2;
+
+  const signals = (n as any).signals ?? null;
 
   const powerKW = useMemo(
     () =>
-      pickSignal(signals, [
-        "power_kw",
-        "kw",
-        "p_kw",
-        "p",
-        "active_power_kw",
-        "active_power",
-      ]),
+      pickSignal(signals, ["power_kw", "kw", "p_kw", "active_power_kw", "active_power", "power"]),
     [signals]
   );
+  const pf = useMemo(() => pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]), [signals]);
+  const kwhToday = useMemo(() => pickSignal(signals, ["kwh_today", "energy_today", "kwh_day"]), [signals]);
 
-  const pf = useMemo(
-    () => pickSignal(signals, ["pf", "cosphi", "cos_phi", "cosφ", "power_factor"]),
-    [signals]
-  );
+  // Drag simple (como otros nodos): mousedown + mousemove en window
+  function onMouseDown(e: React.MouseEvent) {
+    if (!enabled) return;
+    e.stopPropagation();
+    onClick?.();
 
-  const kwhToday = useMemo(
-    () => pickSignal(signals, ["kwh_today", "energy_today", "kwh_day", "kwh"]),
-    [signals]
-  );
+    const start = { x: e.clientX, y: e.clientY };
+    const startPos = getPos(n.id) ?? { x: n.x, y: n.y };
 
-  // Estado visual: si tiene al menos un dato, lo consideramos "online"
-  const hasAny = toNum(powerKW) !== null || toNum(pf) !== null || toNum(kwhToday) !== null;
+    function onMove(ev: MouseEvent) {
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      setPos(n.id, startPos.x + dx, startPos.y + dy);
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      onDragEnd?.();
+    }
 
-  const border = selected ? "border-sky-400" : "border-slate-200";
-  const bg = hasAny ? "bg-white" : "bg-slate-50";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  const title = `Analizador de red`;
+  const lines = [
+    `kW: ${fmt(powerKW, 1)}`,
+    `cosφ: ${fmt(pf, 2)}`,
+    `hoy kWh: ${fmt(kwhToday, 0)}`,
+  ];
 
   return (
-    <div
-      className={[
-        "rounded-xl border shadow-sm",
-        border,
-        bg,
-        "px-3 py-2",
-        "select-none",
-        "min-w-[170px]",
-      ].join(" ")}
-      onMouseDown={(e) => {
-        if (!editable) return;
-        onSelect?.();
-        drag.onMouseDown?.(e as any);
-      }}
-      onClick={() => onSelect?.()}
-      title="Analizador de red (ABB)"
+    <g
+      onMouseDown={onMouseDown}
+      onMouseEnter={(e) => showTip?.(e, { title, lines })}
+      onMouseLeave={() => hideTip?.()}
+      style={{ cursor: enabled ? "move" : "pointer" }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[12px] font-semibold text-slate-700">
-          Analizador de red
-        </div>
+      <rect x={x0} y={y0} width={W} height={H} rx={12} ry={12} fill="#ffffff" stroke="#cbd5e1" strokeWidth={1.2} />
+      <text x={x0 + 10} y={y0 + 18} style={{ fontSize: 12, fontWeight: 700, fill: "#0f172a" }}>
+        Analizador de red
+      </text>
 
-        <div className="flex items-center gap-1">
-          <span
-            className={[
-              "inline-block h-2.5 w-2.5 rounded-full",
-              hasAny ? "bg-emerald-500" : "bg-slate-300",
-            ].join(" ")}
-          />
-          <span className="text-[11px] text-slate-500">
-            {hasAny ? "online" : "—"}
-          </span>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="mt-2 grid grid-cols-1 gap-1">
-        <div className="flex items-baseline justify-between">
-          <span className="text-[12px] text-slate-600">⚡ kW</span>
-          <span className="text-[13px] font-semibold text-slate-800">
-            {fmt(powerKW, 1)}
-          </span>
-        </div>
-
-        <div className="flex items-baseline justify-between">
-          <span className="text-[12px] text-slate-600">cos φ</span>
-          <span className="text-[13px] font-semibold text-slate-800">
-            {fmt(pf, 2)}
-          </span>
-        </div>
-
-        <div className="flex items-baseline justify-between">
-          <span className="text-[12px] text-slate-600">hoy kWh</span>
-          <span className="text-[13px] font-semibold text-slate-800">
-            {fmt(kwhToday, 0)}
-          </span>
-        </div>
-      </div>
-    </div>
+      <text x={x0 + 10} y={y0 + 38} style={{ fontSize: 12, fill: "#334155" }}>
+        ⚡ {fmt(powerKW, 1)} kW
+      </text>
+      <text x={x0 + 10} y={y0 + 54} style={{ fontSize: 12, fill: "#334155" }}>
+        cosφ {fmt(pf, 2)}
+      </text>
+      <text x={x0 + 90} y={y0 + 54} style={{ fontSize: 12, fill: "#334155" }}>
+        hoy {fmt(kwhToday, 0)} kWh
+      </text>
+    </g>
   );
 }

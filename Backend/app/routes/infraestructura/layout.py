@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
 import json
-import time
 
 from app.db import get_conn
 from psycopg.rows import dict_row
@@ -59,23 +58,34 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
                   WHERE l.company_id = %s
+
                   UNION ALL
                   SELECT COALESCE(lp.node_id,'pump:'||p.id)
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
                   WHERE l.company_id = %s
+
                   UNION ALL
                   SELECT COALESCE(lv.node_id,'valve:'||v.id)
                   FROM public.valves v
                   JOIN public.locations l ON l.id = v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
                   WHERE l.company_id = %s
+
                   UNION ALL
                   SELECT COALESCE(lm.node_id,'manifold:'||m.id)
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
+                  WHERE l.company_id = %s
+
+                  UNION ALL
+                  -- ✅ NUEVO: network analyzers (ABB)
+                  SELECT lna.node_id
+                  FROM public.layout_network_analyzers lna
+                  JOIN public.network_analyzers na ON na.id = lna.analyzer_id
+                  JOIN public.locations l ON l.id = na.location_id
                   WHERE l.company_id = %s
                 )
                 SELECT
@@ -88,7 +98,7 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                 LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
                 ORDER BY e.updated_at DESC
                 """,
-                (company_id, company_id, company_id, company_id),
+                (company_id, company_id, company_id, company_id, company_id),
             )
             return cur.fetchall()
     except HTTPException:
@@ -151,6 +161,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     Devuelve nodos (tank/pump/valve/manifold).
     ✅ Incluye `meta` para valves (layout_valves.meta).
     ✅ Incluye `signals` para manifolds (manifold_signals + latest readings).
+    ✅ NUEVO: incluye `network_analyzer` (ABB) desde layout_network_analyzers + network_analyzers.
 
     OPTIMIZADO (LATERAL + LIMIT 1):
     - Tanques: último tank_ingest por tanque via índice (N lookups, no scan global).
@@ -158,7 +169,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # SIN company_id: leemos de la VIEW
+            # SIN company_id: leemos de la VIEW (⚠️ si querés ABB también acá, hay que actualizar v_layout_combined)
             if company_id is None:
                 cur.execute(
                     """
@@ -173,7 +184,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 )
                 return cur.fetchall()
 
-            # CON company_id: query rápida (la que probaste en SQL, ~2-3ms)
+            # CON company_id: query rápida
             cur.execute(
                 """
                 WITH
@@ -335,6 +346,28 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   JOIN locs lx ON lx.id = l.id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   LEFT JOIN m_signals ms ON ms.manifold_id = m.id
+                ),
+
+                -- ✅ NUEVO: ABB / Network Analyzers
+                na AS (
+                  SELECT
+                    lna.node_id AS node_id,
+                    na.id::bigint AS id,
+                    'network_analyzer'::text AS type,
+                    lna.x, lna.y, lna.updated_at,
+                    NULL::boolean AS online,
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    lna.meta AS meta,
+                    -- por ahora vacío; después lo llenamos con lecturas reales
+                    '{}'::jsonb AS signals
+                  FROM public.layout_network_analyzers lna
+                  JOIN public.network_analyzers na ON na.id = lna.analyzer_id
+                  JOIN public.locations l ON l.id = na.location_id
+                  JOIN locs lx ON lx.id = l.id
                 )
 
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
@@ -344,6 +377,8 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM v
                 UNION ALL
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
+                UNION ALL
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
                 (company_id,),
@@ -361,6 +396,12 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
 # -------------------------------------------------------------------
 @router.post("/update_layout")
 async def update_layout(request: Request):
+    """
+    Actualiza x/y del nodo en su tabla layout correspondiente.
+
+    ✅ Soporta node_id con prefijo tipo "pump:12" (lógica existente).
+    ✅ NUEVO: Soporta node_id "sueltos" como 'ABB-PLANTA-ESTE-01' buscando en layout_* por node_id.
+    """
     data = await request.json()
     node_id = data.get("node_id")
     x = data.get("x")
@@ -369,44 +410,66 @@ async def update_layout(request: Request):
     if not node_id or not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         raise HTTPException(status_code=400, detail="Parámetros inválidos: node_id, x, y son requeridos")
 
+    # 1) Si viene con prefijo "tipo:id"
     tipo, _, sufijo = node_id.partition(":")
     table_map = {
         "pump": ("layout_pumps", "pump_id"),
         "manifold": ("layout_manifolds", "manifold_id"),
         "valve": ("layout_valves", "valve_id"),
         "tank": ("layout_tanks", "tank_id"),
+        # ✅ NUEVO: si algún día usás "network_analyzer:3"
+        "network_analyzer": ("layout_network_analyzers", "analyzer_id"),
     }
-    meta = table_map.get(tipo)
-    if not meta:
-        raise HTTPException(status_code=400, detail=f"Tipo de nodo no soportado: {tipo}")
 
-    table, id_col = meta
-
-    try:
-        id_numeric = int(sufijo)
-        where = f"{id_col} = %s"
-        params = (x, y, id_numeric)
-    except ValueError:
-        where = "node_id = %s"
-        params = (x, y, node_id)
-
-    sql = f"""
-        UPDATE public.{table}
-        SET x = %s::double precision,
-            y = %s::double precision,
-            updated_at = now()
-        WHERE {where}
-        RETURNING node_id, {id_col} AS entity_id, x, y, updated_at
-    """
+    # helper executor
+    def _exec_update(cur, table: str, id_col: str, where: str, params: tuple):
+        sql = f"""
+            UPDATE public.{table}
+            SET x = %s::double precision,
+                y = %s::double precision,
+                updated_at = now()
+            WHERE {where}
+            RETURNING node_id, {id_col} AS entity_id, x, y, updated_at
+        """
+        cur.execute(sql, params)
+        return cur.fetchone()
 
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(sql, params)
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail=f"no se encontró fila en {table} con {where}")
-            conn.commit()
-            return {"ok": True, "table": table, "updated": row}
+            # A) prefijo soportado
+            meta = table_map.get(tipo)
+            if meta:
+                table, id_col = meta
+                # si hay sufijo numérico, actualizamos por id_col; si no, por node_id
+                try:
+                    id_numeric = int(sufijo)
+                    row = _exec_update(cur, table, id_col, f"{id_col} = %s", (x, y, id_numeric))
+                except ValueError:
+                    row = _exec_update(cur, table, id_col, "node_id = %s", (x, y, node_id))
+
+                if not row:
+                    raise HTTPException(status_code=404, detail=f"no se encontró fila en {table} para {node_id}")
+
+                conn.commit()
+                return {"ok": True, "table": table, "updated": row}
+
+            # B) NUEVO: node_id “suelto” (ej ABB-PLANTA-ESTE-01) → buscamos por node_id en tablas layout
+            candidates = [
+                ("layout_network_analyzers", "analyzer_id"),
+                ("layout_pumps", "pump_id"),
+                ("layout_manifolds", "manifold_id"),
+                ("layout_valves", "valve_id"),
+                ("layout_tanks", "tank_id"),
+            ]
+
+            for table, id_col in candidates:
+                row = _exec_update(cur, table, id_col, "node_id = %s", (x, y, node_id))
+                if row:
+                    conn.commit()
+                    return {"ok": True, "table": table, "updated": row}
+
+            raise HTTPException(status_code=404, detail=f"no se encontró node_id={node_id} en ninguna tabla layout")
+
     except HTTPException:
         raise
     except Exception as e:
@@ -421,6 +484,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
     ✅ nodes incluye meta para valves y signals para manifolds.
+    ✅ NUEVO: incluye network_analyzer (ABB) en scoped.
 
     Nota: para máxima performance en el front, podés pedir:
       - /get_layout_combined (nodes)
@@ -457,7 +521,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Scoped: nodes (reutiliza el mismo SQL rápido que get_layout_combined)
+            # Scoped: nodes
             cur.execute(
                 """
                 WITH
@@ -599,6 +663,27 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   JOIN locs lx ON lx.id = l.id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   LEFT JOIN m_signals ms ON ms.manifold_id = m.id
+                ),
+
+                -- ✅ NUEVO: ABB / Network Analyzers
+                na AS (
+                  SELECT
+                    lna.node_id AS node_id,
+                    na.id::bigint AS id,
+                    'network_analyzer'::text AS type,
+                    lna.x, lna.y, lna.updated_at,
+                    NULL::boolean AS online,
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    lna.meta AS meta,
+                    '{}'::jsonb AS signals
+                  FROM public.layout_network_analyzers lna
+                  JOIN public.network_analyzers na ON na.id = lna.analyzer_id
+                  JOIN public.locations l ON l.id = na.location_id
+                  JOIN locs lx ON lx.id = l.id
                 )
 
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
@@ -608,13 +693,15 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM v
                 UNION ALL
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
+                UNION ALL
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
                 (company_id,),
             )
             nodes = cur.fetchall()
 
-            # Scoped: edges + knots (NO TOCAR)
+            # Scoped: edges + knots (incluye ABB)
             cur.execute(
                 """
                 WITH nodes AS (
@@ -641,6 +728,13 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   JOIN public.locations l ON l.id=m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id = %s
+                  UNION ALL
+                  -- ✅ NUEVO: ABB
+                  SELECT lna.node_id
+                  FROM public.layout_network_analyzers lna
+                  JOIN public.network_analyzers na ON na.id = lna.analyzer_id
+                  JOIN public.locations l ON l.id = na.location_id
+                  WHERE l.company_id = %s
                 )
                 SELECT
                   e.edge_id, e.src_node_id, e.dst_node_id, e.relacion, e.prioridad, e.updated_at,
@@ -652,7 +746,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 LEFT JOIN public.layout_edge_knots k ON k.edge_id = e.edge_id
                 ORDER BY e.updated_at DESC
                 """,
-                (company_id, company_id, company_id, company_id),
+                (company_id, company_id, company_id, company_id, company_id),
             )
             edges = cur.fetchall()
 
