@@ -1,11 +1,11 @@
 import React, { useMemo } from "react";
-import type { UINode, Tip } from "../../types";
+import type { UINode } from "../../types";
 
 /**
  * NetworkAnalyzerNodeView (ABB)
  * - Render en SVG (<g>) para que funcione dentro del <svg> del diagrama.
+ * - Drag CORREGIDO para zoom/pan: convierte coords de pantalla → SVG usando CTM inversa.
  * - Muestra pantallazo: kW, cosφ, kWh hoy (o "--").
- * - Compatible con el patrón de props de tus otros NodeView (drag + tooltip + enabled).
  */
 
 function toNum(v: any): number | null {
@@ -26,6 +26,16 @@ function pickSignal(signals: any, keys: string[]) {
     if (signals[k] !== undefined && signals[k] !== null) return signals[k];
   }
   return null;
+}
+
+function clientToSvg(svg: SVGSVGElement, clientX: number, clientY: number) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const ctm = svg.getScreenCTM();
+  if (!ctm) return null;
+  const p = pt.matrixTransform(ctm.inverse());
+  return { x: p.x, y: p.y };
 }
 
 export default function NetworkAnalyzerNodeView({
@@ -59,27 +69,35 @@ export default function NetworkAnalyzerNodeView({
   const signals = (n as any).signals ?? null;
 
   const powerKW = useMemo(
-    () =>
-      pickSignal(signals, ["power_kw", "kw", "p_kw", "active_power_kw", "active_power", "power"]),
+    () => pickSignal(signals, ["power_kw", "kw", "p_kw", "active_power_kw", "active_power", "power"]),
     [signals]
   );
   const pf = useMemo(() => pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]), [signals]);
   const kwhToday = useMemo(() => pickSignal(signals, ["kwh_today", "energy_today", "kwh_day"]), [signals]);
 
-  // Drag simple (como otros nodos): mousedown + mousemove en window
-  function onMouseDown(e: React.MouseEvent) {
+  function onMouseDown(e: React.MouseEvent<SVGGElement>) {
     if (!enabled) return;
     e.stopPropagation();
     onClick?.();
 
-    const start = { x: e.clientX, y: e.clientY };
+    const svg = e.currentTarget.ownerSVGElement;
+    if (!svg) return;
+
+    const startSvg = clientToSvg(svg, e.clientX, e.clientY);
+    if (!startSvg) return;
+
     const startPos = getPos(n.id) ?? { x: n.x, y: n.y };
 
     function onMove(ev: MouseEvent) {
-      const dx = ev.clientX - start.x;
-      const dy = ev.clientY - start.y;
+      const curSvg = clientToSvg(svg, ev.clientX, ev.clientY);
+      if (!curSvg) return;
+
+      const dx = curSvg.x - startSvg.x;
+      const dy = curSvg.y - startSvg.y;
+
       setPos(n.id, startPos.x + dx, startPos.y + dy);
     }
+
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -91,11 +109,7 @@ export default function NetworkAnalyzerNodeView({
   }
 
   const title = `Analizador de red`;
-  const lines = [
-    `kW: ${fmt(powerKW, 1)}`,
-    `cosφ: ${fmt(pf, 2)}`,
-    `hoy kWh: ${fmt(kwhToday, 0)}`,
-  ];
+  const lines = [`kW: ${fmt(powerKW, 1)}`, `cosφ: ${fmt(pf, 2)}`, `hoy kWh: ${fmt(kwhToday, 0)}`];
 
   return (
     <g
