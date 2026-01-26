@@ -1,13 +1,6 @@
 import React, { useMemo } from "react";
 import type { UINode } from "../../types";
 
-/**
- * NetworkAnalyzerNodeView (ABB)
- * - Render en SVG (<g>) para que funcione dentro del <svg> del diagrama.
- * - Drag CORREGIDO para zoom/pan: convierte coords de pantalla → SVG usando CTM inversa.
- * - Muestra pantallazo: kW, cosφ, kWh hoy (o "--").
- */
-
 function toNum(v: any): number | null {
   if (v === null || v === undefined) return null;
   const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
@@ -51,7 +44,7 @@ export default function NetworkAnalyzerNodeView({
   n: UINode & { signals?: Record<string, any> };
   getPos: (id: string) => { x: number; y: number } | null;
   setPos: (id: string, x: number, y: number) => void;
-  onDragEnd?: () => void;
+  onDragEnd?: (x: number, y: number) => void; // ✅ ahora entrega la posición final
   showTip?: (e: React.MouseEvent, content: { title: string; lines: string[] }) => void;
   hideTip?: () => void;
   enabled: boolean;
@@ -59,7 +52,6 @@ export default function NetworkAnalyzerNodeView({
 }) {
   const pos = getPos(n.id) ?? { x: n.x, y: n.y };
 
-  // tamaño del cuadrito
   const W = 150;
   const H = 70;
 
@@ -88,6 +80,9 @@ export default function NetworkAnalyzerNodeView({
 
     const startPos = getPos(n.id) ?? { x: n.x, y: n.y };
 
+    // ✅ guardamos el último valor calculado (NO dependemos del state)
+    let last = { x: startPos.x, y: startPos.y };
+
     function onMove(ev: MouseEvent) {
       const curSvg = clientToSvg(svg, ev.clientX, ev.clientY);
       if (!curSvg) return;
@@ -95,13 +90,16 @@ export default function NetworkAnalyzerNodeView({
       const dx = curSvg.x - startSvg.x;
       const dy = curSvg.y - startSvg.y;
 
-      setPos(n.id, startPos.x + dx, startPos.y + dy);
+      last = { x: startPos.x + dx, y: startPos.y + dy };
+      setPos(n.id, last.x, last.y);
     }
 
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      onDragEnd?.();
+
+      // ✅ guardamos con la posición real final
+      onDragEnd?.(last.x, last.y);
     }
 
     window.addEventListener("mousemove", onMove);

@@ -503,20 +503,25 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
   }, []);
 
-  const saveNodePosition = useCallback(
-    async (id: string) => {
-      try {
-        const pos = getPos(id);
-        if (!pos) return;
-        saveLayoutToStorage(nodesByIdAsArray(nodesById));
-        await updateLayout(id, pos.x, pos.y);
-        log("POSITION SAVED", { id, x: pos.x, y: pos.y });
-      } catch (e) {
-        console.error("Error al actualizar layout:", e);
-      }
-    },
-    [getPos, nodesById, log]
-  );
+const saveNodePositionXY = useCallback(
+  async (id: string, x: number, y: number) => {
+    try {
+      // guardo local (para que importLayoutLS no lo pise)
+      const next = nodesByIdAsArray({
+        ...nodesById,
+        [id]: { ...(nodesById[id] as any), x, y },
+      } as any);
+      saveLayoutToStorage(next);
+
+      await updateLayout(id, x, y);
+      log("POSITION SAVED (XY)", { id, x, y });
+    } catch (e) {
+      console.error("Error al actualizar layout (XY):", e);
+    }
+  },
+  [nodesById, log]
+);
+
 
   /** =========================
    *  UI actions
@@ -912,7 +917,8 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
       n={n as any}
       getPos={getPos}
       setPos={setPos}
-      onDragEnd={() => saveNodePosition(n.id)}
+      onDragEnd={(x, y) => saveNodePositionXY(n.id, x, y)}
+
       showTip={showTip}
       hideTip={hideTip}
       enabled={editMode}
