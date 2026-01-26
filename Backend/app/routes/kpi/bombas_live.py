@@ -12,14 +12,14 @@ PUMPS_TABLE     = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 HB_SOURCE       = (os.getenv("PUMP_HB_SOURCE") or "kpi.v_pump_hb_clean").strip()
 
-# Ventana para considerar una bomba "conectada" (en minutos, respecto de 'to')
+# Ventana para considerar una bomba "conectada" (minutos respecto de 'to')
 PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
 
 
 def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
     """
-    Normaliza el rango [from, to] a UTC, redondeando a minuto, y
-    usando por defecto las últimas 24 hs si no se pasa nada.
+    Normaliza el rango [from, to] a UTC, redondeando a minuto.
+    Por defecto últimas 24hs si no se pasa nada.
     """
     if date_to is None:
         date_to = datetime.now(timezone.utc)
@@ -46,6 +46,7 @@ def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime
 
 
 def _bucket_expr_sql(bucket: str) -> str:
+    # OJO: esta expresión se aplica sobre alias "m" en SQL
     if bucket == "1min":
         return "m"
     if bucket == "5min":
@@ -86,30 +87,34 @@ def pumps_live(
     connected_only: bool = Query(True),
 ):
     """
-    Devuelve un timeline de cuántas bombas están ON (según PLC) en cada bucket,
-    junto con:
-      - pumps_total: cantidad total de bombas en el scope (empresa / localidad / ids)
-      - pumps_connected: bombas actualmente conectadas (último HB reciente)
+    Devuelve un timeline de cuántas bombas están ON por bucket, junto con:
+      - pumps_total: bombas totales en scope (empresa / localidad / ids)
+      - pumps_connected: bombas conectadas "ahora" (último HB reciente)
 
-    ⚠️ IMPORTANTE:
-    ON/OFF se calcula ahora a partir de plc_state del último heartbeat:
+    ON/OFF se calcula desde el último heartbeat:
       plc_state = 'run'  -> ON
       plc_state = 'stop' -> OFF
-      si plc_state es NULL -> se usa h.relay como fallback (retrocompatibilidad)
+      plc_state NULL     -> fallback a relay (retrocompatibilidad)
+
+    Mejora performance:
+      - Evita el patrón N(minutos)*M(bombas) con subselect por minuto.
+      - Usa intervalos por bomba (lead()) y un join por rango.
     """
     df, dt = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # 1) Scope de bombas por empresa / localidad / ids
+        # 1) Scope de bombas
         if ids:
             scope_ids_all = ids
         else:
             cur.execute(
                 f"""
-                WITH params AS (SELECT
-                  %(company_id)s::bigint AS company_id,
-                  %(location_id)s::bigint AS location_id)
+                WITH params AS (
+                  SELECT
+                    %(company_id)s::bigint  AS company_id,
+                    %(location_id)s::bigint AS location_id
+                )
                 SELECT p.id AS pump_id
                 FROM {PUMPS_TABLE} p
                 JOIN {LOCATIONS_TABLE} l ON l.id = p.location_id
@@ -122,7 +127,7 @@ def pumps_live(
             scope_ids_all = [int(r["pump_id"]) for r in cur.fetchall()]
 
         pumps_total_all = len(scope_ids_all)
-        if not pumps_total_all:
+        if pumps_total_all == 0:
             return {
                 "timestamps": [],
                 "is_on": [],
@@ -131,10 +136,9 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 2) Bombas "conectadas" según su ÚLTIMO heartbeat
+        # 2) Bombas conectadas según último HB <= dt
         recent_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
 
-        # Usamos plc_state como verdad, relay sólo fallback
         cur.execute(
             f"""
             WITH last_hb AS (
@@ -142,7 +146,7 @@ def pumps_live(
                      h.pump_id,
                      h.hb_ts,
                      CASE
-                       WHEN h.plc_state = 'run' THEN true
+                       WHEN h.plc_state = 'run'  THEN true
                        WHEN h.plc_state = 'stop' THEN false
                        ELSE h.relay
                      END AS is_on
@@ -151,25 +155,22 @@ def pumps_live(
                 AND h.hb_ts <= %(dt)s
               ORDER BY h.pump_id, h.hb_ts DESC
             )
-            SELECT pump_id, hb_ts, is_on AS relay
+            SELECT pump_id, hb_ts, is_on
             FROM last_hb;
             """,
             {"ids": scope_ids_all, "dt": dt},
         )
         last_rows = cur.fetchall()
-
         connected_set = {
             int(r["pump_id"])
             for r in last_rows
-            if r["hb_ts"] is not None and r["hb_ts"] >= recent_from
+            if r.get("hb_ts") is not None and r["hb_ts"] >= recent_from
         }
 
-        # Scope para la serie de tiempo:
+        # Scope final para timeline
         scope_ids = scope_ids_all if not connected_only else [pid for pid in scope_ids_all if pid in connected_set]
 
         if not scope_ids:
-            # No hay bombas conectadas en este momento (o ninguna matchea el filtro),
-            # devolvemos timeline vacío pero igual informamos totales.
             return {
                 "timestamps": [],
                 "is_on": [],
@@ -178,8 +179,19 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 3) Timeline robusto: para cada minuto, miramos el último HB por bomba
-        #    y contamos cuántas están ON (según plc_state / relay fallback).
+        # 3) Timeline eficiente por intervalos
+        #
+        # Estrategia:
+        # - baseline: último estado antes de df (para arrancar el tramo)
+        # - hb_in: heartbeats dentro de [df, dt]
+        # - hb_all = baseline ∪ hb_in
+        # - hb_intervals: cada hb define [hb_ts, next_ts) con lead()
+        # - per_minute: minutos se unen por rango a intervalos (sin subselect por fila)
+        # - bucketed: agrega por bucket (avg o max)
+        #
+        # Nota:
+        # - extendemos intervalos al dt + 1min para incluir dt si cae justo al borde.
+        #
         cur.execute(
             f"""
             WITH bounds AS (
@@ -195,36 +207,72 @@ def pumps_live(
                        interval '1 minute'
                      ) AS m
             ),
-            state_per_minute AS (
+
+            baseline AS (
+              SELECT DISTINCT ON (h.pump_id)
+                     h.pump_id,
+                     h.hb_ts,
+                     CASE
+                       WHEN h.plc_state = 'run'  THEN true
+                       WHEN h.plc_state = 'stop' THEN false
+                       ELSE h.relay
+                     END AS is_on
+              FROM {HB_SOURCE} h
+              JOIN scope s ON s.pump_id = h.pump_id
+              WHERE h.hb_ts < (SELECT df FROM bounds)
+              ORDER BY h.pump_id, h.hb_ts DESC
+            ),
+
+            hb_in AS (
+              SELECT
+                h.pump_id,
+                h.hb_ts,
+                CASE
+                  WHEN h.plc_state = 'run'  THEN true
+                  WHEN h.plc_state = 'stop' THEN false
+                  ELSE h.relay
+                END AS is_on
+              FROM {HB_SOURCE} h
+              JOIN scope s ON s.pump_id = h.pump_id
+              WHERE h.hb_ts >= (SELECT df FROM bounds)
+                AND h.hb_ts <= (SELECT dt FROM bounds)
+            ),
+
+            hb_all AS (
+              SELECT * FROM baseline
+              UNION ALL
+              SELECT * FROM hb_in
+            ),
+
+            hb_intervals AS (
+              SELECT
+                pump_id,
+                hb_ts,
+                LEAD(hb_ts) OVER (PARTITION BY pump_id ORDER BY hb_ts) AS next_ts,
+                is_on
+              FROM hb_all
+            ),
+
+            hb_intervals_fixed AS (
+              SELECT
+                pump_id,
+                hb_ts,
+                COALESCE(next_ts, (SELECT dt FROM bounds) + interval '1 minute') AS next_ts,
+                is_on
+              FROM hb_intervals
+            ),
+
+            per_minute AS (
               SELECT
                 minutes.m,
-                scope.pump_id,
-                COALESCE(
-                  (
-                    SELECT
-                      CASE
-                        WHEN h.plc_state = 'run' THEN true
-                        WHEN h.plc_state = 'stop' THEN false
-                        ELSE h.relay
-                      END AS is_on
-                    FROM {HB_SOURCE} h
-                    WHERE h.pump_id = scope.pump_id
-                      AND h.hb_ts <= minutes.m
-                    ORDER BY h.hb_ts DESC
-                    LIMIT 1
-                  ),
-                  false
-                ) AS relay
+                SUM(CASE WHEN i.is_on THEN 1 ELSE 0 END)::float AS on_count
               FROM minutes
-              CROSS JOIN scope
+              JOIN hb_intervals_fixed i
+                ON minutes.m >= i.hb_ts
+               AND minutes.m <  i.next_ts
+              GROUP BY minutes.m
             ),
-            running AS (
-              SELECT
-                m,
-                SUM(CASE WHEN relay THEN 1 ELSE 0 END)::float AS on_count
-              FROM state_per_minute
-              GROUP BY m
-            ),
+
             bucketed AS (
               SELECT
                 { _bucket_expr_sql(bucket) } AS b,
@@ -232,7 +280,7 @@ def pumps_live(
                   WHEN %(agg_mode)s = 'max' THEN MAX(on_count)
                   ELSE AVG(on_count)
                 END AS v
-              FROM running
+              FROM per_minute
               GROUP BY 1
             )
             SELECT extract(epoch FROM b)::bigint*1000 AS ts_ms, v AS val
@@ -245,7 +293,7 @@ def pumps_live(
 
     return {
         "timestamps": [int(r["ts_ms"]) for r in rows],
-        "is_on":      [None if r["val"] is None else float(r["val"]) for r in rows],
+        "is_on": [None if r["val"] is None else float(r["val"]) for r in rows],
         "pumps_total": pumps_total_all,
         "pumps_connected": len(connected_set),
         "window": {"from": df.isoformat(), "to": dt.isoformat()},
