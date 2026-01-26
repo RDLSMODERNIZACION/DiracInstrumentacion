@@ -34,7 +34,6 @@ function normalize24h(
   for (const r of rows) {
     const t = String(r[tsKey]);
     const raw = r[valueKey];
-    // si viene null (ej. avg_level_pct), ignoramos en el agregado
     const v = raw == null ? NaN : Number(raw);
     const arr = m.get(t) || [];
     arr.push(Number.isFinite(v) ? v : NaN);
@@ -50,14 +49,36 @@ function normalize24h(
 function defaultRangeISO(hours = 24) {
   const to = new Date();
   const from = new Date(to.getTime() - hours * 3600 * 1000);
-  // sin ms
   const toISO = new Date(to.getTime() - to.getMilliseconds()).toISOString();
   const fromISO = new Date(from.getTime() - from.getMilliseconds()).toISOString();
   return { fromISO, toISO };
 }
 
-export async function loadDashboard(location_id?: number | "all") {
-  // 1) locations/totales/uptime/alarms
+type LoadDashboardOpts = {
+  /** ✅ por defecto false: NO pega a /kpi/graphs/* */
+  includeSeries?: boolean;
+  /** si querés cambiar rango */
+  hours?: number;
+  /** si querés que no falle toda la carga si graphs muere */
+  tolerateSeriesFailure?: boolean;
+};
+
+function emptySeries() {
+  return {
+    pumpTs: { timestamps: [] as string[], is_on: [] as number[] },
+    tankTs: { timestamps: [] as string[], level_percent: [] as number[] },
+  };
+}
+
+export async function loadDashboard(
+  location_id?: number | "all",
+  opts: LoadDashboardOpts = {}
+) {
+  const includeSeries = !!opts.includeSeries;
+  const hours = opts.hours ?? 24;
+  const tolerateSeriesFailure = opts.tolerateSeriesFailure ?? true;
+
+  // 1) locations/totales/uptime/alarms  (✅ esto es lo “útil” y no-legacy)
   const [locations, totals, uptime, alarms] = await Promise.all([
     fetchLocations(),
     fetchTotalsByLocation({ location_id }),
@@ -68,7 +89,10 @@ export async function loadDashboard(location_id?: number | "all") {
   // tabla por ubicación + uptime
   const uptimeByLoc = new Map<number | string, number>();
   (uptime as UptimeLocRow[]).forEach((u) =>
-    uptimeByLoc.set(u.location_id, pickNum(u as AnyObj, ["uptime_pct_30d", "uptime_pct"], null as any))
+    uptimeByLoc.set(
+      u.location_id,
+      pickNum(u as AnyObj, ["uptime_pct_30d", "uptime_pct"], null as any)
+    )
   );
 
   const byLocation = (totals as TotalsByLocationRow[]).map((t: any) => ({
@@ -82,43 +106,56 @@ export async function loadDashboard(location_id?: number | "all") {
     uptime_pct_30d: uptimeByLoc.get(t.location_id) ?? null,
   }));
 
-  // 2) series (from/to y filtros)
-  const { fromISO, toISO } = defaultRangeISO();
-  const locParam =
-    location_id !== undefined && location_id !== "all" ? Number(location_id) : undefined;
-
-  const [buckets, pumpsActive, tankLevels] = await Promise.all([
-    fetchBuckets(fromISO, toISO),
-    fetchPumpsActive(fromISO, toISO, locParam),
-    fetchTankLevelAvg(fromISO, toISO, locParam),
-  ]);
-
-  // timeline HH:00
-  const ts = (buckets || []).map((b) => b.local_hour);
-
-  // bombas: ya viene una fila por hora, pero normalizamos por si hay duplicados
-  const pumpsPerHour = normalize24h(
-    ts,
-    (pumpsActive as PumpsActive[]) as AnyObj[],
-    "local_hour",
-    "pumps_count",
-    (xs) => (xs.length ? Math.max(...xs) : 0) // si hay varias entradas de la misma hora, nos quedamos con el máximo
-  );
-
-  // tanques: promedio por hora; si no hay lecturas, dejamos 0 (como hacía tu loader)
-  const levelAvgPerHour = normalize24h(
-    ts,
-    (tankLevels as TankLevelAvg[]) as AnyObj[],
-    "local_hour",
-    "avg_level_pct",
-    (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
-  );
-
-  return {
+  // base response (sin series)
+  const base = {
     locations,
     byLocation,
     overview: { alarms },
-    pumpTs: { timestamps: ts, is_on: pumpsPerHour },
-    tankTs: { timestamps: ts, level_percent: levelAvgPerHour },
+    ...emptySeries(),
   };
+
+  // ✅ 2) series (LEGACY GRAPHS) — solo si se pide explícitamente
+  if (!includeSeries) return base;
+
+  const { fromISO, toISO } = defaultRangeISO(hours);
+  const locParam =
+    location_id !== undefined && location_id !== "all" ? Number(location_id) : undefined;
+
+  try {
+    const [buckets, pumpsActive, tankLevels] = await Promise.all([
+      fetchBuckets(fromISO, toISO),
+      fetchPumpsActive(fromISO, toISO, locParam),
+      fetchTankLevelAvg(fromISO, toISO, locParam),
+    ]);
+
+    const ts = (buckets || []).map((b) => b.local_hour);
+
+    const pumpsPerHour = normalize24h(
+      ts,
+      (pumpsActive as PumpsActive[]) as AnyObj[],
+      "local_hour",
+      "pumps_count",
+      (xs) => (xs.length ? Math.max(...xs) : 0)
+    );
+
+    const levelAvgPerHour = normalize24h(
+      ts,
+      (tankLevels as TankLevelAvg[]) as AnyObj[],
+      "local_hour",
+      "avg_level_pct",
+      (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+    );
+
+    return {
+      ...base,
+      pumpTs: { timestamps: ts, is_on: pumpsPerHour },
+      tankTs: { timestamps: ts, level_percent: levelAvgPerHour },
+    };
+  } catch (err) {
+    console.warn("[loadDashboard] falló carga de series legacy graphs:", err);
+
+    if (!tolerateSeriesFailure) throw err;
+    // devolvemos igual el dashboard (sin series)
+    return base;
+  }
 }
