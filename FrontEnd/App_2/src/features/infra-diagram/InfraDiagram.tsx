@@ -28,6 +28,8 @@ import ValveNodeView from "./components/nodes/ValveNodeView";
 import EditableEdge from "./components/edges/EditableEdge";
 import OpsDrawer from "./components/OpsDrawer";
 import LocationDrawer from "./components/LocationDrawer";
+import NetworkAnalyzerNodeView from "./components/nodes/NetworkAnalyzerNodeView";
+
 
 /** =========================
  *  Types
@@ -364,12 +366,35 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   location_id: n.location_id ?? null,
   location_name: n.location_name ?? null,
 
-  // ✅ NUEVO: no perder signals en manifolds (P/Q)
+  // ✅ no perder signals en manifolds (P/Q)
   ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
+
+  // ✅ no perder signals en ABB (kW/cosφ/kWh)
+  ...(n.type === "network_analyzer" ? { signals: (n as any).signals ?? null } : {}),
 
   // ✅ CLAVE: no perder meta (rot/flip/model/ports) en valves
   ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
 })) as UINode[];
+
+
+// ✅ TEST: nodo ABB para ver el render aunque el backend no lo mande
+uiNodes.push({
+  id: "ABB-TEST-1",
+  type: "network_analyzer",
+  name: "ABB Test",
+  x: 360,
+  y: 140,
+  online: true,
+  state: null,
+  location_id: null,
+  location_name: "Test",
+  signals: {
+    power_kw: 18.4,
+    pf: 0.91,
+    kwh_today: 126,
+  },
+} as any);
+
 
 
 
@@ -861,58 +886,71 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
 
                 ))}
 
-                {/* Nodes */}
-                {nodes.map((n) =>
-                  n.type === "tank" ? (
-                    <TankNodeView
-                      key={n.id}
-                      n={n as TankNode}
-                      getPos={getPos}
-                      setPos={setPos}
-                      onDragEnd={() => saveNodePosition(n.id)}
-                      showTip={showTip}
-                      hideTip={hideTip}
-                      enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-                    />
-                  ) : n.type === "pump" ? (
-                    <PumpNodeView
-                      key={n.id}
-                      n={n as PumpNode}
-                      getPos={getPos}
-                      setPos={setPos}
-                      onDragEnd={() => saveNodePosition(n.id)}
-                      showTip={showTip}
-                      hideTip={hideTip}
-                      enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-                    />
-                  ) : n.type === "manifold" ? (
-                    <ManifoldNodeView
-                      key={n.id}
-                      n={n as ManifoldNode}
-                      getPos={getPos}
-                      setPos={setPos}
-                      onDragEnd={() => saveNodePosition(n.id)}
-                      showTip={showTip}
-                      hideTip={hideTip}
-                      enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-                    />
-                  ) : n.type === "valve" ? (
-                    <ValveNodeView
-                      key={n.id}
-                      n={n as ValveNode}
-                      getPos={getPos}
-                      setPos={setPos}
-                      onDragEnd={() => saveNodePosition(n.id)}
-                      showTip={showTip}
-                      hideTip={hideTip}
-                      enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-                    />
-                  ) : null
-                )}
+               {/* Nodes */}
+{nodes.map((n) =>
+  n.type === "tank" ? (
+    <TankNodeView
+      key={n.id}
+      n={n as TankNode}
+      getPos={getPos}
+      setPos={setPos}
+      onDragEnd={() => saveNodePosition(n.id)}
+      showTip={showTip}
+      hideTip={hideTip}
+      enabled={editMode}
+      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+    />
+  ) : n.type === "pump" ? (
+    <PumpNodeView
+      key={n.id}
+      n={n as PumpNode}
+      getPos={getPos}
+      setPos={setPos}
+      onDragEnd={() => saveNodePosition(n.id)}
+      showTip={showTip}
+      hideTip={hideTip}
+      enabled={editMode}
+      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+    />
+  ) : n.type === "manifold" ? (
+    <ManifoldNodeView
+      key={n.id}
+      n={n as ManifoldNode}
+      getPos={getPos}
+      setPos={setPos}
+      onDragEnd={() => saveNodePosition(n.id)}
+      showTip={showTip}
+      hideTip={hideTip}
+      enabled={editMode}
+      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+    />
+  ) : n.type === "network_analyzer" ? (
+    <NetworkAnalyzerNodeView
+      key={n.id}
+      n={n as any}
+      getPos={getPos}
+      setPos={setPos}
+      onDragEnd={() => saveNodePosition(n.id)}
+      showTip={showTip}
+      hideTip={hideTip}
+      enabled={editMode}
+      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+    />
+  ) : n.type === "valve" ? (
+    <ValveNodeView
+      key={n.id}
+      n={n as ValveNode}
+      getPos={getPos}
+      setPos={setPos}
+      onDragEnd={() => saveNodePosition(n.id)}
+      showTip={showTip}
+      hideTip={hideTip}
+      enabled={editMode}
+      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+    />
+  ) : null
+)}
+
 
                 {/* Puertos para modo conectar */}
                 {editMode &&
