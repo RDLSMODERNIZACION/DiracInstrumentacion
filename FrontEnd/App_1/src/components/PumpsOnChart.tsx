@@ -22,9 +22,12 @@ type Props = {
   pumpsTs: Agg | null | undefined;
   title?: string;
   tz?: string;            // default "America/Argentina/Buenos_Aires"
-  height?: number;        // default 260 (igual TankLevelChart)
+  height?: number;        // default 260
   max?: number;           // techo Y opcional
   syncId?: string;        // ej: "op-sync"
+  /** Si querés volver al modo "minuto a minuto" (pesado), dejalo true.
+   *  Por defecto lo apagamos porque ahora el KPI viene cada 5min. */
+  forceMinuteProfile?: boolean;
 };
 
 const toMs = (x: number | string) => {
@@ -33,8 +36,9 @@ const toMs = (x: number | string) => {
   if (Number.isFinite(n) && n > 10_000) return n;
   return new Date(x).getTime();
 };
-const startOfMin  = (ms: number) => { const d = new Date(ms); d.setSeconds(0,0); return d.getTime(); };
-const startOfHour = (ms: number) => { const d = new Date(ms); d.setMinutes(0,0,0); return d.getTime(); };
+
+const startOfMin  = (ms: number) => { const d = new Date(ms); d.setSeconds(0, 0); return d.getTime(); };
+const startOfHour = (ms: number) => { const d = new Date(ms); d.setMinutes(0, 0, 0); return d.getTime(); };
 const addMinutes  = (ms: number, m: number) => ms + m * 60_000;
 const addHours    = (ms: number, h: number) => ms + h * 3_600_000;
 
@@ -54,30 +58,75 @@ const fmtHM = (ms: number, tz = "America/Argentina/Buenos_Aires") => {
   }
 };
 
-/**
- * Arma perfil horario escalonado por minuto en 24h:
- * - dilateMin: ensancha ±N minutos los ON para que no queden “palitos”
- * - bridgeMin: rellena gaps cortos entre ON consecutivos (evita cortes por jitter)
- * Devuelve serie numérica (ms) para sincronizar por valor con el chart de tanques.
- */
-function buildMinuteProfile24h(
-  pumps: Agg,
-  { dilateMin = 2, bridgeMin = 1 }: { dilateMin?: number; bridgeMin?: number } = {}
-) {
+function toPairs(pumps: Agg) {
   const ts = pumps?.timestamps ?? [];
   const vs = pumps?.is_on ?? [];
+  const N = Math.min(ts.length, vs.length);
   const pairs: Array<{ ms: number; on: number }> = [];
 
-  const N = Math.min(ts.length, vs.length);
   for (let i = 0; i < N; i++) {
     const ms = toMs(ts[i] as any);
     if (!Number.isFinite(ms)) continue;
-    let on = vs[i];
-    on = typeof on === "boolean" ? (on ? 1 : 0) : (on == null ? 0 : Number(on));
-    pairs.push({ ms, on: Number(on) || 0 });
+
+    const v = vs[i];
+    const on =
+      typeof v === "boolean" ? (v ? 1 : 0) :
+      v == null ? 0 :
+      Number(v);
+
+    pairs.push({ ms, on: Number.isFinite(on) ? on : 0 });
   }
 
-  const last = pairs.length ? Math.max(...pairs.map(p => p.ms)) : Date.now();
+  pairs.sort((a, b) => a.ms - b.ms);
+  return pairs;
+}
+
+/**
+ * ✅ Perfil directo (recomendado):
+ * Usa exactamente los puntos recibidos (cada 5min) y arma ticks horarios.
+ * No inventa datos por minuto, no “dilata”, no “puentea”.
+ */
+function buildDirectProfile(pumps: Agg, tz: string) {
+  const pairs = toPairs(pumps);
+
+  const now = Date.now();
+  const end = pairs.length ? startOfMin(pairs[pairs.length - 1].ms) : startOfMin(now);
+  const start = addHours(end, -24);
+
+  // filtramos a 24h por seguridad (aunque backend ya manda 24h)
+  const series = pairs
+    .filter((p) => p.ms >= start && p.ms <= end)
+    .map((p) => ({ x: startOfMin(p.ms), on: p.on, tLabel: fmtHM(p.ms, tz) }));
+
+  // Si por algún motivo vino vacío, dejamos 2 puntos mínimos para que el chart no colapse
+  const safeSeries =
+    series.length >= 2
+      ? series
+      : [
+          { x: start, on: 0, tLabel: fmtHM(start, tz) },
+          { x: end, on: 0, tLabel: fmtHM(end, tz) },
+        ];
+
+  const ticks: number[] = [];
+  for (let t = startOfHour(start); t <= end; t = addHours(t, 1)) ticks.push(t);
+
+  const yDataMax = Math.max(0, ...safeSeries.map((d) => d.on));
+  return { series: safeSeries, ticks, yDataMax };
+}
+
+/**
+ * 🔁 Perfil minuto a minuto (opcional):
+ * Mantengo tu lógica original (dilate/bridge) pero solo si lo pedís.
+ * Útil si alguna vez volvés a pedir bucket=1min (no recomendado para 24h).
+ */
+function buildMinuteProfile24h(
+  pumps: Agg,
+  tz: string,
+  { dilateMin = 2, bridgeMin = 1 }: { dilateMin?: number; bridgeMin?: number } = {}
+) {
+  const pairs = toPairs(pumps);
+
+  const last = pairs.length ? pairs[pairs.length - 1].ms : Date.now();
   const end   = startOfMin(last);
   const start = addHours(end, -24);
 
@@ -92,7 +141,7 @@ function buildMinuteProfile24h(
 
   // 1) DILATACIÓN
   if (dilateMin > 0) {
-    const activeMinutes = Array.from(perMin.keys()).filter(k => (perMin.get(k) ?? 0) > 0);
+    const activeMinutes = Array.from(perMin.keys()).filter((k) => (perMin.get(k) ?? 0) > 0);
     for (const m of activeMinutes) {
       const val = perMin.get(m)!;
       for (let d = -dilateMin; d <= dilateMin; d++) {
@@ -121,22 +170,20 @@ function buildMinuteProfile24h(
     }
   }
 
-  // Serie final (step)
   let series: Array<{ x: number; on: number; tLabel: string }> = [];
   for (let t = start; t <= end; t = addMinutes(t, 1)) {
     const on = perMin.get(t) ?? 0;
-    series.push({ x: t, on, tLabel: fmtHM(t) });
+    series.push({ x: t, on, tLabel: fmtHM(t, tz) });
   }
   if (series.length === 1) {
     const only = series[0];
-    series = [{ x: only.x - 60_000, on: 0, tLabel: fmtHM(only.x - 60_000) }, only];
+    series = [{ x: only.x - 60_000, on: 0, tLabel: fmtHM(only.x - 60_000, tz) }, only];
   }
 
-  // Ticks de X a cada hora
   const ticks: number[] = [];
   for (let t = startOfHour(start); t <= end; t = addHours(t, 1)) ticks.push(t);
 
-  const yDataMax = Math.max(0, ...series.map(d => d.on));
+  const yDataMax = Math.max(0, ...series.map((d) => d.on));
   return { series, ticks, yDataMax };
 }
 
@@ -147,19 +194,20 @@ export default function PumpsOnChart({
   height = 260,
   max,
   syncId,
+  forceMinuteProfile = false,
 }: Props) {
-  // Igual que eficiencia: línea escalonada + grid punteada + ejes simples
-  const { series, ticks, yDataMax } = useMemo(
-    () => buildMinuteProfile24h(pumpsTs ?? {}, { dilateMin: 2, bridgeMin: 1 }),
-    [pumpsTs]
-  );
+  const { series, ticks, yDataMax } = useMemo(() => {
+    const src = pumpsTs ?? {};
+    // ✅ default: directo (optimizado para bucket=5min)
+    if (!forceMinuteProfile) return buildDirectProfile(src, tz);
+    return buildMinuteProfile24h(src, tz, { dilateMin: 2, bridgeMin: 1 });
+  }, [pumpsTs, tz, forceMinuteProfile]);
 
   const yMax = Math.max(1, yDataMax, max ?? 0);
 
-  // Estética igual a eficiencia
   const GRID_COLOR = "rgba(0,0,0,.18)";
   const AXIS_COLOR = "rgba(0,0,0,.20)";
-  const TICK_COLOR = "#475569"; // slate-600
+  const TICK_COLOR = "#475569";
 
   return (
     <Card className="rounded-2xl">
@@ -173,12 +221,10 @@ export default function PumpsOnChart({
             data={series}
             syncId={syncId}
             syncMethod="value"
-            margin={{ top: 8, right: 16, left: 8, bottom: 0 }} // = TankLevelChart
+            margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
           >
-            {/* Grid punteada como eficiencia */}
             <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
 
-            {/* Eje X con HH:mm por hora */}
             <XAxis
               dataKey="x"
               type="number"
@@ -191,7 +237,7 @@ export default function PumpsOnChart({
               tick={{ fontSize: 11, fill: TICK_COLOR }}
               minTickGap={24}
             />
-            {/* Eje Y alineado con Tank (width=40) */}
+
             <YAxis
               domain={[0, yMax]}
               allowDecimals={false}
@@ -201,7 +247,6 @@ export default function PumpsOnChart({
               tick={{ fontSize: 11, fill: TICK_COLOR }}
             />
 
-            {/* Tooltip minimal en el mismo formato */}
             <Tooltip
               cursor={{ strokeDasharray: "3 3" }}
               content={({ active, payload }) => {
@@ -210,19 +255,18 @@ export default function PumpsOnChart({
                 return (
                   <div className="rounded-md border bg-white/95 px-2 py-1 text-xs shadow">
                     <div>{fmtHM(p.x, tz)}</div>
-                    <div><strong>{p.on}</strong> Bombas ON</div>
+                    <div><strong>{Math.round(p.on)}</strong> Bombas ON</div>
                   </div>
                 );
               }}
             />
             <Legend />
 
-            {/* Línea escalonada negra (como eficiencia) */}
             <Line
               type="stepAfter"
               dataKey="on"
               name="Bombas ON"
-              stroke="#0b0f19"     // negro suave (mejor anti-alias)
+              stroke="#0b0f19"
               strokeWidth={2}
               dot={false}
               isAnimationActive={false}

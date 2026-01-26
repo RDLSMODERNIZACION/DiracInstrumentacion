@@ -3,7 +3,15 @@
 // Hook LIVE de Operación: devuelve series sincronizadas para
 //  - Bombas: cantidad de bombas ON (perfil continuo, carry-forward en backend)
 //  - Tanques: nivel promedio del scope (LOCF opcional)
-// Soporta períodos largos con bucket (1min/5min/15min/1h/1d) y polling adaptativo.
+// Soporta períodos largos con bucket y polling.
+//
+// ✅ Update (24h fijo):
+// - Bucket por defecto = 5min (y backend bombas fuerza 5min).
+// - Polling adaptativo: si la pestaña está oculta, baja frecuencia.
+// - Abort real por request (evita solaparse y acumular latencia).
+// - Dedupe ya lo hace graphs.ts, pero acá además evitamos overlap de cargas.
+// - Sanitiza arrays para deps estables.
+//
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -25,12 +33,13 @@ type Args = {
   tankIds?: number[];
   periodHours?: number;                             // default 24
   bucket?: "1min" | "5min" | "15min" | "1h" | "1d"; // si no viene: auto (ver abajo)
-  pumpAggMode?: "avg" | "max";                      // agregación por bucket de bombas (default "avg")
-  pumpRoundCounts?: boolean;                        // redondear promedios de conteo
-  tankAgg?: "avg" | "last";                         // agregación dentro del minuto en tanques (default "avg")
-  tankCarry?: boolean;                              // LOCF (default true)
-  connectedOnly?: boolean;                          // default true (ambos)
+  pumpAggMode?: "avg" | "max";                      // default "avg"
+  pumpRoundCounts?: boolean;                        // default false
+  tankAgg?: "avg" | "last";                         // default "avg"
+  tankCarry?: boolean;                              // default true
+  connectedOnly?: boolean;                          // default true
   pollMs?: number;                                  // default 15000
+  pollMsHidden?: number;                            // default 60000 (cuando la pestaña está oculta)
 };
 
 type LiveOps = {
@@ -41,6 +50,12 @@ type LiveOps = {
   tanksTotal?: number;
   tanksConnected?: number;
   window?: { start: number; end: number }; // epoch ms (alineado a minuto)
+  meta?: {
+    bucket: NonNullable<Args["bucket"]>;
+    lastOkAt?: number;
+    lastErr?: string;
+    isLoading: boolean;
+  };
 };
 
 // =======================
@@ -56,10 +71,7 @@ const LIVEOPS_DEBUG =
   (hasWindow() && window.localStorage?.getItem("DEBUG_LIVEOPS") === "1");
 
 function dlog(...args: any[]) {
-  if (LIVEOPS_DEBUG) {
-    // eslint-disable-next-line no-console
-    console.debug("[useLiveOps]", ...args);
-  }
+  if (LIVEOPS_DEBUG) console.debug("[useLiveOps]", ...args);
 }
 
 // ===== utilitarios de tiempo =====
@@ -69,11 +81,18 @@ function floorToMinute(ms: number) {
   return d.getTime();
 }
 
-/** Elige bucket por defecto según la ventana */
+function stableCsv(nums?: number[]) {
+  if (!nums || !nums.length) return "";
+  const copy = [...nums].filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  return copy.join(",");
+}
+
+/** ✅ 24h -> 5min por defecto (mejor performance + UX) */
 function pickAutoBucket(hours: number): NonNullable<Args["bucket"]> {
-  if (hours >= 24 * 30) return "1d";   // 30 días
-  if (hours > 48)        return "1h";  // 7 días típico
-  return "1min";                        // 24 h o menos
+  if (hours >= 24 * 30) return "1d";
+  if (hours > 48) return "1h";
+  if (hours > 24) return "15min";
+  return "5min";
 }
 
 export function useLiveOps({
@@ -89,17 +108,24 @@ export function useLiveOps({
   tankCarry = true,
   connectedOnly = true,
   pollMs = 15_000,
+  pollMsHidden = 60_000,
 }: Args = {}): LiveOps {
   const [p, setP] = useState<PumpsLiveResp | null>(null);
   const [t, setT] = useState<TanksLiveResp | null>(null);
   const [win, setWin] = useState<{ start: number; end: number }>();
+  const [lastOkAt, setLastOkAt] = useState<number>();
+  const [lastErr, setLastErr] = useState<string>();
+  const [isLoading, setIsLoading] = useState(false);
 
-  // bucket efectivo: si no lo pasaron, lo decidimos acá
   const effBucket: NonNullable<Args["bucket"]> = bucket ?? pickAutoBucket(periodHours);
   const locId = typeof locationId === "number" ? locationId : undefined;
 
-  // Abort simple entre renders/polls
+  const pumpIdsKey = useMemo(() => stableCsv(pumpIds), [pumpIds]);
+  const tankIdsKey = useMemo(() => stableCsv(tankIds), [tankIds]);
+
+  // control de concurrencia
   const seqRef = useRef(0);
+  const inFlightRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!hasWindow()) {
@@ -110,7 +136,16 @@ export function useLiveOps({
     let alive = true;
     const seq = ++seqRef.current;
 
-    const load = async () => {
+    const runLoad = async () => {
+      // Evitar overlap: cancelamos request anterior si todavía está en vuelo
+      if (inFlightRef.current) {
+        inFlightRef.current.abort();
+      }
+      const ac = new AbortController();
+      inFlightRef.current = ac;
+
+      setIsLoading(true);
+
       try {
         const end = floorToMinute(Date.now());
         const start = end - periodHours * 3600_000;
@@ -119,14 +154,14 @@ export function useLiveOps({
         const common = {
           from: new Date(start).toISOString(),
           to: new Date(end).toISOString(),
-          companyId, // 👈 IMPORTANTE: camelCase para que graphs.ts lo mapee a ?company_id=
+          companyId, // camelCase -> graphs.ts lo mapea a company_id
         };
 
         const pumpsArgs: PumpsLiveArgs = {
           ...common,
           locationId: locId,
-          pumpIds,
-          bucket: effBucket,           // ✅ sin fallback: bombas soporta 1d
+          pumpIds: pumpIds && pumpIds.length ? pumpIds : undefined,
+          bucket: effBucket, // ✅ 24h -> 5min
           aggMode: pumpAggMode,
           roundCounts: pumpRoundCounts,
           connectedOnly,
@@ -135,24 +170,21 @@ export function useLiveOps({
         const tanksArgs: TanksLiveArgs = {
           ...common,
           locationId: locId,
-          tankIds,
+          tankIds: tankIds && tankIds.length ? tankIds : undefined,
           agg: tankAgg,
           carry: tankCarry,
-          bucket: effBucket,           // ✅ mismo bucket que bombas
+          bucket: effBucket,
           connectedOnly,
         };
 
-        dlog("poll start", {
-          seq,
-          window: { start, end },
-          bucket: effBucket,
-          pumpsArgs,
-          tanksArgs,
-        });
+        dlog("poll start", { seq, window: { start, end }, bucket: effBucket, pumpsArgs, tanksArgs });
 
+        // Importante: graphs.ts dedupea, pero igual pasamos signal para cancelar en cambios rápidos
         const [pRes, tRes] = await Promise.all([
-          fetchPumpsLive(pumpsArgs),
-          fetchTanksLive(tanksArgs),
+          // @ts-ignore: si fetchPumpsLive soporta signal en tu impl futura, ya queda listo
+          fetchPumpsLive({ ...pumpsArgs, signal: ac.signal } as any),
+          // @ts-ignore
+          fetchTanksLive({ ...tanksArgs, signal: ac.signal } as any),
         ]);
 
         if (!alive || seq !== seqRef.current) {
@@ -160,49 +192,81 @@ export function useLiveOps({
           return;
         }
 
+        setP(pRes);
+        setT(tRes);
+        setLastOkAt(Date.now());
+        setLastErr(undefined);
+
         dlog("poll success", {
           seq,
           pumpsPoints: pRes?.timestamps?.length ?? 0,
           tanksPoints: tRes?.timestamps?.length ?? 0,
           pumpsTotal: pRes?.pumps_total,
           tanksTotal: tRes?.tanks_total,
+          bucketEffective: pRes?.bucket ?? effBucket,
         });
-
-        setP(pRes);
-        setT(tRes);
-      } catch (err) {
+      } catch (err: any) {
+        // si fue abort, no lo tratamos como error
+        if (err?.name === "AbortError") {
+          dlog("poll aborted", { seq });
+          return;
+        }
         console.error("[useLiveOps] fetch error:", err);
+        setLastErr(String(err?.message ?? err));
         dlog("poll error", { error: String(err) });
+      } finally {
+        if (inFlightRef.current === ac) inFlightRef.current = null;
+        if (alive) setIsLoading(false);
       }
     };
 
-    load();
-    const h = window.setInterval(load, pollMs);
+    // polling adaptativo: si está hidden, reducimos frecuencia
+    const tick = () => {
+      runLoad();
+      const ms = document.hidden ? pollMsHidden : pollMs;
+      return window.setTimeout(tick, ms);
+    };
+
+    // primer load inmediato
+    runLoad();
+    const h = window.setTimeout(tick, document.hidden ? pollMsHidden : pollMs);
+
+    const onVis = () => {
+      // al volver a visible, refrescamos rápido
+      if (!document.hidden) {
+        dlog("visibility -> visible, refreshing");
+        runLoad();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
 
     return () => {
       alive = false;
-      window.clearInterval(h);
-      dlog("cleanup interval", { seq });
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearTimeout(h);
+      inFlightRef.current?.abort();
+      inFlightRef.current = null;
+      dlog("cleanup", { seq });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     // scope
     locId,
     companyId,
-    Array.isArray(pumpIds) ? pumpIds.join(",") : "",
-    Array.isArray(tankIds) ? tankIds.join(",") : "",
+    pumpIdsKey,
+    tankIdsKey,
     // ventana/precisión
     periodHours,
-    effBucket,          // <— si cambia, recargamos
+    effBucket,
     pumpAggMode,
     pumpRoundCounts,
     tankAgg,
     tankCarry,
     connectedOnly,
     pollMs,
+    pollMsHidden,
   ]);
 
-  // Adaptadores a la forma que consumen los charts (ya vienen bucketizadas)
   const pumpTs = useMemo<PumpTs | null>(() => {
     if (!p) return null;
     return { timestamps: p.timestamps, is_on: p.is_on };
@@ -221,5 +285,11 @@ export function useLiveOps({
     tanksTotal: t?.tanks_total,
     tanksConnected: t?.tanks_connected,
     window: win,
+    meta: {
+      bucket: effBucket,
+      lastOkAt,
+      lastErr,
+      isLoading,
+    },
   };
 }

@@ -13,6 +13,12 @@
 // - `buildQS` arma querystrings ignorando null/undefined y soporta arrays (CSV).
 // - Fechas: las funciones aceptan ISO strings; si enviás Date/ms, usá `toISO(...)`.
 //
+// ✅ Update (24h fijo):
+// - Bombas: bucket por defecto 5min (y en backend ya lo forzamos a 5min).
+// - Tanques: bucket por defecto 5min para mantener consistencia y rendimiento.
+// - `http` agrega un cache in-flight opcional (dedupe) para evitar requests duplicados
+//   si el mismo componente/hook llama dos veces (montaje doble, strict mode, etc).
+//
 
 import { withScope } from "@/lib/scope";
 import { authHeaders } from "@/lib/http";
@@ -43,6 +49,8 @@ export type PumpsLiveResp = {
   pumps_total: number;                    // total de bombas en el scope (empresa/loc o ids)
   pumps_connected: number;                // cuántas reportaron en la ventana
   window: { from: string; to: string };   // ISO-UTC
+  bucket?: string;                        // backend puede devolver bucket efectivo
+  agg_mode?: string;
 };
 
 export type TanksLiveResp = {
@@ -51,6 +59,7 @@ export type TanksLiveResp = {
   tanks_total: number;
   tanks_connected: number;
   window: { from: string; to: string };
+  bucket?: string;
 };
 
 /* Listados para filtros */
@@ -78,37 +87,72 @@ export type TankInfo = {
 /** Timeout por defecto de requests */
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * Cache in-flight (dedupe):
+ * Si se pide el mismo URL+method al mismo tiempo, devuelve la misma Promise.
+ * Evita duplicados por montajes dobles y hooks concurrentes.
+ */
+const inflight = new Map<string, Promise<any>>();
+function inflightKey(url: string, init?: RequestInit) {
+  const m = (init?.method ?? "GET").toUpperCase();
+  return `${m} ${url}`;
+}
+
 /** GET/POST genérico con auth, scope y timeout. */
 async function http<T>(
   path: string,
-  init?: RequestInit & { timeoutMs?: number }
+  init?: RequestInit & { timeoutMs?: number; dedupeKey?: string }
 ): Promise<T> {
   const url = withScope(`${BASE}${path}`);
+  const key = init?.dedupeKey ? `${init.dedupeKey}::${inflightKey(url, init)}` : inflightKey(url, init);
+
+  // dedupe (solo para GET por defecto; para POST/PUT mejor no dedupe salvo que lo pidas explícito)
+  const method = (init?.method ?? "GET").toUpperCase();
+  const shouldDedupe = method === "GET";
+
+  if (shouldDedupe) {
+    const hit = inflight.get(key);
+    if (hit) return hit as Promise<T>;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), init?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
-  try {
-    const res = await fetch(url, {
-      method: init?.method ?? "GET",
-      headers: { Accept: "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
-      body: init?.body,
-      signal: controller.signal,
-      // ⚠️ Evitamos CORS con credenciales cruzadas. Si algún día necesitás cookies,
-      // cambiá a "include" y configurá CORS en el backend con allow_credentials=True
-      // y allow_origins sin wildcard.
-      credentials: "omit",
-    });
+  const p = (async () => {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Accept: "application/json",
+          ...authHeaders(),
+          ...(init?.headers ?? {}),
+        },
+        body: init?.body,
+        signal: controller.signal,
+        // ⚠️ Evitamos CORS con credenciales cruzadas. Si algún día necesitás cookies,
+        // cambiá a "include" y configurá CORS en el backend con allow_credentials=True
+        // y allow_origins sin wildcard.
+        credentials: "omit",
+      });
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error(`[API ${res.status}] ${res.statusText} ::`, body || "(sin cuerpo)");
-      throw new Error(`[API ${res.status}] ${res.statusText}`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error(`[API ${res.status}] ${res.statusText} ::`, body || "(sin cuerpo)");
+        throw new Error(`[API ${res.status}] ${res.statusText}`);
+      }
+
+      return res.json() as Promise<T>;
+    } finally {
+      clearTimeout(timeout);
     }
+  })();
 
-    return res.json() as Promise<T>;
-  } finally {
-    clearTimeout(timeout);
+  if (shouldDedupe) {
+    inflight.set(key, p);
+    p.finally(() => inflight.delete(key));
   }
+
+  return p;
 }
 
 /** Construye un querystring ignorando null/undefined. Arrays → CSV. */
@@ -188,7 +232,7 @@ export type PumpsLiveArgs = {
   pumpIds?: number[];
   /** True = cuenta sólo bombas con heartbeats en ventana (default backend). */
   connectedOnly?: boolean;
-  /** Bucket de salida para ventanas largas. */
+  /** Bucket de salida (fijamos 5min por default para 24h). */
   bucket?: "1min" | "5min" | "15min" | "1h";
   /** Agregación por bucket (avg|max). */
   aggMode?: "avg" | "max";
@@ -197,9 +241,8 @@ export type PumpsLiveArgs = {
 };
 
 /**
- * Serie continua de “bombas ON” en [from,to), minuto a minuto o bucketizada.
- * - Usa carry-forward del estado y alinea a minuto.
- * - Ideal para OpsPumpsProfile.
+ * Serie continua de “bombas ON” en [from,to), bucketizada.
+ * ✅ 24h fijo → default 5min (y backend fuerza 5min).
  */
 export async function fetchPumpsLive(args: PumpsLiveArgs = {}) {
   const qs = buildQS({
@@ -209,11 +252,13 @@ export async function fetchPumpsLive(args: PumpsLiveArgs = {}) {
     company_id: args.companyId,
     pump_ids: args.pumpIds,
     connected_only: args.connectedOnly,
-    bucket: args.bucket ?? "1min",
+    // ✅ default 5min
+    bucket: args.bucket ?? "5min",
     agg_mode: args.aggMode ?? "avg",
     round_counts: args.roundCounts ?? false,
   });
-  return http<PumpsLiveResp>(`/kpi/bombas/live?${qs}`);
+  // dedupeKey: evita doble llamada si un hook se monta 2 veces
+  return http<PumpsLiveResp>(`/kpi/bombas/live?${qs}`, { dedupeKey: "kpi:pumpsLive" });
 }
 
 /* =========================
@@ -230,7 +275,7 @@ export type TanksLiveArgs = {
   agg?: "avg" | "last";
   /** Carry-forward por minuto (LOCF). */
   carry?: boolean;
-  /** Bucket de salida (1min|5min|15min|1h|1d). */
+  /** Bucket de salida (default 5min para 24h). */
   bucket?: "1min" | "5min" | "15min" | "1h" | "1d";
   /** Sólo tanques con lecturas en ventana (default true). */
   connectedOnly?: boolean;
@@ -245,10 +290,11 @@ export async function fetchTanksLive(args: TanksLiveArgs = {}) {
     tank_ids: args.tankIds,
     agg: args.agg ?? "avg",
     carry: args.carry ?? true,
-    bucket: args.bucket ?? "1min",
+    // ✅ default 5min
+    bucket: args.bucket ?? "5min",
     connected_only: args.connectedOnly ?? true,
   });
-  return http<TanksLiveResp>(`/kpi/tanques/live?${qs}`);
+  return http<TanksLiveResp>(`/kpi/tanques/live?${qs}`, { dedupeKey: "kpi:tanksLive" });
 }
 
 /* =========================
@@ -260,7 +306,7 @@ export function listPumps(opts?: { locationId?: number; companyId?: number }) {
     location_id: opts?.locationId,
     company_id: opts?.companyId,
   });
-  return http<PumpInfo[]>(`/kpi/pumps/status?${qs}`);
+  return http<PumpInfo[]>(`/kpi/pumps/status?${qs}`, { dedupeKey: "kpi:listPumps" });
 }
 
 export function listTanks(opts?: { locationId?: number; companyId?: number }) {
@@ -268,5 +314,5 @@ export function listTanks(opts?: { locationId?: number; companyId?: number }) {
     location_id: opts?.locationId,
     company_id: opts?.companyId,
   });
-  return http<TankInfo[]>(`/kpi/tanks/latest?${qs}`);
+  return http<TankInfo[]>(`/kpi/tanks/latest?${qs}`, { dedupeKey: "kpi:listTanks" });
 }
