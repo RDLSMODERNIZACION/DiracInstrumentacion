@@ -391,7 +391,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
         raise HTTPException(status_code=500, detail=f"DB error (combined): {e}")
 
 
-# -------------------------------------------------------------------
+## -------------------------------------------------------------------
 # POST /infraestructura/update_layout
 # -------------------------------------------------------------------
 @router.post("/update_layout")
@@ -400,7 +400,10 @@ async def update_layout(request: Request):
     Actualiza x/y del nodo en su tabla layout correspondiente.
 
     ✅ Soporta node_id con prefijo tipo "pump:12" (lógica existente).
-    ✅ NUEVO: Soporta node_id "sueltos" como 'ABB-PLANTA-ESTE-01' buscando en layout_* por node_id.
+    ✅ Soporta "network_analyzer:3" si algún día lo usás.
+    ✅ NUEVO: Soporta node_id "sueltos" como 'ABB-PLANTA-ESTE-01'
+       buscándolo directamente por node_id en layout_network_analyzers
+       (y como fallback en otros layout_*).
     """
     data = await request.json()
     node_id = data.get("node_id")
@@ -408,27 +411,30 @@ async def update_layout(request: Request):
     y = data.get("y")
 
     if not node_id or not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-        raise HTTPException(status_code=400, detail="Parámetros inválidos: node_id, x, y son requeridos")
+        raise HTTPException(
+            status_code=400,
+            detail="Parámetros inválidos: node_id, x, y son requeridos"
+        )
 
     # 1) Si viene con prefijo "tipo:id"
     tipo, _, sufijo = node_id.partition(":")
+
     table_map = {
         "pump": ("layout_pumps", "pump_id"),
         "manifold": ("layout_manifolds", "manifold_id"),
         "valve": ("layout_valves", "valve_id"),
         "tank": ("layout_tanks", "tank_id"),
-        # ✅ NUEVO: si algún día usás "network_analyzer:3"
+        # ABB / Analizador de red
         "network_analyzer": ("layout_network_analyzers", "analyzer_id"),
     }
 
-    # helper executor
-    def _exec_update(cur, table: str, id_col: str, where: str, params: tuple):
+    def _exec_update(cur, table: str, id_col: str, where_sql: str, params: tuple):
         sql = f"""
             UPDATE public.{table}
             SET x = %s::double precision,
                 y = %s::double precision,
                 updated_at = now()
-            WHERE {where}
+            WHERE {where_sql}
             RETURNING node_id, {id_col} AS entity_id, x, y, updated_at
         """
         cur.execute(sql, params)
@@ -436,26 +442,65 @@ async def update_layout(request: Request):
 
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # A) prefijo soportado
+            # ------------------------------------------------------------------
+            # A) Caso normal: node_id con prefijo (pump:12, manifold:3, etc.)
+            # ------------------------------------------------------------------
             meta = table_map.get(tipo)
             if meta:
                 table, id_col = meta
-                # si hay sufijo numérico, actualizamos por id_col; si no, por node_id
                 try:
+                    # si el sufijo es numérico, actualizamos por id
                     id_numeric = int(sufijo)
-                    row = _exec_update(cur, table, id_col, f"{id_col} = %s", (x, y, id_numeric))
+                    row = _exec_update(
+                        cur,
+                        table,
+                        id_col,
+                        f"{id_col} = %s",
+                        (x, y, id_numeric),
+                    )
                 except ValueError:
-                    row = _exec_update(cur, table, id_col, "node_id = %s", (x, y, node_id))
+                    # si no es numérico, actualizamos por node_id
+                    row = _exec_update(
+                        cur,
+                        table,
+                        id_col,
+                        "node_id = %s",
+                        (x, y, node_id),
+                    )
 
                 if not row:
-                    raise HTTPException(status_code=404, detail=f"no se encontró fila en {table} para {node_id}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"no se encontró fila en {table} para {node_id}",
+                    )
 
                 conn.commit()
                 return {"ok": True, "table": table, "updated": row}
 
-            # B) NUEVO: node_id “suelto” (ej ABB-PLANTA-ESTE-01) → buscamos por node_id en tablas layout
+            # ------------------------------------------------------------------
+            # B) NUEVO: node_id sin prefijo (ej: ABB-PLANTA-ESTE-01)
+            #     → primero intentamos layout_network_analyzers
+            # ------------------------------------------------------------------
+            row = _exec_update(
+                cur,
+                "layout_network_analyzers",
+                "analyzer_id",
+                "node_id = %s",
+                (x, y, node_id),
+            )
+            if row:
+                conn.commit()
+                return {
+                    "ok": True,
+                    "table": "layout_network_analyzers",
+                    "updated": row,
+                }
+
+            # ------------------------------------------------------------------
+            # C) Fallback defensivo: buscar node_id en otros layout_*
+            #    (no debería pasar, pero evita 500 raros)
+            # ------------------------------------------------------------------
             candidates = [
-                ("layout_network_analyzers", "analyzer_id"),
                 ("layout_pumps", "pump_id"),
                 ("layout_manifolds", "manifold_id"),
                 ("layout_valves", "valve_id"),
@@ -463,17 +508,30 @@ async def update_layout(request: Request):
             ]
 
             for table, id_col in candidates:
-                row = _exec_update(cur, table, id_col, "node_id = %s", (x, y, node_id))
+                row = _exec_update(
+                    cur,
+                    table,
+                    id_col,
+                    "node_id = %s",
+                    (x, y, node_id),
+                )
                 if row:
                     conn.commit()
                     return {"ok": True, "table": table, "updated": row}
 
-            raise HTTPException(status_code=404, detail=f"no se encontró node_id={node_id} en ninguna tabla layout")
+            raise HTTPException(
+                status_code=404,
+                detail=f"no se encontró node_id={node_id} en ninguna tabla layout",
+            )
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DB error (update): {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"DB error (update_layout): {e}",
+        )
+
 
 
 # -------------------------------------------------------------------
