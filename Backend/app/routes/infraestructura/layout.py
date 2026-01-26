@@ -388,7 +388,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 ORDER BY type,id
                 """,
                 # company_id usado en locs + cada bloque t/p/v/m
-                (company_id, company_id, company_id, company_id, company_id, company_id),
+                (company_id, company_id, company_id, company_id, company_id),
             )
             return cur.fetchall()
 
