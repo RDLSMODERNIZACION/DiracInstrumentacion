@@ -8,13 +8,6 @@ from psycopg.rows import dict_row
 
 router = APIRouter(prefix="/infraestructura", tags=["infraestructura"])
 
-# ============================================================
-# Helpers (debug timing)
-# ============================================================
-
-def _ms(t0: float) -> int:
-    return int((time.perf_counter() - t0) * 1000)
-
 
 # -------------------------------------------------------------------
 # GET /infraestructura/health_db
@@ -22,12 +15,11 @@ def _ms(t0: float) -> int:
 @router.get("/health_db")
 async def health_db():
     """Health-check simple contra la DB."""
-    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
-        return {"ok": True, "ms": _ms(t0)}
+        return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB down: {e}")
 
@@ -43,7 +35,6 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
     - Sin company_id: todas.
     - Con company_id: sólo aristas cuyos endpoints pertenecen a nodos de esa empresa.
     """
-    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
@@ -58,10 +49,8 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                     ORDER BY e.updated_at DESC
                     """
                 )
-                rows = cur.fetchall()
-                return rows
+                return cur.fetchall()
 
-            # Scoped por empresa: limitamos por node_id de los nodos de esa empresa
             cur.execute(
                 """
                 WITH nodes AS (
@@ -115,12 +104,6 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
 async def update_edge_knots(request: Request):
     """
     Guarda la forma (knots) de un edge para que quede fijo en cualquier PC.
-
-    Body:
-    {
-      "edge_id": 138,
-      "knots": [{"x":123.4,"y":56.7}, ...]
-    }
     """
     data = await request.json()
     edge_id = data.get("edge_id")
@@ -166,20 +149,16 @@ async def update_edge_knots(request: Request):
 async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     Devuelve nodos (tank/pump/valve/manifold).
-    ✅ Incluye `meta` para valves (desde public.layout_valves.meta).
-    ✅ Incluye `signals` para manifolds (desde public.manifold_signals + latest readings).
+    ✅ Incluye `meta` para valves (layout_valves.meta).
+    ✅ Incluye `signals` para manifolds (manifold_signals + latest readings).
 
     OPTIMIZADO:
-    - Tanques: 1 sola lectura latest por tanque (CTE tank_last)
-    - Manifolds: 1 sola lectura latest por señal (CTE ms_last) + agregado por manifold (m_signals)
-    - Evita N laterals por señal / subqueries duplicadas
+    - Tanques: latest ingest SOLO para tanques de la empresa (no escanea 5.2M).
+    - Bombas: latest hb/event SOLO para pumps de la empresa (no usa v_pumps_with_status).
     """
-    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # ---------------------------------------------------------
-            # SIN company_id: leemos de la VIEW (ya tiene signals)
-            # ---------------------------------------------------------
+            # SIN company_id: leemos de la VIEW
             if company_id is None:
                 cur.execute(
                     """
@@ -192,25 +171,65 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     ORDER BY c.type, c.id
                     """
                 )
-                rows = cur.fetchall()
-                # debug opcional
-                # return {"rows": rows, "ms": _ms(t0)}  # si querés medir desde afuera
-                return rows
+                return cur.fetchall()
 
-            # ---------------------------------------------------------
-            # CON company_id: query optimizada
-            # ---------------------------------------------------------
+            # CON company_id: query scoped (evita scans globales)
             cur.execute(
                 """
                 WITH
+                -- ===== scope de assets por empresa =====
+                locs AS (
+                  SELECT id
+                  FROM public.locations
+                  WHERE company_id = %s
+                ),
+                pumps_scope AS (
+                  SELECT p.id AS pump_id, p.location_id
+                  FROM public.pumps p
+                  JOIN locs l ON l.id = p.location_id
+                ),
+                tanks_scope AS (
+                  SELECT t.id AS tank_id, t.location_id
+                  FROM public.tanks t
+                  JOIN locs l ON l.id = t.location_id
+                ),
+
+                -- ===== latest tank ingest (solo para esos tanques) =====
                 tank_last AS (
                   SELECT DISTINCT ON (i.tank_id)
                     i.tank_id,
                     i.level_pct,
                     i.created_at
                   FROM public.tank_ingest i
+                  JOIN tanks_scope s ON s.tank_id = i.tank_id
                   ORDER BY i.tank_id, i.created_at DESC
                 ),
+
+                -- ===== latest pump heartbeat (solo para esos pumps) =====
+                last_hb AS (
+                  SELECT DISTINCT ON (ph.pump_id)
+                    ph.pump_id,
+                    ph.id AS latest_hb_id,
+                    ph.created_at AS hb_ts,
+                    ph.plc_state
+                  FROM public.pump_heartbeat ph
+                  JOIN pumps_scope ps ON ps.pump_id = ph.pump_id
+                  ORDER BY ph.pump_id, ph.created_at DESC, ph.id DESC
+                ),
+
+                -- ===== latest pump event (solo para esos pumps) =====
+                last_event AS (
+                  SELECT DISTINCT ON (pe.pump_id)
+                    pe.pump_id,
+                    pe.id AS latest_event_id,
+                    pe.state AS last_event_state,
+                    pe.created_at AS event_ts
+                  FROM public.pump_events pe
+                  JOIN pumps_scope ps ON ps.pump_id = pe.pump_id
+                  ORDER BY pe.pump_id, pe.created_at DESC, pe.id DESC
+                ),
+
+                -- ===== latest manifold reading por señal (ok) =====
                 ms_last AS (
                   SELECT DISTINCT ON (r.manifold_signal_id)
                     r.manifold_signal_id,
@@ -219,16 +238,18 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   FROM public.manifold_signal_readings r
                   ORDER BY r.manifold_signal_id, r.created_at DESC
                 ),
+
+                -- ===== tanks =====
                 t AS (
                   SELECT
                     COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
-                    t.id::bigint                        AS id,
-                    'tank'::text                        AS type,
+                    t.id::bigint AS id,
+                    'tank'::text AS type,
                     lt.x, lt.y, lt.updated_at,
 
                     COALESCE((now() - tl.created_at) <= interval '60 seconds', false) AS online,
-                    NULL::text                          AS state,
-                    tl.level_pct::numeric               AS level_pct,
+                    NULL::text AS state,
+                    tl.level_pct::numeric AS level_pct,
 
                     CASE
                       WHEN tl.level_pct IS NULL THEN NULL
@@ -237,12 +258,12 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       WHEN tc.high_high_pct IS NOT NULL AND tl.level_pct >= tc.high_high_pct THEN 'critico'
                       WHEN tc.high_pct      IS NOT NULL AND tl.level_pct >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
-                    END::text                           AS alarma,
+                    END::text AS alarma,
 
-                    l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    NULL::jsonb AS signals
                   FROM public.tanks t
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
@@ -250,47 +271,61 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   LEFT JOIN tank_last tl ON tl.tank_id = t.id
                   WHERE l.company_id = %s
                 ),
+
+                -- ===== pumps (mismo output que v_pump_latest_state) =====
                 p AS (
                   SELECT
                     COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
-                    p.id::bigint                         AS id,
-                    'pump'::text                         AS type,
+                    p.id::bigint AS id,
+                    'pump'::text AS type,
                     lp.x, lp.y, lp.updated_at,
 
-                    COALESCE(s.online, false)            AS online,
-                    CASE WHEN COALESCE(s.online, false) = true THEN s.state ELSE NULL END AS state,
+                    CASE
+                      WHEN hb.hb_ts IS NOT NULL AND (now() - hb.hb_ts) < interval '00:05:00' THEN true
+                      ELSE false
+                    END AS online,
 
-                    NULL::numeric                        AS level_pct,
-                    NULL::text                           AS alarma,
-                    l.id::bigint                         AS location_id,
-                    l.name::text                         AS location_name,
-                    NULL::jsonb                          AS meta,
-                    NULL::jsonb                          AS signals
+                    COALESCE(hb.plc_state, 'stop'::text) AS state,
+
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    NULL::jsonb AS signals
+
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
-                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+                  LEFT JOIN last_hb hb ON hb.pump_id = p.id
+                  -- si en el front necesitás latest_event_id/event_ts, podés agregarlos acá
+                  -- LEFT JOIN last_event ev ON ev.pump_id = p.id
                   WHERE l.company_id = %s
                 ),
+
+                -- ===== valves =====
                 v AS (
                   SELECT
                     COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
-                    v.id::bigint                          AS id,
-                    'valve'::text                         AS type,
+                    v.id::bigint AS id,
+                    'valve'::text AS type,
                     lv.x, lv.y, lv.updated_at,
-                    NULL::boolean                         AS online,
-                    NULL::text                            AS state,
-                    NULL::numeric                         AS level_pct,
-                    NULL::text                            AS alarma,
-                    l.id::bigint                          AS location_id,
-                    l.name::text                          AS location_name,
-                    lv.meta                               AS meta,
-                    NULL::jsonb                           AS signals
+                    NULL::boolean AS online,
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    lv.meta AS meta,
+                    NULL::jsonb AS signals
                   FROM public.valves v
                   JOIN public.locations l ON l.id = v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
                   WHERE l.company_id = %s
                 ),
+
+                -- ===== manifold signals aggregate =====
                 m_signals AS (
                   SELECT
                     s.manifold_id,
@@ -315,11 +350,13 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   LEFT JOIN ms_last ml ON ml.manifold_signal_id = s.id
                   GROUP BY s.manifold_id
                 ),
+
+                -- ===== manifolds =====
                 m AS (
                   SELECT
                     COALESCE(lm.node_id, 'manifold:'||m.id) AS node_id,
-                    m.id::bigint                             AS id,
-                    'manifold'::text                         AS type,
+                    m.id::bigint AS id,
+                    'manifold'::text AS type,
                     lm.x, lm.y, lm.updated_at,
 
                     CASE
@@ -327,19 +364,20 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       THEN true ELSE false
                     END AS online,
 
-                    NULL::text                               AS state,
-                    NULL::numeric                            AS level_pct,
-                    NULL::text                               AS alarma,
-                    l.id::bigint                             AS location_id,
-                    l.name::text                             AS location_name,
-                    NULL::jsonb                              AS meta,
-                    COALESCE(ms.signals, '{}'::jsonb)         AS signals
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    COALESCE(ms.signals, '{}'::jsonb) AS signals
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
                   LEFT JOIN m_signals ms ON ms.manifold_id = m.id
                   WHERE l.company_id = %s
                 )
+
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
                 UNION ALL
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM p
@@ -349,10 +387,10 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
                 ORDER BY type,id
                 """,
-                (company_id, company_id, company_id, company_id),
+                # company_id usado en locs + cada bloque t/p/v/m
+                (company_id, company_id, company_id, company_id, company_id, company_id),
             )
-            rows = cur.fetchall()
-            return rows
+            return cur.fetchall()
 
     except HTTPException:
         raise
@@ -424,17 +462,10 @@ async def update_layout(request: Request):
 async def bootstrap_layout(company_id: int | None = Query(default=None)):
     """
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
-    ✅ Ahora `nodes` incluye `meta` para valves.
-    ✅ Ahora `nodes` incluye `signals` para manifolds.
-
-    NOTA: Para performance máxima, preferí:
-      - get_layout_combined (nodes) + get_layout_edges (edges)
+    ✅ nodes incluye meta para valves y signals para manifolds.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # ---------------------------------------------------------
-            # SIN company_id
-            # ---------------------------------------------------------
             if company_id is None:
                 cur.execute(
                     """
@@ -464,21 +495,40 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 return {"nodes": nodes, "edges": edges}
 
-            # ---------------------------------------------------------
-            # CON company_id (scoped)
-            # Reusamos get_layout_combined optimizado para nodes
-            # y mantenemos edges NO TOCAR.
-            # ---------------------------------------------------------
+            # Nodes (reusa get_layout_combined lógico, pero en SQL para no hacer 2 roundtrips)
             cur.execute(
                 """
                 WITH
+                locs AS (
+                  SELECT id FROM public.locations WHERE company_id = %s
+                ),
+                pumps_scope AS (
+                  SELECT p.id AS pump_id
+                  FROM public.pumps p
+                  JOIN locs l ON l.id = p.location_id
+                ),
+                tanks_scope AS (
+                  SELECT t.id AS tank_id
+                  FROM public.tanks t
+                  JOIN locs l ON l.id = t.location_id
+                ),
                 tank_last AS (
                   SELECT DISTINCT ON (i.tank_id)
                     i.tank_id,
                     i.level_pct,
                     i.created_at
                   FROM public.tank_ingest i
+                  JOIN tanks_scope s ON s.tank_id = i.tank_id
                   ORDER BY i.tank_id, i.created_at DESC
+                ),
+                last_hb AS (
+                  SELECT DISTINCT ON (ph.pump_id)
+                    ph.pump_id,
+                    ph.created_at AS hb_ts,
+                    ph.plc_state
+                  FROM public.pump_heartbeat ph
+                  JOIN pumps_scope ps ON ps.pump_id = ph.pump_id
+                  ORDER BY ph.pump_id, ph.created_at DESC, ph.id DESC
                 ),
                 ms_last AS (
                   SELECT DISTINCT ON (r.manifold_signal_id)
@@ -491,14 +541,12 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 t AS (
                   SELECT
                     COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
-                    t.id::bigint                        AS id,
-                    'tank'::text                        AS type,
+                    t.id::bigint AS id,
+                    'tank'::text AS type,
                     lt.x, lt.y, lt.updated_at,
-
                     COALESCE((now() - tl.created_at) <= interval '60 seconds', false) AS online,
-                    NULL::text                          AS state,
-                    tl.level_pct::numeric               AS level_pct,
-
+                    NULL::text AS state,
+                    tl.level_pct::numeric AS level_pct,
                     CASE
                       WHEN tl.level_pct IS NULL THEN NULL
                       WHEN tc.low_low_pct   IS NOT NULL AND tl.level_pct <= tc.low_low_pct   THEN 'critico'
@@ -506,12 +554,11 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       WHEN tc.high_high_pct IS NOT NULL AND tl.level_pct >= tc.high_high_pct THEN 'critico'
                       WHEN tc.high_pct      IS NOT NULL AND tl.level_pct >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
-                    END::text                           AS alarma,
-
-                    l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name,
-                    NULL::jsonb                         AS meta,
-                    NULL::jsonb                         AS signals
+                    END::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    NULL::jsonb AS signals
                   FROM public.tanks t
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
@@ -522,39 +569,37 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 p AS (
                   SELECT
                     COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
-                    p.id::bigint                         AS id,
-                    'pump'::text                         AS type,
+                    p.id::bigint AS id,
+                    'pump'::text AS type,
                     lp.x, lp.y, lp.updated_at,
-
-                    COALESCE(s.online, false)            AS online,
-                    CASE WHEN COALESCE(s.online, false) = true THEN s.state ELSE NULL END AS state,
-
-                    NULL::numeric                        AS level_pct,
-                    NULL::text                           AS alarma,
-                    l.id::bigint                         AS location_id,
-                    l.name::text                         AS location_name,
-                    NULL::jsonb                          AS meta,
-                    NULL::jsonb                          AS signals
+                    CASE WHEN hb.hb_ts IS NOT NULL AND (now() - hb.hb_ts) < interval '00:05:00' THEN true ELSE false END AS online,
+                    COALESCE(hb.plc_state, 'stop'::text) AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    NULL::jsonb AS signals
                   FROM public.pumps p
                   JOIN public.locations l ON l.id = p.location_id
                   LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
-                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+                  LEFT JOIN last_hb hb ON hb.pump_id = p.id
                   WHERE l.company_id = %s
                 ),
                 v AS (
                   SELECT
                     COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
-                    v.id::bigint                          AS id,
-                    'valve'::text                         AS type,
+                    v.id::bigint AS id,
+                    'valve'::text AS type,
                     lv.x, lv.y, lv.updated_at,
-                    NULL::boolean                         AS online,
-                    NULL::text                            AS state,
-                    NULL::numeric                         AS level_pct,
-                    NULL::text                            AS alarma,
-                    l.id::bigint                          AS location_id,
-                    l.name::text                          AS location_name,
-                    lv.meta                               AS meta,
-                    NULL::jsonb                           AS signals
+                    NULL::boolean AS online,
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    lv.meta AS meta,
+                    NULL::jsonb AS signals
                   FROM public.valves v
                   JOIN public.locations l ON l.id = v.location_id
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
@@ -587,22 +632,17 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                 m AS (
                   SELECT
                     COALESCE(lm.node_id, 'manifold:'||m.id) AS node_id,
-                    m.id::bigint                             AS id,
-                    'manifold'::text                         AS type,
+                    m.id::bigint AS id,
+                    'manifold'::text AS type,
                     lm.x, lm.y, lm.updated_at,
-
-                    CASE
-                      WHEN ms.last_ts IS NOT NULL AND (now() - ms.last_ts) <= interval '00:10:00'
-                      THEN true ELSE false
-                    END AS online,
-
-                    NULL::text                               AS state,
-                    NULL::numeric                            AS level_pct,
-                    NULL::text                               AS alarma,
-                    l.id::bigint                             AS location_id,
-                    l.name::text                             AS location_name,
-                    NULL::jsonb                              AS meta,
-                    COALESCE(ms.signals, '{}'::jsonb)         AS signals
+                    CASE WHEN ms.last_ts IS NOT NULL AND (now() - ms.last_ts) <= interval '00:10:00' THEN true ELSE false END AS online,
+                    NULL::text AS state,
+                    NULL::numeric AS level_pct,
+                    NULL::text AS alarma,
+                    l.id::bigint AS location_id,
+                    l.name::text AS location_name,
+                    NULL::jsonb AS meta,
+                    COALESCE(ms.signals, '{}'::jsonb) AS signals
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
@@ -618,16 +658,14 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   UNION ALL
                   SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM m
                 )
-                SELECT
-                  node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals
-                FROM nodes
+                SELECT * FROM nodes
                 ORDER BY type,id
                 """,
-                (company_id, company_id, company_id, company_id),
+                (company_id, company_id, company_id, company_id, company_id),
             )
             nodes = cur.fetchall()
 
-            # Scoped: edges + knots (NO TOCAR)
+            # Edges + knots (NO TOCAR)
             cur.execute(
                 """
                 WITH nodes AS (
@@ -670,5 +708,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
             edges = cur.fetchall()
 
             return {"nodes": nodes, "edges": edges}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (bootstrap): {e}")
