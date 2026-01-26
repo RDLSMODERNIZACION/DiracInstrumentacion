@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listPumps, listTanks, fetchPumpsLive, fetchTanksLive } from "@/api/graphs";
 import { floorToMinuteISO, startOfMin } from "../helpers/time";
 import type { PumpInfo, TankInfo } from "../types";
@@ -6,13 +6,18 @@ import type { PumpInfo, TankInfo } from "../types";
 type TsTank = { timestamps: number[]; level_percent: (number | null)[] } | null;
 type TsPump = { timestamps: number[]; is_on: (number | null)[] } | null;
 
+function stableCsv(nums: number[]) {
+  const copy = [...nums].filter(Number.isFinite).sort((a, b) => a - b);
+  return copy.join(",");
+}
+
 export function useAudit({
   enabled,
   auditLoc,
   domain,
 }: {
   enabled: boolean;
-  auditLoc: number | "" ;
+  auditLoc: number | "";
   domain: [number, number];
 }) {
   const [pumpOptions, setPumpOptions] = useState<PumpInfo[]>([]);
@@ -25,37 +30,65 @@ export function useAudit({
   const [tankTs, setTankTs] = useState<TsTank>(null);
   const [loading, setLoading] = useState(false);
 
+  // Abort controllers (options + series)
+  const optAbortRef = useRef<AbortController | null>(null);
+  const seriesAbortRef = useRef<AbortController | null>(null);
+
   // Reset
   useEffect(() => {
     if (!enabled) {
+      optAbortRef.current?.abort();
+      seriesAbortRef.current?.abort();
+      optAbortRef.current = null;
+      seriesAbortRef.current = null;
+
       setPumpOptions([]);
       setTankOptions([]);
       setSelectedPumpIds("all");
       setSelectedTankIds("all");
       setPumpTs(null);
       setTankTs(null);
+      setLoading(false);
     }
   }, [enabled]);
 
-  // Cargar assets
+  // locId estable
+  const locId = useMemo(() => {
+    const id = auditLoc === "" ? undefined : Number(auditLoc);
+    return id && Number.isFinite(id) ? id : undefined;
+  }, [auditLoc]);
+
+  // Cargar assets (options)
   useEffect(() => {
     if (!enabled) return;
-    const locId = auditLoc === "" ? undefined : Number(auditLoc);
+
     if (!locId) {
       setPumpOptions([]);
       setTankOptions([]);
       return;
     }
+
+    optAbortRef.current?.abort();
+    const ac = new AbortController();
+    optAbortRef.current = ac;
+
     let mounted = true;
     (async () => {
       try {
-        const [p, t] = await Promise.all([listPumps({ locationId: locId }), listTanks({ locationId: locId })]);
+        const [p, t] = await Promise.all([
+          // @ts-ignore (si luego querés pasar signal en graphs.ts, ya queda listo)
+          listPumps({ locationId: locId, signal: ac.signal } as any),
+          // @ts-ignore
+          listTanks({ locationId: locId, signal: ac.signal } as any),
+        ]);
+
         if (!mounted) return;
         setPumpOptions(p || []);
         setTankOptions(t || []);
         setSelectedPumpIds("all");
         setSelectedTankIds("all");
-      } catch (e) {
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
         if (mounted) {
           setPumpOptions([]);
           setTankOptions([]);
@@ -63,15 +96,33 @@ export function useAudit({
         console.error("[audit] options error:", e);
       }
     })();
+
     return () => {
       mounted = false;
+      ac.abort();
     };
-  }, [enabled, auditLoc]);
+  }, [enabled, locId]);
+
+  // IDs efectivos (para series) + keys estables para deps
+  const effectivePumpIds = useMemo(() => {
+    if (!locId) return [];
+    if (selectedPumpIds !== "all") return selectedPumpIds;
+    return pumpOptions.map((p) => p.pump_id);
+  }, [locId, selectedPumpIds, pumpOptions]);
+
+  const effectiveTankIds = useMemo(() => {
+    if (!locId) return [];
+    if (selectedTankIds !== "all") return selectedTankIds;
+    return tankOptions.map((t) => t.tank_id);
+  }, [locId, selectedTankIds, tankOptions]);
+
+  const pumpIdsKey = useMemo(() => stableCsv(effectivePumpIds), [effectivePumpIds]);
+  const tankIdsKey = useMemo(() => stableCsv(effectiveTankIds), [effectiveTankIds]);
 
   // Series con la MISMA ventana
   useEffect(() => {
     if (!enabled) return;
-    const locId = auditLoc === "" ? undefined : Number(auditLoc);
+
     if (!locId) {
       setPumpTs(null);
       setTankTs(null);
@@ -82,13 +133,13 @@ export function useAudit({
     const toMs = startOfMin(domain[1]);
     if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return;
 
-    const pumpIds =
-      selectedPumpIds === "all" ? pumpOptions.map((p) => p.pump_id) : (selectedPumpIds as number[]);
-    const tankIds =
-      selectedTankIds === "all" ? tankOptions.map((t) => t.tank_id) : (selectedTankIds as number[]);
+    // cancelamos request anterior
+    seriesAbortRef.current?.abort();
+    const ac = new AbortController();
+    seriesAbortRef.current = ac;
 
-    let cancelled = false;
     setLoading(true);
+
     (async () => {
       try {
         const [pumps, tanks] = await Promise.all([
@@ -96,40 +147,46 @@ export function useAudit({
             from: floorToMinuteISO(new Date(fromMs)),
             to: floorToMinuteISO(new Date(toMs)),
             locationId: locId,
-            pumpIds: pumpIds.length ? pumpIds : undefined,
-            bucket: "1min",
+            pumpIds: effectivePumpIds.length ? effectivePumpIds : undefined,
+            // ✅ KPI fijo a 5min
+            bucket: "5min",
             aggMode: "avg",
             connectedOnly: true,
-          }),
+            // @ts-ignore: si luego soportás signal, queda listo
+            signal: ac.signal,
+          } as any),
           fetchTanksLive({
             from: floorToMinuteISO(new Date(fromMs)),
             to: floorToMinuteISO(new Date(toMs)),
             locationId: locId,
-            tankIds: tankIds.length ? tankIds : undefined,
+            tankIds: effectiveTankIds.length ? effectiveTankIds : undefined,
             agg: "avg",
             carry: true,
-            bucket: "1min",
+            // ✅ KPI fijo a 5min
+            bucket: "5min",
             connectedOnly: true,
-          }),
+            // @ts-ignore
+            signal: ac.signal,
+          } as any),
         ]);
-        if (cancelled) return;
+
+        if (ac.signal.aborted) return;
         setPumpTs({ timestamps: pumps.timestamps, is_on: pumps.is_on });
         setTankTs({ timestamps: tanks.timestamps, level_percent: tanks.level_percent });
-      } catch (e) {
-        if (!cancelled) {
-          setPumpTs(null);
-          setTankTs(null);
-        }
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        setPumpTs(null);
+        setTankTs(null);
         console.error("[audit] series error:", e);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!ac.signal.aborted) setLoading(false);
       }
     })();
 
     return () => {
-      cancelled = true;
+      ac.abort();
     };
-  }, [enabled, auditLoc, selectedPumpIds, selectedTankIds, pumpOptions, tankOptions, domain[0], domain[1]]);
+  }, [enabled, locId, domain[0], domain[1], pumpIdsKey, tankIdsKey]);
 
   return {
     // options

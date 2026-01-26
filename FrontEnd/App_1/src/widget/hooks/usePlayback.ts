@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPumpsLive, fetchTanksLive } from "@/api/graphs";
 import {
   TZ,
@@ -14,6 +14,12 @@ type TsPump = { timestamps: number[]; is_on: (number | null)[] } | null;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function stableKey(ids: number[] | "all") {
+  if (ids === "all") return "all";
+  const copy = [...ids].filter(Number.isFinite).sort((a, b) => a - b);
+  return copy.join(",");
 }
 
 export function usePlayback({
@@ -49,11 +55,11 @@ export function usePlayback({
   // NUEVO: velocidad de playback (0.5x, 1x, 2x, 4x)
   const [playSpeed, setPlaySpeed] = useState<0.5 | 1 | 2 | 4>(1);
 
+  // Abort real para series
+  const abortRef = useRef<AbortController | null>(null);
+
   // Base (inicio de la escala de 7 días), alineado a minuto. Se calcula una sola vez.
-  const baseStartMs = useMemo(
-    () => startOfMin(Date.now() - 7 * 24 * H),
-    []
-  );
+  const baseStartMs = useMemo(() => startOfMin(Date.now() - 7 * 24 * H), []);
 
   // Dominio LIVE (fallback si no hay ventana en vivo todavía)
   const xDomainLive = useMemo<[number, number]>(() => {
@@ -70,24 +76,15 @@ export function usePlayback({
     const to = baseStartMs + finClamped * 60_000;
     const from = to - 24 * H;
     return [from, to];
-  }, [baseStartMs, playFinMin]);
+  }, [baseStartMs, playFinMin, MIN_OFFSET_MIN, MAX_OFFSET_MIN]);
 
   // Dominio efectivo usado por los charts
   const domain = (playEnabled ? sliderDomain : xDomainLive) as [number, number];
 
   // Ticks y labels
-  const ticks = useMemo(
-    () => buildHourTicks(domain),
-    [domain[0], domain[1]]
-  );
-  const startLabel = useMemo(
-    () => fmtDayTime(domain[0], TZ),
-    [domain]
-  );
-  const endLabel = useMemo(
-    () => fmtDayTime(domain[1], TZ),
-    [domain]
-  );
+  const ticks = useMemo(() => buildHourTicks(domain), [domain[0], domain[1]]);
+  const startLabel = useMemo(() => fmtDayTime(domain[0], TZ), [domain[0]]);
+  const endLabel = useMemo(() => fmtDayTime(domain[1], TZ), [domain[1]]);
 
   // Si salís de la pestaña Operación, apagamos playback/autoplay
   useEffect(() => {
@@ -105,17 +102,25 @@ export function usePlayback({
       setFinDebounced(clamp(playFinMin, MIN_OFFSET_MIN, MAX_OFFSET_MIN));
     }, 600);
     return () => window.clearTimeout(id);
-  }, [playEnabled, dragging, playFinMin, locId]);
+  }, [playEnabled, dragging, playFinMin, locId, MIN_OFFSET_MIN, MAX_OFFSET_MIN]);
+
+  // Keys estables para deps (evita re-fetch por referencia distinta)
+  const pumpIdsKey = useMemo(() => stableKey(selectedPumpIds), [selectedPumpIds]);
+  const tankIdsKey = useMemo(() => stableKey(selectedTankIds), [selectedTankIds]);
 
   // Fetch de la ventana 24h (playback)
   useEffect(() => {
     if (!playEnabled || !locId) {
+      abortRef.current?.abort();
+      abortRef.current = null;
       setPlayTankTs(null);
       setPlayPumpTs(null);
+      setLoadingPlay(false);
       return;
     }
 
-    let cancelled = false;
+    // si justo está arrastrando, no tiene sentido disparar (el debounce lo hará)
+    if (dragging) return;
 
     const finClamped = clamp(finDebounced, MIN_OFFSET_MIN, MAX_OFFSET_MIN);
     const toMs = startOfMin(baseStartMs + finClamped * 60_000);
@@ -123,6 +128,11 @@ export function usePlayback({
 
     const fromISO = floorToMinuteISO(new Date(fromMs));
     const toISO = floorToMinuteISO(new Date(toMs));
+
+    // abort anterior
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
 
     setLoadingPlay(true);
 
@@ -134,10 +144,13 @@ export function usePlayback({
             to: toISO,
             locationId: locId,
             pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
-            bucket: "1min",
+            // ✅ KPI fijo a 5min
+            bucket: "5min",
             aggMode: "avg",
             connectedOnly: true,
-          }),
+            // @ts-ignore (si luego soportás signal en graphs.ts, ya queda listo)
+            signal: ac.signal,
+          } as any),
           fetchTanksLive({
             from: fromISO,
             to: toISO,
@@ -145,42 +158,41 @@ export function usePlayback({
             tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
             agg: "avg",
             carry: true,
-            bucket: "1min",
+            // ✅ KPI fijo a 5min
+            bucket: "5min",
             connectedOnly: true,
-          }),
+            // @ts-ignore
+            signal: ac.signal,
+          } as any),
         ]);
 
-        if (cancelled) return;
+        if (ac.signal.aborted) return;
 
-        setPlayPumpTs({
-          timestamps: pumps.timestamps,
-          is_on: pumps.is_on,
-        });
-        setPlayTankTs({
-          timestamps: tanks.timestamps,
-          level_percent: tanks.level_percent,
-        });
-      } catch (e) {
-        if (!cancelled) {
-          setPlayPumpTs(null);
-          setPlayTankTs(null);
-        }
+        setPlayPumpTs({ timestamps: pumps.timestamps, is_on: pumps.is_on });
+        setPlayTankTs({ timestamps: tanks.timestamps, level_percent: tanks.level_percent });
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        setPlayPumpTs(null);
+        setPlayTankTs(null);
         console.error("[playback] fetch error:", e);
       } finally {
-        if (!cancelled) setLoadingPlay(false);
+        if (!ac.signal.aborted) setLoadingPlay(false);
       }
     })();
 
     return () => {
-      cancelled = true;
+      ac.abort();
     };
   }, [
     playEnabled,
-    finDebounced,
     locId,
-    selectedPumpIds,
-    selectedTankIds,
+    dragging,
+    finDebounced,
     baseStartMs,
+    MIN_OFFSET_MIN,
+    MAX_OFFSET_MIN,
+    pumpIdsKey,
+    tankIdsKey,
   ]);
 
   // Auto-play fluido: avanza según velocidad (0.5x, 1x, 2x, 4x)
@@ -196,10 +208,8 @@ export function usePlayback({
         const next = clamp(prev + step, MIN_OFFSET_MIN, MAX_OFFSET_MIN);
 
         if (next >= MAX_OFFSET_MIN) {
-          // llegamos al "ahora" → detener autoplay
           setPlaying(false);
         }
-
         return next;
       });
     }, TICK_MS);
@@ -210,11 +220,15 @@ export function usePlayback({
   // Reset seguro al deshabilitar playback
   useEffect(() => {
     if (!playEnabled) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+
       setPlaying(false);
       setPlayFinMin(MAX_OFFSET_MIN);
       setFinDebounced(MAX_OFFSET_MIN);
       setPlayPumpTs(null);
       setPlayTankTs(null);
+      setLoadingPlay(false);
     }
   }, [playEnabled, MAX_OFFSET_MIN]);
 
@@ -241,7 +255,7 @@ export function usePlayback({
     MAX_OFFSET_MIN,
     dragging,
     setDragging,
-    // NUEVO: velocidad
+    // speed
     playSpeed,
     setPlaySpeed,
     // view

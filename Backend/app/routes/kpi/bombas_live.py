@@ -12,18 +12,13 @@ PUMPS_TABLE     = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 HB_SOURCE       = (os.getenv("PUMP_HB_SOURCE") or "kpi.v_pump_hb_clean").strip()
 
-# Ventana para considerar una bomba "conectada" (minutos respecto de 'to')
 PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
 
-# ✅ KPI bombas: resolución fija para ventana 24hs
-# (igual dejamos el parámetro para compatibilidad, pero se ignora)
-FORCED_BUCKET = os.getenv("KPI_PUMPS_BUCKET", "5min").strip()  # default: 5min
+# ✅ KPI bombas: resolución fija (24h) -> 5min
+FORCED_BUCKET = os.getenv("KPI_PUMPS_BUCKET", "5min").strip()
 
 
-def _bounds_utc_minute(
-    date_from: Optional[datetime],
-    date_to: Optional[datetime],
-) -> Tuple[datetime, datetime]:
+def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
     """
     Normaliza el rango [from, to] a UTC, redondeando a minuto.
     Por defecto últimas 24 hs si no se pasa nada.
@@ -43,7 +38,6 @@ def _bounds_utc_minute(
     else:
         date_from = date_from.astimezone(timezone.utc)
 
-    # redondeo a minuto
     date_to = date_to.replace(second=0, microsecond=0)
     date_from = date_from.replace(second=0, microsecond=0)
 
@@ -53,24 +47,7 @@ def _bounds_utc_minute(
     return date_from, date_to
 
 
-def _bucket_expr_sql(bucket: str) -> str:
-    # expresión sobre alias "t"
-    if bucket == "1min":
-        return "t"
-    if bucket == "5min":
-        return "date_trunc('hour', t) + ((extract(minute from t)::int/5 )*5 )*interval '1 min'"
-    if bucket == "15min":
-        return "date_trunc('hour', t) + ((extract(minute from t)::int/15)*15)*interval '1 min'"
-    if bucket == "1h":
-        return "date_trunc('hour', t)"
-    if bucket == "1d":
-        return "date_trunc('day', t)"
-    raise HTTPException(status_code=400, detail="bucket inválido")
-
-
 def _bucket_interval_sql(bucket: str) -> str:
-    if bucket == "1min":
-        return "interval '1 minute'"
     if bucket == "5min":
         return "interval '5 minutes'"
     if bucket == "15min":
@@ -79,6 +56,8 @@ def _bucket_interval_sql(bucket: str) -> str:
         return "interval '1 hour'"
     if bucket == "1d":
         return "interval '1 day'"
+    if bucket == "1min":
+        return "interval '1 minute'"
     raise HTTPException(status_code=400, detail="bucket inválido")
 
 
@@ -115,40 +94,31 @@ def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
 def pumps_live(
     company_id: Optional[int] = Query(None),
     location_id: Optional[int] = Query(None),
-    pump_ids: Optional[str] = Query(None, description="CSV de pump_id"),
+    pump_ids: Optional[str]    = Query(None, description="CSV de pump_id"),
     date_from: Optional[datetime] = Query(None, alias="from"),
-    date_to: Optional[datetime] = Query(None, alias="to"),
-    # ✅ se mantiene por compatibilidad, pero se fuerza a 5min
+    date_to:   Optional[datetime] = Query(None, alias="to"),
+    # se mantiene por compatibilidad, pero se fuerza por env / default
     bucket: str = Query("1min", pattern="^(1min|5min|15min|1h|1d)$"),
     agg_mode: str = Query("avg", pattern="^(avg|max)$"),
     connected_only: bool = Query(True),
 ):
     """
-    KPI bombas (24hs) -> resolución FIJA cada 5 minutos (por performance y UX).
+    KPI Bombas:
+    - Ventana típica 24h
+    - Bucket forzado (default 5min) por performance
 
     Devuelve:
-      - timestamps (ms)
-      - is_on: promedio (o max) de cantidad de bombas ON por bucket
-      - pumps_total: total en scope (empresa/localidad/ids)
-      - pumps_connected: conectadas "ahora" (último HB reciente)
-      - window: from/to UTC
-      - bucket: bucket efectivo usado (siempre 5min por default)
-
-    ON/OFF:
-      plc_state='run'  -> ON
-      plc_state='stop' -> OFF
-      plc_state NULL   -> fallback a relay (retrocompatibilidad)
+      timestamps (ms), is_on (conteo ON por bucket),
+      pumps_total, pumps_connected, window y bucket efectivo.
     """
     df, dt = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
-    # ✅ forzamos bucket (default 5min)
+    # ✅ bucket forzado (default 5min)
     bucket = FORCED_BUCKET or "5min"
-    # validación rápida
     if bucket not in ("1min", "5min", "15min", "1h", "1d"):
         raise HTTPException(status_code=500, detail="KPI_PUMPS_BUCKET inválido en ENV")
 
-    # Para bucket fijo 5min usamos el camino TURBO (sin generar minutos)
     b_interval = _bucket_interval_sql(bucket)
     b_secs = _bucket_seconds(bucket)
 
@@ -159,9 +129,11 @@ def pumps_live(
         else:
             cur.execute(
                 f"""
-                WITH params AS (SELECT
-                  %(company_id)s::bigint AS company_id,
-                  %(location_id)s::bigint AS location_id)
+                WITH params AS (
+                  SELECT
+                    %s::bigint AS company_id,
+                    %s::bigint AS location_id
+                )
                 SELECT p.id AS pump_id
                 FROM {PUMPS_TABLE} p
                 JOIN {LOCATIONS_TABLE} l ON l.id = p.location_id
@@ -169,7 +141,7 @@ def pumps_live(
                 WHERE (params.company_id IS NULL OR l.company_id = params.company_id)
                   AND (params.location_id IS NULL OR l.id = params.location_id)
                 """,
-                {"company_id": company_id, "location_id": location_id},
+                (company_id, location_id),
             )
             scope_ids_all = [int(r["pump_id"]) for r in cur.fetchall()]
 
@@ -185,30 +157,36 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 2) Conectadas: último HB <= dt, y "conectada" si hb_ts >= recent_from
+        # 2) Bombas conectadas (🔥 optimizado con LATERAL + índice)
         recent_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
+
         cur.execute(
             f"""
-            WITH last_hb AS (
-              SELECT DISTINCT ON (h.pump_id)
-                     h.pump_id,
-                     h.hb_ts,
-                     CASE
-                       WHEN h.plc_state = 'run'  THEN true
-                       WHEN h.plc_state = 'stop' THEN false
-                       ELSE h.relay
-                     END AS is_on
-              FROM {HB_SOURCE} h
-              WHERE h.pump_id = ANY(%(ids)s::int[])
-                AND h.hb_ts <= %(dt)s
-              ORDER BY h.pump_id, h.hb_ts DESC
+            WITH scope AS (
+              SELECT unnest(%s::int[]) AS pump_id
             )
-            SELECT pump_id, hb_ts, is_on
-            FROM last_hb;
+            SELECT
+              s.pump_id,
+              h.hb_ts,
+              CASE
+                WHEN h.plc_state = 'run'  THEN true
+                WHEN h.plc_state = 'stop' THEN false
+                ELSE h.relay
+              END AS is_on
+            FROM scope s
+            LEFT JOIN LATERAL (
+              SELECT h.hb_ts, h.plc_state, h.relay
+              FROM {HB_SOURCE} h
+              WHERE h.pump_id = s.pump_id
+                AND h.hb_ts <= %s
+              ORDER BY h.hb_ts DESC
+              LIMIT 1
+            ) h ON true;
             """,
-            {"ids": scope_ids_all, "dt": dt},
+            (scope_ids_all, dt),
         )
         last_rows = cur.fetchall()
+
         connected_set = {
             int(r["pump_id"])
             for r in last_rows
@@ -227,19 +205,17 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 3) Timeline TURBO (sin generar minutos)
-        # - avg: exacto por solapamiento de intervalos
-        # - max: exacto evaluando en puntos de cambio (hb_ts) + bordes de bucket
+        # 3) Timeline TURBO (bucket > 1min) usando intervalos + solapamiento
+        #    Nota: si algún día forzás bucket=1min, podés agregar el camino minutes.
         if agg_mode == "avg":
             cur.execute(
                 f"""
                 WITH bounds AS (
-                  SELECT %(df)s::timestamptz AS df, %(dt)s::timestamptz AS dt
+                  SELECT %s::timestamptz AS df, %s::timestamptz AS dt
                 ),
                 scope AS (
-                  SELECT unnest(%(ids)s::int[]) AS pump_id
+                  SELECT unnest(%s::int[]) AS pump_id
                 ),
-
                 buckets AS (
                   SELECT
                     gs AS b_start,
@@ -250,7 +226,6 @@ def pumps_live(
                     {b_interval}
                   ) gs
                 ),
-
                 baseline AS (
                   SELECT DISTINCT ON (h.pump_id)
                          h.pump_id,
@@ -265,7 +240,6 @@ def pumps_live(
                   WHERE h.hb_ts < (SELECT df FROM bounds)
                   ORDER BY h.pump_id, h.hb_ts DESC
                 ),
-
                 hb_in AS (
                   SELECT
                     h.pump_id,
@@ -280,13 +254,11 @@ def pumps_live(
                   WHERE h.hb_ts >= (SELECT df FROM bounds)
                     AND h.hb_ts <= (SELECT dt FROM bounds)
                 ),
-
                 hb_all AS (
                   SELECT * FROM baseline
                   UNION ALL
                   SELECT * FROM hb_in
                 ),
-
                 hb_intervals AS (
                   SELECT
                     pump_id,
@@ -295,7 +267,6 @@ def pumps_live(
                     is_on
                   FROM hb_all
                 ),
-
                 hb_intervals_fixed AS (
                   SELECT
                     pump_id,
@@ -305,7 +276,6 @@ def pumps_live(
                   FROM hb_intervals
                   WHERE hb_ts < (SELECT dt FROM bounds)
                 ),
-
                 overlap AS (
                   SELECT
                     b.b_start,
@@ -317,7 +287,6 @@ def pumps_live(
                     ON i.hb_ts < b.b_end
                    AND i.next_ts > b.b_start
                 ),
-
                 per_bucket AS (
                   SELECT
                     b_start,
@@ -333,24 +302,23 @@ def pumps_live(
                 )
                 SELECT
                   EXTRACT(EPOCH FROM b_start)::bigint*1000 AS ts_ms,
-                  (on_seconds_sum / %(bucket_secs)s::float) AS val
+                  (on_seconds_sum / %s::float) AS val
                 FROM per_bucket
                 ORDER BY ts_ms;
                 """,
-                {"ids": scope_ids, "df": df, "dt": dt, "bucket_secs": b_secs},
+                (df, dt, scope_ids, b_secs),
             )
             rows = cur.fetchall()
-
         else:
+            # max: puntos de cambio + bordes de bucket
             cur.execute(
                 f"""
                 WITH bounds AS (
-                  SELECT %(df)s::timestamptz AS df, %(dt)s::timestamptz AS dt
+                  SELECT %s::timestamptz AS df, %s::timestamptz AS dt
                 ),
                 scope AS (
-                  SELECT unnest(%(ids)s::int[]) AS pump_id
+                  SELECT unnest(%s::int[]) AS pump_id
                 ),
-
                 buckets AS (
                   SELECT
                     gs AS b_start,
@@ -361,7 +329,6 @@ def pumps_live(
                     {b_interval}
                   ) gs
                 ),
-
                 baseline AS (
                   SELECT DISTINCT ON (h.pump_id)
                          h.pump_id,
@@ -376,7 +343,6 @@ def pumps_live(
                   WHERE h.hb_ts < (SELECT df FROM bounds)
                   ORDER BY h.pump_id, h.hb_ts DESC
                 ),
-
                 hb_in AS (
                   SELECT
                     h.pump_id,
@@ -391,13 +357,11 @@ def pumps_live(
                   WHERE h.hb_ts >= (SELECT df FROM bounds)
                     AND h.hb_ts <= (SELECT dt FROM bounds)
                 ),
-
                 hb_all AS (
                   SELECT * FROM baseline
                   UNION ALL
                   SELECT * FROM hb_in
                 ),
-
                 hb_intervals AS (
                   SELECT
                     pump_id,
@@ -406,7 +370,6 @@ def pumps_live(
                     is_on
                   FROM hb_all
                 ),
-
                 hb_intervals_fixed AS (
                   SELECT
                     pump_id,
@@ -415,25 +378,18 @@ def pumps_live(
                     is_on
                   FROM hb_intervals
                 ),
-
                 change_points AS (
-                  SELECT DISTINCT hb_ts AS t
-                  FROM hb_in
-                  UNION
-                  SELECT b_start AS t FROM buckets
-                  UNION
-                  SELECT b_end   AS t FROM buckets
-                  UNION
-                  SELECT (SELECT dt FROM bounds) AS t
+                  SELECT DISTINCT hb_ts AS t FROM hb_in
+                  UNION SELECT b_start AS t FROM buckets
+                  UNION SELECT b_end   AS t FROM buckets
+                  UNION SELECT (SELECT dt FROM bounds) AS t
                 ),
-
                 points AS (
                   SELECT t
                   FROM change_points
                   WHERE t >= (SELECT df FROM bounds)
                     AND t <= (SELECT dt FROM bounds)
                 ),
-
                 on_at_point AS (
                   SELECT
                     p.t,
@@ -444,7 +400,6 @@ def pumps_live(
                    AND p.t <  i.next_ts
                   GROUP BY p.t
                 ),
-
                 per_bucket_max AS (
                   SELECT
                     b.b_start,
@@ -461,7 +416,7 @@ def pumps_live(
                 FROM per_bucket_max
                 ORDER BY ts_ms;
                 """,
-                {"ids": scope_ids, "df": df, "dt": dt},
+                (df, dt, scope_ids),
             )
             rows = cur.fetchall()
 
