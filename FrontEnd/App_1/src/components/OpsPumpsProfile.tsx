@@ -148,18 +148,21 @@ export default function OpsPumpsProfile({
               formatter={(v: any, name: any) => [String(v), name]}
             />
             <Legend />
-            <Area
-              type="stepAfter"
-              dataKey="on"
-              name="Bombas ON"
-              fillOpacity={0.25}
-              strokeWidth={2}
-              isAnimationActive={false}
-              connectNulls
-            />
+           <Area
+  type="stepAfter"
+  dataKey="on"
+  name="Bombas ON"
+  stroke="#dc2626"        // 🔴 rojo fuerte
+  fill="#fecaca"          // 🔴 rojo claro
+  fillOpacity={0.35}
+  strokeWidth={2}
+  isAnimationActive={false}
+  connectNulls
+/>
+
             {dataCmp && (
               <Area
-                type="stepAfter"
+                type="stepAfter"s
                 dataKey="on_cmp"
                 name={`${compareLabel} (ON)`}
                 fillOpacity={0.15}

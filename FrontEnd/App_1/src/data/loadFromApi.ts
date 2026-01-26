@@ -61,6 +61,8 @@ type LoadDashboardOpts = {
   hours?: number;
   /** si querés que no falle toda la carga si graphs muere */
   tolerateSeriesFailure?: boolean;
+  /** ✅ logs para comparar "qué debería" vs "qué da" */
+  debug?: boolean;
 };
 
 function emptySeries() {
@@ -70,15 +72,29 @@ function emptySeries() {
   };
 }
 
-export async function loadDashboard(
-  location_id?: number | "all",
-  opts: LoadDashboardOpts = {}
-) {
+function computeTotalPumpsScope(params: {
+  byLocation: Array<{ location_id: any; pumps_count: number }>;
+  location_id?: number | "all";
+}) {
+  const { byLocation, location_id } = params;
+
+  // si viene una ubicación puntual, usamos ese row
+  if (location_id !== undefined && location_id !== "all") {
+    const row = byLocation.find((r) => String(r.location_id) === String(location_id));
+    return row?.pumps_count ?? 0;
+  }
+
+  // si es all, sumamos todas
+  return byLocation.reduce((acc, r) => acc + (Number(r.pumps_count) || 0), 0);
+}
+
+export async function loadDashboard(location_id?: number | "all", opts: LoadDashboardOpts = {}) {
   const includeSeries = !!opts.includeSeries;
   const hours = opts.hours ?? 24;
   const tolerateSeriesFailure = opts.tolerateSeriesFailure ?? true;
+  const debug = !!opts.debug;
 
-  // 1) locations/totales/uptime/alarms  (✅ esto es lo “útil” y no-legacy)
+  // 1) locations/totales/uptime/alarms
   const [locations, totals, uptime, alarms] = await Promise.all([
     fetchLocations(),
     fetchTotalsByLocation({ location_id }),
@@ -106,6 +122,8 @@ export async function loadDashboard(
     uptime_pct_30d: uptimeByLoc.get(t.location_id) ?? null,
   }));
 
+  const totalPumpsScope = computeTotalPumpsScope({ byLocation, location_id });
+
   // base response (sin series)
   const base = {
     locations,
@@ -118,19 +136,44 @@ export async function loadDashboard(
   if (!includeSeries) return base;
 
   const { fromISO, toISO } = defaultRangeISO(hours);
+
+  // ✅ IMPORTANTÍSIMO: graphs.ts espera opts objeto, no number
   const locParam =
     location_id !== undefined && location_id !== "all" ? Number(location_id) : undefined;
+
+  const graphsOpts = locParam != null ? ({ locationId: locParam } as any) : undefined;
 
   try {
     const [buckets, pumpsActive, tankLevels] = await Promise.all([
       fetchBuckets(fromISO, toISO),
-      fetchPumpsActive(fromISO, toISO, locParam),
-      fetchTankLevelAvg(fromISO, toISO, locParam),
+      fetchPumpsActive(fromISO, toISO, graphsOpts),
+      fetchTankLevelAvg(fromISO, toISO, graphsOpts),
     ]);
 
-    const ts = (buckets || []).map((b) => b.local_hour);
+    const ts = (buckets || []).map((b: any) => b.local_hour).filter(Boolean);
 
-    const pumpsPerHour = normalize24h(
+    // si no hay buckets, evitamos dividir/normalizar
+    if (!ts.length) {
+      if (debug) console.warn("[loadDashboard] buckets vacío, devolviendo series vacías");
+      return base;
+    }
+
+    // 🔎 Debug: qué devuelve realmente el backend
+    if (debug) {
+      const sample = (pumpsActive as any[])?.slice(0, 5) ?? [];
+      const raw = (pumpsActive as any[]).map((r) =>
+        Number(r.pumps_count ?? r.count ?? r.pumps_with_reading ?? 0)
+      );
+      console.group("DEBUG PumpsActive");
+      console.log("location_id:", location_id, "graphsOpts:", graphsOpts);
+      console.log("totalPumpsScope:", totalPumpsScope);
+      console.log("sample rows:", sample);
+      console.log("max raw:", raw.length ? Math.max(...raw) : 0);
+      console.groupEnd();
+    }
+
+    // bombas: normalizamos por hora (max) y clamp al total real (✅ “seguro”)
+    const pumpsPerHourRaw = normalize24h(
       ts,
       (pumpsActive as PumpsActive[]) as AnyObj[],
       "local_hour",
@@ -138,6 +181,11 @@ export async function loadDashboard(
       (xs) => (xs.length ? Math.max(...xs) : 0)
     );
 
+    const pumpsPerHour = pumpsPerHourRaw.map((v) =>
+      totalPumpsScope > 0 ? Math.min(v, totalPumpsScope) : v
+    );
+
+    // tanques: promedio por hora
     const levelAvgPerHour = normalize24h(
       ts,
       (tankLevels as TankLevelAvg[]) as AnyObj[],
@@ -153,9 +201,7 @@ export async function loadDashboard(
     };
   } catch (err) {
     console.warn("[loadDashboard] falló carga de series legacy graphs:", err);
-
     if (!tolerateSeriesFailure) throw err;
-    // devolvemos igual el dashboard (sin series)
     return base;
   }
 }
