@@ -217,17 +217,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   ORDER BY ph.pump_id, ph.created_at DESC, ph.id DESC
                 ),
 
-                -- ===== latest pump event (solo para esos pumps) =====
-                last_event AS (
-                  SELECT DISTINCT ON (pe.pump_id)
-                    pe.pump_id,
-                    pe.id AS latest_event_id,
-                    pe.state AS last_event_state,
-                    pe.created_at AS event_ts
-                  FROM public.pump_events pe
-                  JOIN pumps_scope ps ON ps.pump_id = pe.pump_id
-                  ORDER BY pe.pump_id, pe.created_at DESC, pe.id DESC
-                ),
+         
 
                 -- ===== latest manifold reading por señal (ok) =====
                 ms_last AS (
