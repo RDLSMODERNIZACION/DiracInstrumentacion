@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Header
 from psycopg.rows import dict_row
 
 from app.db import get_conn
@@ -24,14 +24,28 @@ PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
 # KPI bombas: resolución fija (24h) -> 5min
 FORCED_BUCKET = os.getenv("KPI_PUMPS_BUCKET", "5min").strip()
 
+# Seguridad refresh
+ADMIN_REFRESH_TOKEN = (os.getenv("ADMIN_REFRESH_TOKEN") or "").strip()
 
-def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
+# Advisory lock key (cualquier int64 fijo)
+REFRESH_LOCK_KEY = 987654321
+
+
+def _bounds_utc_minute(
+    date_from: Optional[datetime],
+    date_to: Optional[datetime],
+) -> Tuple[datetime, datetime, datetime]:
     """
-    Normaliza el rango [from, to] a UTC, redondeando a minuto.
-    Por defecto últimas 24 hs si no se pasa nada.
+    Devuelve:
+      - df_floor: from en UTC redondeado a minuto
+      - dt_floor: to en UTC redondeado a minuto (para series)
+      - now_utc: ahora real UTC (para conectividad, sin truncar)
+    Por defecto últimas 24 hs.
     """
+    now_utc = datetime.now(timezone.utc)
+
     if date_to is None:
-        date_to = datetime.now(timezone.utc)
+        date_to = now_utc
     if date_from is None:
         date_from = date_to - timedelta(hours=24)
 
@@ -45,13 +59,13 @@ def _bounds_utc_minute(date_from: Optional[datetime], date_to: Optional[datetime
     else:
         date_from = date_from.astimezone(timezone.utc)
 
-    date_to = date_to.replace(second=0, microsecond=0)
-    date_from = date_from.replace(second=0, microsecond=0)
+    dt_floor = date_to.replace(second=0, microsecond=0)
+    df_floor = date_from.replace(second=0, microsecond=0)
 
-    if date_from >= date_to:
+    if df_floor >= dt_floor:
         raise HTTPException(status_code=400, detail="'from' debe ser menor que 'to'")
 
-    return date_from, date_to
+    return df_floor, dt_floor, now_utc
 
 
 def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
@@ -67,6 +81,56 @@ def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
         except Exception:
             pass
     return out or None
+
+
+@router.post("/refresh")
+def refresh_mv_pump_state_1m(x_token: str = Header(default="", alias="X-Token")):
+    """
+    Refresca la MV kpi.mv_pump_state_1m.
+    - protegido por token (ADMIN_REFRESH_TOKEN)
+    - usa advisory lock para no solapar refresh
+    - intenta CONCURRENTLY; si falla, cae a refresh normal
+    """
+    if not ADMIN_REFRESH_TOKEN:
+        raise HTTPException(status_code=500, detail="ADMIN_REFRESH_TOKEN no configurado")
+    if x_token != ADMIN_REFRESH_TOKEN:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        # evitar solapes
+        cur.execute("SELECT pg_try_advisory_lock(%s) AS ok;", (REFRESH_LOCK_KEY,))
+        ok = bool(cur.fetchone()["ok"])
+        if not ok:
+            return {"ok": True, "skipped": True, "reason": "refresh already running"}
+
+        try:
+            # intentar concurrently (requiere índice UNIQUE)
+            try:
+                cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {PUMP_STATE_1M};")
+                mode = "concurrently"
+            except Exception as e:
+                # fallback: refresh normal
+                cur.execute(f"REFRESH MATERIALIZED VIEW {PUMP_STATE_1M};")
+                mode = "normal_fallback"
+
+            # devolver lag para debug
+            cur.execute(
+                f"""
+                SELECT
+                  max(minute_ts) AS last_minute,
+                  now() - max(minute_ts) AS lag
+                FROM {PUMP_STATE_1M};
+                """
+            )
+            r = cur.fetchone() or {}
+            return {
+                "ok": True,
+                "mode": mode,
+                "last_minute": (r.get("last_minute").isoformat() if r.get("last_minute") else None),
+                "lag": str(r.get("lag")) if r.get("lag") is not None else None,
+            }
+        finally:
+            cur.execute("SELECT pg_advisory_unlock(%s);", (REFRESH_LOCK_KEY,))
 
 
 @router.get("/live")
@@ -87,13 +151,12 @@ def pumps_live(
     - usa fuente agregada por minuto (kpi.mv_pump_state_1m) para evitar recorrer HB cada 5s
     - calcula conectadas con último HB por bomba (LATERAL + índice)
     """
-    df, dt = _bounds_utc_minute(date_from, date_to)
+    df, dt, now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
     # bucket forzado
     bucket = FORCED_BUCKET or "5min"
     if bucket != "5min":
-        # por ahora lo dejamos fijo: simplifica y garantiza performance
         bucket = "5min"
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -131,8 +194,8 @@ def pumps_live(
                 "window": {"from": df.isoformat(), "to": dt.isoformat()},
             }
 
-        # 2) Bombas conectadas (rápido: 1 index seek por bomba)
-        recent_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
+        # 2) Bombas conectadas (usar now_utc real, NO dt truncado)
+        recent_from = now_utc - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
 
         cur.execute(
             f"""
@@ -152,7 +215,7 @@ def pumps_live(
               LIMIT 1
             ) h ON true;
             """,
-            (scope_ids_all, dt),
+            (scope_ids_all, now_utc),
         )
         last_rows = cur.fetchall()
 
@@ -175,13 +238,11 @@ def pumps_live(
             }
 
         # 3) Timeline usando mv_pump_state_1m (1 fila / bomba / minuto)
-        #    Luego agrupamos a 5min. Para avg vs max:
-        #    - avg: promedio del conteo ON en el bucket (pero con 5min es lo mismo que el valor si no faltan minutos)
-        #    - max: máximo conteo ON dentro del bucket (por si el estado cambia dentro de esos 5 minutos)
         if agg_mode not in ("avg", "max"):
             raise HTTPException(status_code=400, detail="agg_mode inválido")
 
         if agg_mode == "avg":
+            # avg real dentro del bucket: (sum ON por minuto) promediado en los 5 minutos
             cur.execute(
                 f"""
                 WITH bounds AS (
@@ -199,20 +260,24 @@ def pumps_live(
                   WHERE m.minute_ts >= (SELECT df FROM bounds)
                     AND m.minute_ts <= (SELECT dt FROM bounds)
                 ),
+                per_min_sum AS (
+                  SELECT minute_ts, SUM(on_int)::float AS on_count
+                  FROM per_min
+                  GROUP BY minute_ts
+                ),
                 per_5m AS (
                   SELECT
                     date_trunc('hour', minute_ts)
                       + ((extract(minute from minute_ts)::int / 5) * 5) * interval '1 min'
                       AS bucket_ts,
-                    SUM(on_int)::float AS on_count
-                  FROM per_min
+                    AVG(on_count) AS v
+                  FROM per_min_sum
                   GROUP BY bucket_ts
                 )
                 SELECT
                   extract(epoch FROM bucket_ts)::bigint * 1000 AS ts_ms,
-                  AVG(on_count) AS val
+                  v AS val
                 FROM per_5m
-                GROUP BY bucket_ts
                 ORDER BY bucket_ts;
                 """,
                 (df, dt, scope_ids),
