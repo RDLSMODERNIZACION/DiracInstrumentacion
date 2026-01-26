@@ -1,4 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 type AuthState = {
   email: string | null;
@@ -11,6 +18,7 @@ type AuthContextType = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   getAuthHeader: () => Record<string, string>;
+  apiBase: string;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -32,11 +40,20 @@ function getApiBase() {
   return "https://diracinstrumentacion.onrender.com";
 }
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+function isGetLike(method?: string) {
+  const m = (method || "GET").toUpperCase();
+  return m === "GET" || m === "HEAD";
+}
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<AuthState>(() => {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as AuthState) : { email: null, basicToken: null };
+      return raw
+        ? (JSON.parse(raw) as AuthState)
+        : { email: null, basicToken: null };
     } catch {
       return { email: null, basicToken: null };
     }
@@ -46,50 +63,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
+  const apiBase = useMemo(() => getApiBase(), []);
+
   const getAuthHeader = useCallback(() => {
     return state.basicToken ? { Authorization: state.basicToken } : {};
   }, [state.basicToken]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const token = buildBasicToken(email.trim(), password);
-    const api = getApiBase();
-    const res = await fetch(`${api}/dirac/me/locations`, {
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: token },
-      cache: "no-store",
-    });
+  /**
+   * Login: acá SÍ usamos Authorization porque justamente estamos validando credenciales.
+   * Ojo: NO conviene enviar Content-Type en un GET si querés evitar preflight,
+   * pero como es una llamada “de login” no importa tanto.
+   */
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const token = buildBasicToken(email.trim(), password);
 
-    if (res.status === 401) {
-      throw new Error("Credenciales inválidas");
-    }
-    if (!res.ok) {
-      throw new Error(`Error de autenticación (${res.status})`);
-    }
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.toLowerCase().includes("application/json")) {
-      // Nos están devolviendo HTML (index.html) o algo que no es JSON → API mal configurada
-      throw new Error("La URL de API no devuelve JSON. Configurá VITE_API_BASE hacia el backend.");
-    }
+      const res = await fetch(`${apiBase}/dirac/me/locations`, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: token,
+        },
+        cache: "no-store",
+      });
 
-    const data = await res.json().catch(() => null);
-    if (!Array.isArray(data)) {
-      throw new Error("Respuesta inesperada del backend en /dirac/me/locations");
-    }
+      if (res.status === 401) {
+        throw new Error("Credenciales inválidas");
+      }
+      if (!res.ok) {
+        throw new Error(`Error de autenticación (${res.status})`);
+      }
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.toLowerCase().includes("application/json")) {
+        throw new Error(
+          "La URL de API no devuelve JSON. Configurá VITE_API_BASE hacia el backend."
+        );
+      }
 
-    setState({ email, basicToken: token });
-  }, []);
+      const data = await res.json().catch(() => null);
+      if (!Array.isArray(data)) {
+        throw new Error("Respuesta inesperada del backend en /dirac/me/locations");
+      }
+
+      setState({ email, basicToken: token });
+    },
+    [apiBase]
+  );
 
   const logout = useCallback(() => {
     setState({ email: null, basicToken: null });
     sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  const value = useMemo<AuthContextType>(() => ({
-    isAuthenticated: !!state.basicToken,
-    email: state.email,
-    login,
-    logout,
-    getAuthHeader,
-  }), [state.basicToken, state.email, login, logout, getAuthHeader]);
+  const value = useMemo<AuthContextType>(
+    () => ({
+      isAuthenticated: !!state.basicToken,
+      email: state.email,
+      login,
+      logout,
+      getAuthHeader,
+      apiBase,
+    }),
+    [state.basicToken, state.email, login, logout, getAuthHeader, apiBase]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
@@ -100,18 +136,78 @@ export function useAuth() {
   return ctx;
 }
 
-// Helper para fetch con auth ya inyectado
+/**
+ * ✅ Fetch público (SIN Authorization) para endpoints tipo:
+ * - /locations
+ * - /companies
+ * - /pumps/config
+ * - /tanks/config
+ *
+ * Esto evita preflight CORS.
+ */
+export function usePublicFetch() {
+  const { apiBase } = useAuth();
+
+  return useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const method = (init.method || "GET").toUpperCase();
+
+      // Para GET/HEAD: NO mandamos Content-Type (evita preflight)
+      // Para POST/PUT/PATCH: si mandás JSON, sí corresponde Content-Type
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...(init.headers as any),
+      };
+
+      if (!isGetLike(method) && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const res = await fetch(`${apiBase}${path}`, {
+        ...init,
+        method,
+        headers,
+        // NO forzamos no-store: dejamos que el browser/cache/ETag funcione
+      });
+
+      return res;
+    },
+    [apiBase]
+  );
+}
+
+/**
+ * ✅ Fetch con auth (Authorization) SOLO cuando lo necesitás.
+ * Además:
+ * - No mete Content-Type en GET/HEAD (reduce preflight)
+ * - No fuerza cache: "no-store" por defecto (lo podés pasar por init si querés)
+ */
 export function useAuthedFetch() {
-  const { getAuthHeader } = useAuth();
-  const apiBase = getApiBase();
-  return useCallback(async (path: string, init: RequestInit = {}) => {
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(init.headers || {}),
-      ...getAuthHeader(),
-    };
-    const res = await fetch(`${apiBase}${path}`, { ...init, headers, cache: "no-store" });
-    return res;
-  }, [getAuthHeader, apiBase]);
+  const { getAuthHeader, apiBase } = useAuth();
+
+  return useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const method = (init.method || "GET").toUpperCase();
+
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        ...(init.headers as any),
+        ...getAuthHeader(), // Authorization
+      };
+
+      // Content-Type solo para métodos con body
+      if (!isGetLike(method) && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const res = await fetch(`${apiBase}${path}`, {
+        ...init,
+        method,
+        headers,
+      });
+
+      return res;
+    },
+    [getAuthHeader, apiBase]
+  );
 }
