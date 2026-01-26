@@ -377,24 +377,6 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
 })) as UINode[];
 
 
-// ✅ TEST: nodo ABB para ver el render aunque el backend no lo mande
-uiNodes.push({
-  id: "ABB-TEST-1",
-  type: "network_analyzer",
-  name: "ABB Test",
-  x: 360,
-  y: 140,
-  online: true,
-  state: null,
-  location_id: null,
-  location_name: "Test",
-  signals: {
-    power_kw: 18.4,
-    pf: 0.91,
-    kwh_today: 126,
-  },
-} as any);
-
 
 
 
