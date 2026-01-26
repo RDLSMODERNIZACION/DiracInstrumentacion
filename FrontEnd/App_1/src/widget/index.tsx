@@ -95,12 +95,14 @@ export default function Widget() {
     };
   }, [locId]);
 
-  // Live 24h BASE
+  // ✅ Polling: Operación frecuente; resto muy suave
   const pollMs = tab === "operacion" ? 15_000 : 10 * 60_000;
+
+  // ✅ Live 24h BASE (bucket fijo 5min)
   const liveSync = useLiveOps({
     locationId: locId,
     periodHours: 24,
-    bucket: "1min",
+    bucket: "5min", // ✅ antes estaba 1min (eso te mataba)
     pollMs,
     pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
     tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
@@ -141,19 +143,13 @@ export default function Widget() {
   );
 
   const byLocationFiltered = useMemo(() => {
-    // "all" => sin filtro, mostramos todas
     if (locId == null) return byLocation;
-    return byLocation.filter(
-      (r: any) => Number(r?.location_id) === locId
-    );
+    return byLocation.filter((r: any) => Number(r?.location_id) === locId);
   }, [byLocation, locId]);
 
   const kpis = useMemo(() => {
-    let tanks = 0,
-      pumps = 0;
-    for (const r of Array.isArray(byLocationFiltered)
-      ? byLocationFiltered
-      : []) {
+    let tanks = 0, pumps = 0;
+    for (const r of Array.isArray(byLocationFiltered) ? byLocationFiltered : []) {
       tanks += Number(r?.tanks_count ?? 0);
       pumps += Number(r?.pumps_count ?? 0);
     }
@@ -164,6 +160,7 @@ export default function Widget() {
     () => liveSync.pumpsTotal ?? (kpis.pumps || undefined),
     [liveSync.pumpsTotal, kpis]
   );
+
   const auditPumpsCap = useMemo(
     () => (audit.pumpOptions?.length || 0) || undefined,
     [audit.pumpOptions]
@@ -173,16 +170,13 @@ export default function Widget() {
     <div className="p-6 space-y-6">
       {/* Filtros superiores */}
       <div className="flex flex-wrap gap-4 items-center">
-        {/* Ubicación BASE */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Ubicación:</span>
           <select
             className="border rounded-xl p-2 text-sm"
             value={loc === "all" ? "all" : String(loc)}
             onChange={(e) =>
-              setLoc(
-                e.target.value === "all" ? "all" : Number(e.target.value)
-              )
+              setLoc(e.target.value === "all" ? "all" : Number(e.target.value))
             }
           >
             <option value="all">Todas</option>
@@ -193,11 +187,8 @@ export default function Widget() {
             ))}
           </select>
         </div>
-
-        {/* ⛔ Playback exterior eliminado */}
       </div>
 
-      {/* Selectores BASE */}
       {loc !== "all" && (
         <BaseSelectors
           pumpOptions={pumpOptions}
@@ -209,7 +200,6 @@ export default function Widget() {
         />
       )}
 
-      {/* Tabs */}
       <Tabs
         value={tab}
         onChange={setTab}
@@ -222,19 +212,13 @@ export default function Widget() {
         ]}
       />
 
-      {/* ===== Operación ===== */}
       {tab === "operacion" && (
         <>
-          {/* KPIs */}
           <section className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-2 gap-3">
             <KPI label="Tanques" value={k(kpis.tanks)} />
-            <KPI
-              label="Bombas"
-              value={k(liveSync?.pumpsTotal ?? kpis.pumps)}
-            />
+            <KPI label="Bombas" value={k(liveSync?.pumpsTotal ?? kpis.pumps)} />
           </section>
 
-          {/* Panel de Auditoría (incluye Playback adentro y selectores propios) */}
           <AuditPanel
             auditEnabled={auditEnabled}
             setAuditEnabled={setAuditEnabled}
@@ -265,16 +249,11 @@ export default function Widget() {
             }
           />
 
-          {/* Gráficos BASE */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <TankLevelChart
               ts={playback.tankTs}
               syncId="op-sync"
-              title={
-                playback.playEnabled
-                  ? "Nivel del tanque (Playback 24 h)"
-                  : "Nivel del tanque (24h • en vivo)"
-              }
+              title={playback.playEnabled ? "Nivel del tanque (Playback 24 h)" : "Nivel del tanque (24h • en vivo)"}
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -286,11 +265,7 @@ export default function Widget() {
               pumpsTs={playback.pumpTs}
               max={totalPumpsCap}
               syncId="op-sync"
-              title={
-                playback.playEnabled
-                  ? "Bombas ON (Playback 24 h)"
-                  : "Bombas ON (24h)"
-              }
+              title={playback.playEnabled ? "Bombas ON (Playback 24 h)" : "Bombas ON (24h)"}
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -299,7 +274,6 @@ export default function Widget() {
             />
           </section>
 
-          {/* Gráficos AUDITORÍA (dos adicionales) */}
           {auditEnabled && auditLoc !== "" && (
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <TankLevelChart
@@ -328,25 +302,16 @@ export default function Widget() {
         </>
       )}
 
-      {/* ===== Eficiencia energética ===== */}
       {tab === "eficiencia" && (
         <section>
-          <EnergyEfficiencyPage
-            locationId={locId}
-            tz="America/Argentina/Buenos_Aires"
-          />
+          <EnergyEfficiencyPage locationId={locId} tz="America/Argentina/Buenos_Aires" />
         </section>
       )}
 
-      {/* ===== Confiabilidad ===== */}
       {tab === "confiabilidad" && (
-        <ReliabilityPage
-          locationId={loc === "all" ? "all" : locId ?? "all"}
-          thresholdLow={90}
-        />
+        <ReliabilityPage locationId={loc === "all" ? "all" : locId ?? "all"} thresholdLow={90} />
       )}
 
-      {/* Resumen por ubicación */}
       <section>
         <Card className="rounded-2xl">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
