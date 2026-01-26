@@ -503,6 +503,29 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
   }, []);
 
+
+
+  const saveNodePosition = useCallback(
+  async (id: string) => {
+    try {
+      const pos = getPos(id);
+      if (!pos) return;
+
+      // 1) Guardar local
+      saveLayoutToStorage(nodesByIdAsArray(nodesById));
+
+      // 2) Guardar DB
+      await updateLayout(id, pos.x, pos.y);
+
+      log("POSITION SAVED", { id, x: pos.x, y: pos.y });
+    } catch (e) {
+      console.error("Error al actualizar layout:", e);
+    }
+  },
+  [getPos, nodesById, log]
+);
+
+
 const saveNodePositionXY = useCallback(
   async (id: string, x: number, y: number) => {
     try {
