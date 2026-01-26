@@ -1,11 +1,19 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
 import json
+import time
 
 from app.db import get_conn
 from psycopg.rows import dict_row
 
 router = APIRouter(prefix="/infraestructura", tags=["infraestructura"])
+
+# ============================================================
+# Helpers (debug timing)
+# ============================================================
+
+def _ms(t0: float) -> int:
+    return int((time.perf_counter() - t0) * 1000)
 
 
 # -------------------------------------------------------------------
@@ -14,11 +22,12 @@ router = APIRouter(prefix="/infraestructura", tags=["infraestructura"])
 @router.get("/health_db")
 async def health_db():
     """Health-check simple contra la DB."""
+    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
-        return {"ok": True}
+        return {"ok": True, "ms": _ms(t0)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB down: {e}")
 
@@ -30,11 +39,11 @@ async def health_db():
 async def get_layout_edges(company_id: int | None = Query(default=None)):
     """
     Devuelve conexiones de layout (edges) desde public.v_layout_edges_flow,
-    incluyendo src_port/dst_port
-    y knots desde public.layout_edge_knots (para fijar caños).
+    incluyendo src_port/dst_port y knots desde public.layout_edge_knots.
     - Sin company_id: todas.
     - Con company_id: sólo aristas cuyos endpoints pertenecen a nodos de esa empresa.
     """
+    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             if company_id is None:
@@ -49,7 +58,8 @@ async def get_layout_edges(company_id: int | None = Query(default=None)):
                     ORDER BY e.updated_at DESC
                     """
                 )
-                return cur.fetchall()
+                rows = cur.fetchall()
+                return rows
 
             # Scoped por empresa: limitamos por node_id de los nodos de esa empresa
             cur.execute(
@@ -121,7 +131,6 @@ async def update_edge_knots(request: Request):
     if not isinstance(knots, list):
         raise HTTPException(status_code=400, detail="knots debe ser una lista [{x,y},...]")
 
-    # Validación liviana
     for p in knots:
         if not isinstance(p, dict) or "x" not in p or "y" not in p:
             raise HTTPException(status_code=400, detail="knots inválido: cada punto debe tener x,y")
@@ -159,7 +168,13 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     Devuelve nodos (tank/pump/valve/manifold).
     ✅ Incluye `meta` para valves (desde public.layout_valves.meta).
     ✅ Incluye `signals` para manifolds (desde public.manifold_signals + latest readings).
+
+    OPTIMIZADO:
+    - Tanques: 1 sola lectura latest por tanque (CTE tank_last)
+    - Manifolds: 1 sola lectura latest por señal (CTE ms_last) + agregado por manifold (m_signals)
+    - Evita N laterals por señal / subqueries duplicadas
     """
+    t0 = time.perf_counter()
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
             # ---------------------------------------------------------
@@ -177,37 +192,53 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     ORDER BY c.type, c.id
                     """
                 )
-                return cur.fetchall()
+                rows = cur.fetchall()
+                # debug opcional
+                # return {"rows": rows, "ms": _ms(t0)}  # si querés medir desde afuera
+                return rows
 
             # ---------------------------------------------------------
-            # CON company_id: mantenemos tu armado + agregamos signals
-            # (no tocamos edges; esto sólo afecta nodes)
+            # CON company_id: query optimizada
             # ---------------------------------------------------------
             cur.execute(
                 """
-                WITH t AS (
+                WITH
+                tank_last AS (
+                  SELECT DISTINCT ON (i.tank_id)
+                    i.tank_id,
+                    i.level_pct,
+                    i.created_at
+                  FROM public.tank_ingest i
+                  ORDER BY i.tank_id, i.created_at DESC
+                ),
+                ms_last AS (
+                  SELECT DISTINCT ON (r.manifold_signal_id)
+                    r.manifold_signal_id,
+                    r.value,
+                    r.created_at
+                  FROM public.manifold_signal_readings r
+                  ORDER BY r.manifold_signal_id, r.created_at DESC
+                ),
+                t AS (
                   SELECT
                     COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
                     t.id::bigint                        AS id,
                     'tank'::text                        AS type,
                     lt.x, lt.y, lt.updated_at,
-                    COALESCE((
-                      SELECT (now() - i.created_at) <= interval '60 seconds'
-                      FROM public.tank_ingest i
-                      WHERE i.tank_id = t.id
-                      ORDER BY i.created_at DESC
-                      LIMIT 1
-                    ), false)                           AS online,
+
+                    COALESCE((now() - tl.created_at) <= interval '60 seconds', false) AS online,
                     NULL::text                          AS state,
-                    lvl.level_pct::numeric              AS level_pct,
+                    tl.level_pct::numeric               AS level_pct,
+
                     CASE
-                      WHEN lvl.level_pct IS NULL THEN NULL
-                      WHEN tc.low_low_pct   IS NOT NULL AND lvl.level_pct <= tc.low_low_pct   THEN 'critico'
-                      WHEN tc.low_pct       IS NOT NULL AND lvl.level_pct <= tc.low_pct       THEN 'alerta'
-                      WHEN tc.high_high_pct IS NOT NULL AND lvl.level_pct >= tc.high_high_pct THEN 'critico'
-                      WHEN tc.high_pct      IS NOT NULL AND lvl.level_pct >= tc.high_pct      THEN 'alerta'
+                      WHEN tl.level_pct IS NULL THEN NULL
+                      WHEN tc.low_low_pct   IS NOT NULL AND tl.level_pct <= tc.low_low_pct   THEN 'critico'
+                      WHEN tc.low_pct       IS NOT NULL AND tl.level_pct <= tc.low_pct       THEN 'alerta'
+                      WHEN tc.high_high_pct IS NOT NULL AND tl.level_pct >= tc.high_high_pct THEN 'critico'
+                      WHEN tc.high_pct      IS NOT NULL AND tl.level_pct >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
                     END::text                           AS alarma,
+
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
                     NULL::jsonb                         AS meta,
@@ -216,41 +247,31 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   JOIN public.locations l ON l.id = t.location_id
                   LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
                   LEFT JOIN public.tank_configs tc ON tc.tank_id = t.id
-                  LEFT JOIN LATERAL (
-                    SELECT i.level_pct
-                    FROM public.tank_ingest i
-                    WHERE i.tank_id = t.id
-                    ORDER BY i.created_at DESC
-                    LIMIT 1
-                  ) AS lvl ON TRUE
+                  LEFT JOIN tank_last tl ON tl.tank_id = t.id
                   WHERE l.company_id = %s
                 ),
                 p AS (
-                 SELECT
-  COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
-  p.id::bigint                         AS id,
-  'pump'::text                         AS type,
-  lp.x, lp.y, lp.updated_at,
+                  SELECT
+                    COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
+                    p.id::bigint                         AS id,
+                    'pump'::text                         AS type,
+                    lp.x, lp.y, lp.updated_at,
 
-  COALESCE(s.online, false)            AS online,
-  CASE
-    WHEN COALESCE(s.online, false) = true THEN s.state
-    ELSE NULL
-  END                                  AS state,
+                    COALESCE(s.online, false)            AS online,
+                    CASE WHEN COALESCE(s.online, false) = true THEN s.state ELSE NULL END AS state,
 
-  NULL::numeric                        AS level_pct,
-  NULL::text                           AS alarma,
-  l.id::bigint                         AS location_id,
-  l.name::text                         AS location_name,
-  NULL::jsonb                          AS meta,
-  NULL::jsonb                          AS signals
-FROM public.pumps p
-JOIN public.locations l ON l.id = p.location_id
-LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
-LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
-WHERE l.company_id = %s
-),
-
+                    NULL::numeric                        AS level_pct,
+                    NULL::text                           AS alarma,
+                    l.id::bigint                         AS location_id,
+                    l.name::text                         AS location_name,
+                    NULL::jsonb                          AS meta,
+                    NULL::jsonb                          AS signals
+                  FROM public.pumps p
+                  JOIN public.locations l ON l.id = p.location_id
+                  LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
+                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+                  WHERE l.company_id = %s
+                ),
                 v AS (
                   SELECT
                     COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
@@ -270,6 +291,30 @@ WHERE l.company_id = %s
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
                   WHERE l.company_id = %s
                 ),
+                m_signals AS (
+                  SELECT
+                    s.manifold_id,
+                    MAX(ml.created_at) AS last_ts,
+                    jsonb_object_agg(
+                      s.signal_type,
+                      jsonb_build_object(
+                        'id', s.id,
+                        'signal_type', s.signal_type,
+                        'node_id', s.node_id,
+                        'tag', s.tag,
+                        'unit', s.unit,
+                        'scale_mult', s.scale_mult,
+                        'scale_add', s.scale_add,
+                        'min_value', s.min_value,
+                        'max_value', s.max_value,
+                        'value', ml.value,
+                        'ts', ml.created_at
+                      )
+                    ) AS signals
+                  FROM public.manifold_signals s
+                  LEFT JOIN ms_last ml ON ml.manifold_signal_id = s.id
+                  GROUP BY s.manifold_id
+                ),
                 m AS (
                   SELECT
                     COALESCE(lm.node_id, 'manifold:'||m.id) AS node_id,
@@ -277,10 +322,8 @@ WHERE l.company_id = %s
                     'manifold'::text                         AS type,
                     lm.x, lm.y, lm.updated_at,
 
-                    -- ✅ online por última lectura de cualquier señal (10 min)
                     CASE
-                      WHEN ms.last_ts IS NOT NULL
-                           AND (now() - ms.last_ts) <= interval '00:10:00'
+                      WHEN ms.last_ts IS NOT NULL AND (now() - ms.last_ts) <= interval '00:10:00'
                       THEN true ELSE false
                     END AS online,
 
@@ -290,43 +333,11 @@ WHERE l.company_id = %s
                     l.id::bigint                             AS location_id,
                     l.name::text                             AS location_name,
                     NULL::jsonb                              AS meta,
-
                     COALESCE(ms.signals, '{}'::jsonb)         AS signals
-
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
-
-                  LEFT JOIN LATERAL (
-                    SELECT
-                      MAX(r.created_at) AS last_ts,
-                      jsonb_object_agg(
-                        s.signal_type,
-                        jsonb_build_object(
-                          'id', s.id,
-                          'signal_type', s.signal_type,
-                          'node_id', s.node_id,
-                          'tag', s.tag,
-                          'unit', s.unit,
-                          'scale_mult', s.scale_mult,
-                          'scale_add', s.scale_add,
-                          'min_value', s.min_value,
-                          'max_value', s.max_value,
-                          'value', r.value,
-                          'ts', r.created_at
-                        )
-                      ) AS signals
-                    FROM public.manifold_signals s
-                    LEFT JOIN LATERAL (
-                      SELECT value, created_at
-                      FROM public.manifold_signal_readings r
-                      WHERE r.manifold_signal_id = s.id
-                      ORDER BY r.created_at DESC
-                      LIMIT 1
-                    ) r ON TRUE
-                    WHERE s.manifold_id = m.id
-                  ) ms ON TRUE
-
+                  LEFT JOIN m_signals ms ON ms.manifold_id = m.id
                   WHERE l.company_id = %s
                 )
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
@@ -340,7 +351,8 @@ WHERE l.company_id = %s
                 """,
                 (company_id, company_id, company_id, company_id),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
+            return rows
 
     except HTTPException:
         raise
@@ -414,6 +426,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
     Devuelve {nodes, edges}. Con company_id, limita a esa empresa.
     ✅ Ahora `nodes` incluye `meta` para valves.
     ✅ Ahora `nodes` incluye `signals` para manifolds.
+
+    NOTA: Para performance máxima, preferí:
+      - get_layout_combined (nodes) + get_layout_edges (edges)
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -451,149 +466,148 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
             # ---------------------------------------------------------
             # CON company_id (scoped)
-            # (mantenemos tu SQL base y agregamos signals)
+            # Reusamos get_layout_combined optimizado para nodes
+            # y mantenemos edges NO TOCAR.
             # ---------------------------------------------------------
             cur.execute(
                 """
-                WITH t AS (
+                WITH
+                tank_last AS (
+                  SELECT DISTINCT ON (i.tank_id)
+                    i.tank_id,
+                    i.level_pct,
+                    i.created_at
+                  FROM public.tank_ingest i
+                  ORDER BY i.tank_id, i.created_at DESC
+                ),
+                ms_last AS (
+                  SELECT DISTINCT ON (r.manifold_signal_id)
+                    r.manifold_signal_id,
+                    r.value,
+                    r.created_at
+                  FROM public.manifold_signal_readings r
+                  ORDER BY r.manifold_signal_id, r.created_at DESC
+                ),
+                t AS (
                   SELECT
-                    COALESCE(lt.node_id,'tank:'||t.id) AS node_id,
+                    COALESCE(lt.node_id, 'tank:'||t.id) AS node_id,
                     t.id::bigint                        AS id,
                     'tank'::text                        AS type,
                     lt.x, lt.y, lt.updated_at,
-                    COALESCE((
-                      SELECT (now() - i.created_at) <= interval '60 seconds'
-                      FROM public.tank_ingest i
-                      WHERE i.tank_id = t.id
-                      ORDER BY i.created_at DESC
-                      LIMIT 1
-                    ), false)                           AS online,
+
+                    COALESCE((now() - tl.created_at) <= interval '60 seconds', false) AS online,
                     NULL::text                          AS state,
-                    (SELECT i.level_pct
-                     FROM public.tank_ingest i
-                     WHERE i.tank_id=t.id
-                     ORDER BY i.created_at DESC
-                     LIMIT 1)::numeric                  AS level_pct,
+                    tl.level_pct::numeric               AS level_pct,
+
                     CASE
-                      WHEN (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) IS NULL
-                        THEN NULL
-                      WHEN tc.low_low_pct   IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) <= tc.low_low_pct   THEN 'critico'
-                      WHEN tc.low_pct       IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) <= tc.low_pct       THEN 'alerta'
-                      WHEN tc.high_high_pct IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) >= tc.high_high_pct THEN 'critico'
-                      WHEN tc.high_pct      IS NOT NULL AND (SELECT i.level_pct FROM public.tank_ingest i WHERE i.tank_id=t.id ORDER BY i.created_at DESC LIMIT 1) >= tc.high_pct      THEN 'alerta'
+                      WHEN tl.level_pct IS NULL THEN NULL
+                      WHEN tc.low_low_pct   IS NOT NULL AND tl.level_pct <= tc.low_low_pct   THEN 'critico'
+                      WHEN tc.low_pct       IS NOT NULL AND tl.level_pct <= tc.low_pct       THEN 'alerta'
+                      WHEN tc.high_high_pct IS NOT NULL AND tl.level_pct >= tc.high_high_pct THEN 'critico'
+                      WHEN tc.high_pct      IS NOT NULL AND tl.level_pct >= tc.high_pct      THEN 'alerta'
                       ELSE NULL
                     END::text                           AS alarma,
+
                     l.id::bigint                        AS location_id,
                     l.name::text                        AS location_name,
                     NULL::jsonb                         AS meta,
                     NULL::jsonb                         AS signals
                   FROM public.tanks t
-                  JOIN public.locations l ON l.id=t.location_id
-                  LEFT JOIN public.layout_tanks lt ON lt.tank_id=t.id
-                  LEFT JOIN public.tank_configs tc ON tc.tank_id=t.id
-                  WHERE l.company_id=%s
+                  JOIN public.locations l ON l.id = t.location_id
+                  LEFT JOIN public.layout_tanks lt ON lt.tank_id = t.id
+                  LEFT JOIN public.tank_configs tc ON tc.tank_id = t.id
+                  LEFT JOIN tank_last tl ON tl.tank_id = t.id
+                  WHERE l.company_id = %s
                 ),
                 p AS (
-               SELECT
-  COALESCE(lp.node_id,'pump:'||p.id)  AS node_id,
-  p.id::bigint                        AS id,
-  'pump'::text                        AS type,
-  lp.x, lp.y, lp.updated_at,
+                  SELECT
+                    COALESCE(lp.node_id, 'pump:'||p.id) AS node_id,
+                    p.id::bigint                         AS id,
+                    'pump'::text                         AS type,
+                    lp.x, lp.y, lp.updated_at,
 
-  COALESCE(s.online, false)            AS online,
-  CASE
-    WHEN COALESCE(s.online, false) = true THEN s.state
-    ELSE NULL
-  END                                  AS state,
+                    COALESCE(s.online, false)            AS online,
+                    CASE WHEN COALESCE(s.online, false) = true THEN s.state ELSE NULL END AS state,
 
-  NULL::numeric                       AS level_pct,
-  NULL::text                          AS alarma,
-  l.id::bigint                        AS location_id,
-  l.name::text                        AS location_name,
-  NULL::jsonb                         AS meta,
-  NULL::jsonb                         AS signals
-FROM public.pumps p
-JOIN public.locations l ON l.id=p.location_id
-LEFT JOIN public.layout_pumps lp ON lp.pump_id=p.id
-LEFT JOIN public.v_pumps_with_status s ON s.pump_id=p.id
-WHERE l.company_id=%s
-),
-
+                    NULL::numeric                        AS level_pct,
+                    NULL::text                           AS alarma,
+                    l.id::bigint                         AS location_id,
+                    l.name::text                         AS location_name,
+                    NULL::jsonb                          AS meta,
+                    NULL::jsonb                          AS signals
+                  FROM public.pumps p
+                  JOIN public.locations l ON l.id = p.location_id
+                  LEFT JOIN public.layout_pumps lp ON lp.pump_id = p.id
+                  LEFT JOIN public.v_pumps_with_status s ON s.pump_id = p.id
+                  WHERE l.company_id = %s
+                ),
                 v AS (
                   SELECT
-                    COALESCE(lv.node_id,'valve:'||v.id) AS node_id,
-                    v.id::bigint                        AS id,
-                    'valve'::text                       AS type,
+                    COALESCE(lv.node_id, 'valve:'||v.id) AS node_id,
+                    v.id::bigint                          AS id,
+                    'valve'::text                         AS type,
                     lv.x, lv.y, lv.updated_at,
-                    NULL::boolean                       AS online,
-                    NULL::text                          AS state,
-                    NULL::numeric                       AS level_pct,
-                    NULL::text                          AS alarma,
-                    l.id::bigint                        AS location_id,
-                    l.name::text                        AS location_name,
-                    lv.meta                             AS meta,
-                    NULL::jsonb                         AS signals
+                    NULL::boolean                         AS online,
+                    NULL::text                            AS state,
+                    NULL::numeric                         AS level_pct,
+                    NULL::text                            AS alarma,
+                    l.id::bigint                          AS location_id,
+                    l.name::text                          AS location_name,
+                    lv.meta                               AS meta,
+                    NULL::jsonb                           AS signals
                   FROM public.valves v
-                  JOIN public.locations l ON l.id=v.location_id
-                  LEFT JOIN public.layout_valves lv ON lv.valve_id=v.id
-                  WHERE l.company_id=%s
+                  JOIN public.locations l ON l.id = v.location_id
+                  LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
+                  WHERE l.company_id = %s
+                ),
+                m_signals AS (
+                  SELECT
+                    s.manifold_id,
+                    MAX(ml.created_at) AS last_ts,
+                    jsonb_object_agg(
+                      s.signal_type,
+                      jsonb_build_object(
+                        'id', s.id,
+                        'signal_type', s.signal_type,
+                        'node_id', s.node_id,
+                        'tag', s.tag,
+                        'unit', s.unit,
+                        'scale_mult', s.scale_mult,
+                        'scale_add', s.scale_add,
+                        'min_value', s.min_value,
+                        'max_value', s.max_value,
+                        'value', ml.value,
+                        'ts', ml.created_at
+                      )
+                    ) AS signals
+                  FROM public.manifold_signals s
+                  LEFT JOIN ms_last ml ON ml.manifold_signal_id = s.id
+                  GROUP BY s.manifold_id
                 ),
                 m AS (
                   SELECT
-                    COALESCE(lm.node_id,'manifold:'||m.id) AS node_id,
-                    m.id::bigint                            AS id,
-                    'manifold'::text                        AS type,
+                    COALESCE(lm.node_id, 'manifold:'||m.id) AS node_id,
+                    m.id::bigint                             AS id,
+                    'manifold'::text                         AS type,
                     lm.x, lm.y, lm.updated_at,
 
                     CASE
-                      WHEN ms.last_ts IS NOT NULL
-                           AND (now() - ms.last_ts) <= interval '00:10:00'
+                      WHEN ms.last_ts IS NOT NULL AND (now() - ms.last_ts) <= interval '00:10:00'
                       THEN true ELSE false
                     END AS online,
 
-                    NULL::text                              AS state,
-                    NULL::numeric                           AS level_pct,
-                    NULL::text                              AS alarma,
-                    l.id::bigint                            AS location_id,
-                    l.name::text                            AS location_name,
-                    NULL::jsonb                             AS meta,
-                    COALESCE(ms.signals, '{}'::jsonb)        AS signals
-
+                    NULL::text                               AS state,
+                    NULL::numeric                            AS level_pct,
+                    NULL::text                               AS alarma,
+                    l.id::bigint                             AS location_id,
+                    l.name::text                             AS location_name,
+                    NULL::jsonb                              AS meta,
+                    COALESCE(ms.signals, '{}'::jsonb)         AS signals
                   FROM public.manifolds m
-                  JOIN public.locations l ON l.id=m.location_id
-                  LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
-
-                  LEFT JOIN LATERAL (
-                    SELECT
-                      MAX(r.created_at) AS last_ts,
-                      jsonb_object_agg(
-                        s.signal_type,
-                        jsonb_build_object(
-                          'id', s.id,
-                          'signal_type', s.signal_type,
-                          'node_id', s.node_id,
-                          'tag', s.tag,
-                          'unit', s.unit,
-                          'scale_mult', s.scale_mult,
-                          'scale_add', s.scale_add,
-                          'min_value', s.min_value,
-                          'max_value', s.max_value,
-                          'value', r.value,
-                          'ts', r.created_at
-                        )
-                      ) AS signals
-                    FROM public.manifold_signals s
-                    LEFT JOIN LATERAL (
-                      SELECT value, created_at
-                      FROM public.manifold_signal_readings r
-                      WHERE r.manifold_signal_id = s.id
-                      ORDER BY r.created_at DESC
-                      LIMIT 1
-                    ) r ON TRUE
-                    WHERE s.manifold_id = m.id
-                  ) ms ON TRUE
-
-                  WHERE l.company_id=%s
+                  JOIN public.locations l ON l.id = m.location_id
+                  LEFT JOIN public.layout_manifolds lm ON lm.manifold_id = m.id
+                  LEFT JOIN m_signals ms ON ms.manifold_id = m.id
+                  WHERE l.company_id = %s
                 ),
                 nodes AS (
                   SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,location_id,location_name,meta,signals FROM t
