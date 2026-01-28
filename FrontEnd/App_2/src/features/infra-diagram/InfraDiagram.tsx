@@ -370,7 +370,17 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
 
   // ✅ no perder signals en ABB (kW/cosφ/kWh)
-  ...(n.type === "network_analyzer" ? { signals: (n as any).signals ?? null } : {}),
+// ✅ ABB: no perder signals + guardar analyzer_id (clave para /latest)
+...(n.type === "network_analyzer"
+  ? (() => {
+      const aid = Number((n as any).analyzer_id ?? n.id);
+      return {
+        signals: (n as any).signals ?? null,
+        analyzer_id: Number.isFinite(aid) ? aid : null,
+      };
+    })()
+  : {}),
+
 
   // ✅ CLAVE: no perder meta (rot/flip/model/ports) en valves
   ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
