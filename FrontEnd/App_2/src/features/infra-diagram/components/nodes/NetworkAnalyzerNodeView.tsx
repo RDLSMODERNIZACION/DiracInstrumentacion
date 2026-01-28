@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { UINode } from "../../types";
 
-// ✅ Usa tu helper existente (ya lo usás en InfraDiagram)
-import { fetchJSON } from "../../services/data";
+// ❌ NO usar fetchJSON acá porque te agrega ?company_id=...
+// ✅ Usar API_BASE directo (sin scope)
+import { API_BASE } from "@/lib/api";
 
 function toNum(v: any): number | null {
   if (v === null || v === undefined) return null;
@@ -45,7 +46,6 @@ type LatestReading = {
   e_kwh_import: number | null;
   e_kwh_export: number | null;
 
-  // por si más adelante querés mostrar todo
   v_l1l2?: number | null;
   v_l3l2?: number | null;
   v_l1l3?: number | null;
@@ -78,6 +78,25 @@ function extractAnalyzerId(n: UINode & any): number | null {
   return null;
 }
 
+async function fetchLatestNoScope(analyzerId: number, signal?: AbortSignal): Promise<LatestReading> {
+  const url = `${API_BASE}/components/network_analyzers/${analyzerId}/latest`;
+
+  const r = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal,
+  });
+
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    // 404: "No readings found" o route no encontrada
+    throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
+  }
+
+  return (await r.json()) as LatestReading;
+}
+
 export default function NetworkAnalyzerNodeView({
   n,
   getPos,
@@ -88,7 +107,7 @@ export default function NetworkAnalyzerNodeView({
   enabled,
   onClick,
 }: {
-  n: UINode & { signals?: Record<string, any>; analyzer_id?: number };
+  n: UINode & { signals?: Record<string, any>; analyzer_id?: number | null };
   getPos: (id: string) => { x: number; y: number } | null;
   setPos: (id: string, x: number, y: number) => void;
   onDragEnd?: (x: number, y: number) => void;
@@ -115,6 +134,7 @@ export default function NetworkAnalyzerNodeView({
   useEffect(() => {
     let alive = true;
     let t: any = null;
+    const ctrl = new AbortController();
 
     async function tick() {
       if (!analyzerId) {
@@ -126,14 +146,14 @@ export default function NetworkAnalyzerNodeView({
       }
 
       try {
-        const row = await fetchJSON(`/components/network_analyzers/${analyzerId}/latest`);
+        const row = await fetchLatestNoScope(analyzerId, ctrl.signal);
         if (!alive) return;
-        setLatest(row as LatestReading);
+        setLatest(row);
         setLatestErr(null);
       } catch (e: any) {
         if (!alive) return;
         setLatestErr(e?.message ?? String(e));
-        // mantenemos latest anterior si falla (no lo borramos)
+        // mantenemos latest anterior si falla
       } finally {
         if (!alive) return;
         t = setTimeout(tick, 2000); // ✅ polling 2s
@@ -143,6 +163,7 @@ export default function NetworkAnalyzerNodeView({
     tick();
     return () => {
       alive = false;
+      ctrl.abort();
       if (t) clearTimeout(t);
     };
   }, [analyzerId]);
@@ -181,7 +202,6 @@ export default function NetworkAnalyzerNodeView({
   const kwh = useMemo(() => {
     const v = toNum(latest?.e_kwh_import);
     if (v !== null) return v;
-    // fallback a nombres viejos si existieran en signals
     return pickSignal(signals, ["kwh", "kwh_import", "energy_kwh", "e_kwh_import"]);
   }, [latest?.e_kwh_import, signals]);
 
