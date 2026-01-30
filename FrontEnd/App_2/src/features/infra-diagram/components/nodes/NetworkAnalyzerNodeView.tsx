@@ -1,5 +1,9 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { UINode } from "../../types";
+
+// ❌ NO usar fetchJSON acá porque te agrega ?company_id=...
+// ✅ Usar API_BASE directo (sin scope)
+import { API_BASE } from "@/lib/api";
 
 function toNum(v: any): number | null {
   if (v === null || v === undefined) return null;
@@ -31,6 +35,68 @@ function clientToSvg(svg: SVGSVGElement, clientX: number, clientY: number) {
   return { x: p.x, y: p.y };
 }
 
+type LatestReading = {
+  id: number;
+  analyzer_id: number | null;
+  ts: string | null;
+
+  p_kw: number | null;
+  pf: number | null;
+
+  e_kwh_import: number | null;
+  e_kwh_export: number | null;
+
+  v_l1l2?: number | null;
+  v_l3l2?: number | null;
+  v_l1l3?: number | null;
+  i_l1?: number | null;
+  i_l2?: number | null;
+  i_l3?: number | null;
+  hz?: number | null;
+
+  raw?: any;
+  source?: string | null;
+};
+
+function extractAnalyzerId(n: UINode & any): number | null {
+  // ✅ preferimos analyzer_id si existe
+  const a = n?.analyzer_id ?? n?.analyzerId ?? n?.analyzer?.id;
+  const na = toNum(a);
+  if (na !== null && na > 0) return Math.trunc(na);
+
+  // fallback: si el id del nodo es "1" o "001"
+  const idNum = toNum(n?.id);
+  if (idNum !== null && idNum > 0) return Math.trunc(idNum);
+
+  // fallback si es algo tipo "NA-1"
+  const m = String(n?.id ?? "").match(/(\d+)/);
+  if (m?.[1]) {
+    const k = Number(m[1]);
+    return Number.isFinite(k) && k > 0 ? k : null;
+  }
+
+  return null;
+}
+
+async function fetchLatestNoScope(analyzerId: number, signal?: AbortSignal): Promise<LatestReading> {
+  const url = `${API_BASE}/components/network_analyzers/${analyzerId}/latest`;
+
+  const r = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal,
+  });
+
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    // 404: "No readings found" o route no encontrada
+    throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
+  }
+
+  return (await r.json()) as LatestReading;
+}
+
 export default function NetworkAnalyzerNodeView({
   n,
   getPos,
@@ -41,7 +107,7 @@ export default function NetworkAnalyzerNodeView({
   enabled,
   onClick,
 }: {
-  n: UINode & { signals?: Record<string, any> };
+  n: UINode & { signals?: Record<string, any>; analyzer_id?: number | null };
   getPos: (id: string) => { x: number; y: number } | null;
   setPos: (id: string, x: number, y: number) => void;
   onDragEnd?: (x: number, y: number) => void;
@@ -59,27 +125,85 @@ export default function NetworkAnalyzerNodeView({
   const x0 = pos.x - W / 2;
   const y0 = pos.y - H / 2;
 
+  const analyzerId = useMemo(() => extractAnalyzerId(n as any), [n]);
+
+  // --------- ✅ Traer latest del backend (polling) ----------
+  const [latest, setLatest] = useState<LatestReading | null>(null);
+  const [latestErr, setLatestErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    let t: any = null;
+    const ctrl = new AbortController();
+
+    async function tick() {
+      if (!analyzerId) {
+        if (alive) {
+          setLatest(null);
+          setLatestErr("missing analyzerId");
+        }
+        return;
+      }
+
+      try {
+        const row = await fetchLatestNoScope(analyzerId, ctrl.signal);
+        if (!alive) return;
+        setLatest(row);
+        setLatestErr(null);
+      } catch (e: any) {
+        if (!alive) return;
+        setLatestErr(e?.message ?? String(e));
+        // mantenemos latest anterior si falla
+      } finally {
+        if (!alive) return;
+        t = setTimeout(tick, 2000); // ✅ polling 2s
+      }
+    }
+
+    tick();
+    return () => {
+      alive = false;
+      ctrl.abort();
+      if (t) clearTimeout(t);
+    };
+  }, [analyzerId]);
+
+  // --------- ✅ Online / Offline por ts ----------
+  const ageSec = useMemo(() => {
+    const ts = latest?.ts;
+    if (!ts) return null;
+    const ms = Date.parse(ts);
+    if (!Number.isFinite(ms)) return null;
+    const diff = Date.now() - ms;
+    return Math.floor(diff / 1000);
+  }, [latest?.ts]);
+
+  const online = useMemo(() => {
+    if (ageSec === null) return false;
+    return ageSec <= 180; // 3 minutos
+  }, [ageSec]);
+
   const signals = (n as any).signals ?? null;
 
-  const powerKW = useMemo(
-    () => pickSignal(signals, ["power_kw", "kw", "p_kw", "active_power_kw", "active_power", "power"]),
-    [signals]
-  );
-  const pf = useMemo(() => pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]), [signals]);
+  // ✅ Valores: primero latest del backend, si no hay -> señales locales fallback
+  const powerKW = useMemo(() => {
+    const v = toNum(latest?.p_kw);
+    if (v !== null) return v;
+    return pickSignal(signals, ["power_kw", "kw", "p_kw", "active_power_kw", "active_power", "power"]);
+  }, [latest?.p_kw, signals]);
 
-  // ✅ nuevo: kWh/mes (usa varios nombres posibles)
-  const kwhMonth = useMemo(
-    () =>
-      pickSignal(signals, [
-        "kwh_month",
-        "energy_month",
-        "kwh_mes",
-        "kwh_monthly",
-        "kwh_mtd",
-        "mtd_kwh",
-      ]),
-    [signals]
-  );
+  const pf = useMemo(() => {
+    const v = toNum(latest?.pf);
+    if (v !== null) return v;
+    return pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]);
+  }, [latest?.pf, signals]);
+
+  // ✅ Row 3: por ahora mostramos kWh import (total import)
+  const kwh = useMemo(() => {
+    const v = toNum(latest?.e_kwh_import);
+    if (v !== null) return v;
+    return pickSignal(signals, ["kwh", "kwh_import", "energy_kwh", "e_kwh_import"]);
+  }, [latest?.e_kwh_import, signals]);
 
   function onMouseDown(e: React.MouseEvent<SVGGElement>) {
     if (!enabled) return;
@@ -118,16 +242,27 @@ export default function NetworkAnalyzerNodeView({
 
   const vKW = fmt(powerKW, 1);
   const vPF = fmt(pf, 2);
-  const vKWhM = fmt(kwhMonth, 0);
+  const vKWh = fmt(kwh, 0);
 
   // ✅ Layout fijo (no se corre)
   const labelX = x0 + 20;
-  const unitRight = x0 + W - 18; // unidades al borde derecho
-  const valueX = unitRight - 28; // valores un poquito antes de la unidad
+  const unitRight = x0 + W - 18;
+  const valueX = unitRight - 28;
 
   const row1Y = y0 + 34;
   const row2Y = y0 + 66;
   const row3Y = y0 + 96;
+
+  const border = !analyzerId ? "#ef4444" : online ? "#1e293b" : "#f59e0b"; // rojo si no hay id, amarillo offline
+
+  const tipLines = [
+    `kW: ${vKW}`,
+    `cosφ: ${vPF}`,
+    `kWh: ${vKWh}`,
+    analyzerId ? `analyzer_id: ${analyzerId}` : `analyzer_id: --`,
+    ageSec !== null ? `age: ${ageSec}s` : `age: --`,
+    latestErr ? `err: ${latestErr}` : "",
+  ].filter(Boolean) as string[];
 
   return (
     <g
@@ -135,35 +270,29 @@ export default function NetworkAnalyzerNodeView({
       onMouseEnter={(e) =>
         showTip?.(e, {
           title: "Eléctrico",
-          lines: [`kW: ${vKW}`, `cosφ: ${vPF}`, `kWh/mes: ${vKWhM}`],
+          lines: tipLines,
         })
       }
       onMouseLeave={() => hideTip?.()}
       style={{ cursor: enabled ? "move" : "pointer" }}
     >
       <defs>
-        {/* sombra suave */}
         <filter id={`shadow-${n.id}`} x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.35" />
         </filter>
 
-        {/* fondo oscuro translúcido (no impacta tanto) */}
         <linearGradient id={`bg-${n.id}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#020617" stopOpacity="0.78" />
           <stop offset="100%" stopColor="#020617" stopOpacity="0.58" />
         </linearGradient>
 
-        {/* rayo grande de fondo, MUY suave */}
         <linearGradient id={`boltFade-${n.id}`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#facc15" stopOpacity="0.16" />
           <stop offset="100%" stopColor="#facc15" stopOpacity="0.03" />
         </linearGradient>
 
         <g id={`boltBg-${n.id}`}>
-          <path
-            d="M40 0 L10 60 H45 L30 120 L110 40 H70 L90 0 Z"
-            fill={`url(#boltFade-${n.id})`}
-          />
+          <path d="M40 0 L10 60 H45 L30 120 L110 40 H70 L90 0 Z" fill={`url(#boltFade-${n.id})`} />
         </g>
       </defs>
 
@@ -176,12 +305,12 @@ export default function NetworkAnalyzerNodeView({
         rx={16}
         ry={16}
         fill={`url(#bg-${n.id})`}
-        stroke="#1e293b"
-        strokeWidth={1.2}
+        stroke={border}
+        strokeWidth={1.4}
         filter={`url(#shadow-${n.id})`}
       />
 
-      {/* ⚡ rayo de fondo (no afecta el layout) */}
+      {/* ⚡ rayo de fondo */}
       <g transform={`translate(${x0 + 52}, ${y0 + 10}) scale(0.85)`}>
         <use href={`#boltBg-${n.id}`} />
       </g>
@@ -205,16 +334,28 @@ export default function NetworkAnalyzerNodeView({
         {vPF}
       </text>
 
-      {/* Row 3: kWh/mes */}
+      {/* Row 3: kWh */}
       <text x={labelX} y={row3Y} style={{ fontSize: 16, fill: "#e2e8f0", fontWeight: 800 }}>
-        kWh/mes
+        kWh
       </text>
       <text x={valueX} y={row3Y} textAnchor="end" style={{ fontSize: 18, fill: "#f8fafc", fontWeight: 950 }}>
-        {vKWhM}
+        {vKWh}
       </text>
       <text x={unitRight} y={row3Y} textAnchor="end" style={{ fontSize: 13, fill: "#94a3b8", fontWeight: 800 }}>
         kWh
       </text>
+
+      {/* indicador sutil offline */}
+      {!online && analyzerId ? (
+        <text
+          x={x0 + W - 14}
+          y={y0 + 18}
+          textAnchor="end"
+          style={{ fontSize: 10, fill: "#fbbf24", fontWeight: 900, letterSpacing: 0.5 }}
+        >
+          OFF
+        </text>
+      ) : null}
     </g>
   );
 }

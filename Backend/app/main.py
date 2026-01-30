@@ -57,6 +57,8 @@ from app.routes.mapa.simulacion import router as mapasagua_sim_router
 from app.routes.mapa.nodes import router as mapa_nodes_router  # ✅ NUEVO
 
 
+from app.routes.components.network_analyzers import router as network_analyzers_router
+
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -168,7 +170,7 @@ app.include_router(mapa_nodes_router, prefix="/mapa", tags=["mapa"])  # ✅ NUEV
 # ===== Telegram test =====
 app.include_router(telegram_test_router)
 
-
+app.include_router(network_analyzers_router)
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():

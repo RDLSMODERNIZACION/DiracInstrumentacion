@@ -370,7 +370,17 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
 
   // ✅ no perder signals en ABB (kW/cosφ/kWh)
-  ...(n.type === "network_analyzer" ? { signals: (n as any).signals ?? null } : {}),
+// ✅ ABB: no perder signals + guardar analyzer_id (clave para /latest)
+...(n.type === "network_analyzer"
+  ? (() => {
+      const aid = Number((n as any).analyzer_id ?? n.id);
+      return {
+        signals: (n as any).signals ?? null,
+        analyzer_id: Number.isFinite(aid) ? aid : null,
+      };
+    })()
+  : {}),
+
 
   // ✅ CLAVE: no perder meta (rot/flip/model/ports) en valves
   ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
@@ -502,6 +512,29 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   const setPos = useCallback((id: string, x: number, y: number) => {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
   }, []);
+
+
+
+  const saveNodePosition = useCallback(
+  async (id: string) => {
+    try {
+      const pos = getPos(id);
+      if (!pos) return;
+
+      // 1) Guardar local
+      saveLayoutToStorage(nodesByIdAsArray(nodesById));
+
+      // 2) Guardar DB
+      await updateLayout(id, pos.x, pos.y);
+
+      log("POSITION SAVED", { id, x: pos.x, y: pos.y });
+    } catch (e) {
+      console.error("Error al actualizar layout:", e);
+    }
+  },
+  [getPos, nodesById, log]
+);
+
 
 const saveNodePositionXY = useCallback(
   async (id: string, x: number, y: number) => {
