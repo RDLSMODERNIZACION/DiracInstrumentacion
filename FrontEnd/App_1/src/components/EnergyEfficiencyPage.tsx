@@ -10,13 +10,13 @@ import {
   Legend,
   BarChart,
   Bar,
+  Cell,
+  ReferenceLine,
 } from "recharts";
 
 import { getApiRoot, getApiHeaders } from "@/lib/config";
 
-type Props = {
-  analyzerId?: number;
-};
+type Props = { analyzerId?: number };
 
 type LatestReading = {
   id: number;
@@ -27,25 +27,25 @@ type LatestReading = {
   source?: string | null;
 };
 
-/**
- * Para LIVE y para HISTÓRICO "DÍA" (serie temporal)
- */
-type LivePoint = {
-  t: string; // ISO ts
-  kw: number; // abs(kW)
-  pf: number | null;
+type LivePoint = { t: string; kw: number; pf: number | null };
+
+type KpiMinuteRow = {
+  ts: string;
+  kw_avg: number | null;
+  kw_max: number | null;
+  pf_avg: number | null;
+  pf_min: number | null;
+  samples: number | null;
 };
 
-/**
- * Para HISTÓRICO "MES" (agregado por día)
- * Ideal: el backend te da kwh del día real.
- * Si no hay kwh, el front puede estimar con kw_avg*24 (aprox).
- */
-type MonthPoint = {
-  day: string; // "2026-01-15"
-  kwh: number | null;
+type KpiDayRow = {
+  ts: string; // YYYY-MM-DD
+  kwh_est: number | null;
   kw_avg: number | null;
+  kw_max: number | null;
   pf_avg: number | null;
+  pf_min: number | null;
+  samples: number | null;
 };
 
 function toNum(v: any): number | null {
@@ -53,19 +53,16 @@ function toNum(v: any): number | null {
   const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
   return Number.isFinite(n) ? n : null;
 }
-
 function fmt(v: any, decimals = 2, unit = ""): string {
   const n = toNum(v);
   if (n === null) return `--${unit}`;
   return `${n.toFixed(decimals)}${unit}`;
 }
-
 function fmt1(v: any, unit = ""): string {
   const n = toNum(v);
   if (n === null) return `--${unit}`;
   return `${n.toFixed(1)}${unit}`;
 }
-
 function absKw(v: any): number | null {
   const n = toNum(v);
   if (n === null) return null;
@@ -78,57 +75,66 @@ function isoDate(d: Date) {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+function addDays(dateStr: string, delta: number) {
+  const d = new Date(dateStr + "T00:00:00.000");
+  d.setDate(d.getDate() + delta);
+  return isoDate(d);
+}
 
-function startOfDayISO(dateStr: string) {
-  return `${dateStr}T00:00:00.000Z`;
+// TZ Argentina
+const AR_TZ = "America/Argentina/Buenos_Aires";
+
+function startOfDayISO_AR(dateStr: string) {
+  return `${dateStr}T00:00:00-03:00`;
 }
-function endOfDayISO(dateStr: string) {
-  return `${dateStr}T23:59:59.999Z`;
+function endOfDayISO_AR(dateStr: string) {
+  return `${dateStr}T23:59:59.999-03:00`;
 }
+function dayStartMs_AR(dateStr: string) {
+  return Date.parse(`${dateStr}T00:00:00-03:00`);
+}
+function dayEndMs_AR(dateStr: string) {
+  return dayStartMs_AR(dateStr) + 24 * 60 * 60 * 1000;
+}
+function fmtTimeFromMs_AR(ms: number) {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "--:--";
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: AR_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
 function monthRange(monthStr: string) {
-  // monthStr: "2026-01"
   const [y, m] = monthStr.split("-").map((x) => Number(x));
   const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999)); // último día del mes
+  const end = new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
   return { start: isoDate(start), end: isoDate(end) };
 }
-
-/**
- * Integración simple para estimar kWh a partir de puntos kW vs tiempo.
- * Usa trapezoidal entre muestras.
- */
-function estimateKwhFromSeries(points: LivePoint[]): number | null {
-  if (!points || points.length < 2) return null;
-  let kwh = 0;
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1];
-    const b = points[i];
-    const ta = Date.parse(a.t);
-    const tb = Date.parse(b.t);
-    if (!Number.isFinite(ta) || !Number.isFinite(tb) || tb <= ta) continue;
-
-    const dtHours = (tb - ta) / 3600000;
-    const kwa = Number.isFinite(a.kw) ? a.kw : 0;
-    const kwb = Number.isFinite(b.kw) ? b.kw : 0;
-    kwh += ((kwa + kwb) / 2) * dtHours;
-  }
-  return Number.isFinite(kwh) ? kwh : null;
+function prevMonth(monthStr: string) {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function nextMonth(monthStr: string) {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-async function fetchLatestNoScope(
-  analyzerId: number,
-  signal?: AbortSignal
-): Promise<LatestReading> {
+async function fetchLatestNoScope(analyzerId: number, signal?: AbortSignal): Promise<LatestReading> {
   const root = getApiRoot();
-  const url = `${root}/components/network_analyzers/${analyzerId}/latest`;
-
+  const url = `${root}/components/network_analyzers/${analyzerId}/latest?fields=lite`;
   const r = await fetch(url, {
     method: "GET",
     headers: getApiHeaders({ "Content-Type": undefined as any }),
     cache: "no-store",
     signal,
   });
-
   if (r.status === 404) throw new Error("SIN_LECTURAS");
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
@@ -137,13 +143,6 @@ async function fetchLatestNoScope(
   return (await r.json()) as LatestReading;
 }
 
-/**
- * HISTÓRICO:
- * - granularity="minute" → puntos ts/kw/pf para un día (o rango corto)
- * - granularity="day"    → puntos por día con kwh/kw_avg/pf_avg para un mes
- *
- * Ajustá la URL a tu backend real.
- */
 async function fetchHistory(
   analyzerId: number,
   params: { from: string; to: string; granularity: "minute" | "day" },
@@ -156,9 +155,7 @@ async function fetchHistory(
     granularity: params.granularity,
   }).toString();
 
-  // 👇 Cambiá SOLO esto si tu backend tiene otro path:
   const url = `${root}/components/network_analyzers/${analyzerId}/history?${qs}`;
-
   const r = await fetch(url, {
     method: "GET",
     headers: getApiHeaders({ "Content-Type": "application/json" as any }),
@@ -176,49 +173,87 @@ async function fetchHistory(
 
 type Mode = "live" | "day" | "month";
 
-export default function EnergyEfficiencyPage({
-  analyzerId: initialAnalyzerId = 1,
-}: Props) {
-  const [analyzerId, setAnalyzerId] = useState<number>(initialAnalyzerId);
+function SoftBadge({ ok, text }: { ok: boolean; text: string }) {
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border ${
+        ok ? "bg-green-50 text-green-700 border-green-200" : "bg-amber-50 text-amber-700 border-amber-200"
+      }`}
+    >
+      {text}
+    </span>
+  );
+}
 
+function clamp01(x: number) {
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
+}
+
+export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1 }: Props) {
+  const [analyzerId, setAnalyzerId] = useState<number>(initialAnalyzerId);
   const [mode, setMode] = useState<Mode>("live");
 
-  // selectors
   const today = useMemo(() => isoDate(new Date()), []);
   const thisMonth = useMemo(() => today.slice(0, 7), [today]);
 
   const [selectedDay, setSelectedDay] = useState<string>(today);
   const [selectedMonth, setSelectedMonth] = useState<string>(thisMonth);
 
+  // ALERT CONFIG (mes)
+  const [pfThreshold, setPfThreshold] = useState<number>(0.85);
+  const [spikePct, setSpikePct] = useState<number>(25);
+
+  // TARIFA
+  const [tariffArsPerKwh, setTariffArsPerKwh] = useState<number>(0);
+
+  useEffect(() => {
+    const t = localStorage.getItem("dirac.tariff_ars_kwh");
+    const p = localStorage.getItem("dirac.pf_threshold");
+    const s = localStorage.getItem("dirac.kwh_spike_pct");
+    if (t) {
+      const n = Number(t);
+      if (Number.isFinite(n)) setTariffArsPerKwh(n);
+    }
+    if (p) {
+      const n = Number(p);
+      if (Number.isFinite(n)) setPfThreshold(clamp01(n));
+    }
+    if (s) {
+      const n = Number(s);
+      if (Number.isFinite(n)) setSpikePct(Math.max(0, n));
+    }
+  }, []);
+
+  useEffect(() => localStorage.setItem("dirac.tariff_ars_kwh", String(tariffArsPerKwh)), [tariffArsPerKwh]);
+  useEffect(() => localStorage.setItem("dirac.pf_threshold", String(pfThreshold)), [pfThreshold]);
+  useEffect(() => localStorage.setItem("dirac.kwh_spike_pct", String(spikePct)), [spikePct]);
+
   // LIVE state
   const [latest, setLatest] = useState<LatestReading | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [series, setSeries] = useState<LivePoint[]>([]);
-  const lastMsRef = useRef<number | null>(null);
 
   // HIST state
   const [histError, setHistError] = useState<string | null>(null);
-  const [daySeries, setDaySeries] = useState<LivePoint[]>([]);
-  const [monthSeries, setMonthSeries] = useState<MonthPoint[]>([]);
+  const [dayRows, setDayRows] = useState<KpiMinuteRow[]>([]);
+  const [monthRows, setMonthRows] = useState<KpiDayRow[]>([]);
   const [loadingHist, setLoadingHist] = useState(false);
 
-  // RESET helper
   function resetAll() {
     setLatest(null);
     setLiveError(null);
     setSeries([]);
-    lastMsRef.current = null;
-
     setHistError(null);
-    setDaySeries([]);
-    setMonthSeries([]);
+    setDayRows([]);
+    setMonthRows([]);
     setLoadingHist(false);
   }
 
-  // polling live (solo si mode === "live")
+  // Polling LIVE
   useEffect(() => {
     if (mode !== "live") return;
-
     let alive = true;
     const ctrl = new AbortController();
     let t: any;
@@ -232,23 +267,19 @@ export default function EnergyEfficiencyPage({
         setLiveError(null);
 
         const ts = row.ts ?? new Date().toISOString();
-        const ms = Date.parse(ts);
-
         const kw = absKw(row.p_kw) ?? 0;
         const pf = toNum(row.pf);
 
         setSeries((prev) => {
           const next = [...prev, { t: ts, kw, pf }];
-          if (next.length > 300) next.splice(0, next.length - 300); // ~10 min
+          if (next.length > 300) next.splice(0, next.length - 300);
           return next;
         });
-
-        if (Number.isFinite(ms)) lastMsRef.current = ms;
       } catch (e: any) {
         if (!alive) return;
         if (String(e?.message).includes("SIN_LECTURAS")) {
           setLatest(null);
-          setLiveError("Sin lecturas todavía (mandá datos al analizador).");
+          setLiveError("Sin lecturas todavía.");
         } else {
           setLiveError(e?.message ?? String(e));
         }
@@ -266,7 +297,7 @@ export default function EnergyEfficiencyPage({
     };
   }, [analyzerId, mode]);
 
-  // fetch histórico al cambiar mode/day/month/analyzer
+  // Fetch HIST
   useEffect(() => {
     if (mode === "live") return;
 
@@ -279,73 +310,56 @@ export default function EnergyEfficiencyPage({
         setHistError(null);
 
         if (mode === "day") {
-          const from = startOfDayISO(selectedDay);
-          const to = endOfDayISO(selectedDay);
+          const from = startOfDayISO_AR(selectedDay);
+          const to = endOfDayISO_AR(selectedDay);
 
-          const json = await fetchHistory(
-            analyzerId,
-            { from, to, granularity: "minute" },
-            ctrl.signal
-          );
-
-          // Soporta 2 formatos:
-          // A) { points: [{ts,p_kw,pf}] }
-          // B) [{ts,p_kw,pf}] directo
+          const json = await fetchHistory(analyzerId, { from, to, granularity: "minute" }, ctrl.signal);
           const arr = Array.isArray(json) ? json : json?.points ?? [];
-          const pts: LivePoint[] = (arr || [])
-            .map((r: any) => {
-              const ts = r.ts ?? r.t;
-              const kw = absKw(r.p_kw ?? r.kw) ?? 0;
-              const pf = toNum(r.pf);
-              if (!ts) return null;
-              return { t: String(ts), kw, pf };
-            })
-            .filter(Boolean);
+
+          const pts: KpiMinuteRow[] = (arr || [])
+            .map((r: any) => ({
+              ts: String(r.ts ?? r.minute_ts ?? r.t),
+              kw_avg: toNum(r.kw_avg),
+              kw_max: toNum(r.kw_max),
+              pf_avg: toNum(r.pf_avg),
+              pf_min: toNum(r.pf_min),
+              samples: toNum(r.samples) as any,
+            }))
+            .filter((r) => !!r.ts);
 
           if (!alive) return;
-          setDaySeries(pts);
-          setMonthSeries([]);
+          setDayRows(pts);
+          setMonthRows([]);
         }
 
         if (mode === "month") {
           const { start, end } = monthRange(selectedMonth);
-          const from = startOfDayISO(start);
-          const to = endOfDayISO(end);
+          const from = startOfDayISO_AR(start);
+          const to = endOfDayISO_AR(end);
 
-          const json = await fetchHistory(
-            analyzerId,
-            { from, to, granularity: "day" },
-            ctrl.signal
-          );
+          const json = await fetchHistory(analyzerId, { from, to, granularity: "day" }, ctrl.signal);
+          const arr = Array.isArray(json) ? json : json?.points ?? json?.days ?? [];
 
-          // Soporta:
-          // A) { days: [{day,kwh,kw_avg,pf_avg}] }
-          // B) [{day,kwh,kw_avg,pf_avg}] directo
-          const arr = Array.isArray(json) ? json : json?.days ?? json?.points ?? [];
-          const pts: MonthPoint[] = (arr || [])
-            .map((r: any) => {
-              const day = r.day ?? (r.ts ? String(r.ts).slice(0, 10) : null);
-              if (!day) return null;
-              return {
-                day,
-                kwh: toNum(r.kwh),
-                kw_avg: toNum(r.kw_avg ?? r.kw),
-                pf_avg: toNum(r.pf_avg ?? r.pf),
-              };
-            })
-            .filter(Boolean);
+          const pts: KpiDayRow[] = (arr || [])
+            .map((r: any) => ({
+              ts: String(r.ts ?? r.day_ts ?? r.day),
+              kwh_est: toNum(r.kwh_est ?? r.kwh),
+              kw_avg: toNum(r.kw_avg),
+              kw_max: toNum(r.kw_max),
+              pf_avg: toNum(r.pf_avg),
+              pf_min: toNum(r.pf_min),
+              samples: toNum(r.samples) as any,
+            }))
+            .filter((r) => !!r.ts);
 
           if (!alive) return;
-          setMonthSeries(pts);
-          setDaySeries([]);
+          setMonthRows(pts);
+          setDayRows([]);
         }
       } catch (e: any) {
         if (!alive) return;
-        if (String(e?.message).includes("SIN_HISTORIA")) {
-          setHistError("Sin histórico para ese período.");
-        } else {
-          setHistError(e?.message ?? String(e));
-        }
+        if (String(e?.message).includes("SIN_HISTORIA")) setHistError("Sin histórico para ese período.");
+        else setHistError(e?.message ?? String(e));
       } finally {
         if (!alive) return;
         setLoadingHist(false);
@@ -359,79 +373,147 @@ export default function EnergyEfficiencyPage({
     };
   }, [mode, analyzerId, selectedDay, selectedMonth]);
 
-  // ---------------------
-  // UI computed values
-  // ---------------------
+  // -------------------
+  // LIVE chart
+  // -------------------
   const liveChartData = useMemo(
     () =>
       series.map((p) => ({
-        t: p.t.slice(11, 19),
+        t: fmtTimeFromMs_AR(Date.parse(p.t)),
         kw: p.kw,
         pf: p.pf ?? undefined,
       })),
     [series]
   );
 
-  const dayChartData = useMemo(
-    () =>
-      daySeries.map((p) => ({
-        t: p.t.slice(11, 19),
-        kw: p.kw,
-        pf: p.pf ?? undefined,
-      })),
-    [daySeries]
-  );
+  // -------------------
+  // DAY chart (FIXED)
+  // - x: timestamp ms (numérico)
+  // - kw: valor de ese minuto (no promedio general)
+  // - Línea vertical en el máximo del día
+  // -------------------
+  const dayDomain = useMemo(() => {
+    const start = dayStartMs_AR(selectedDay);
+    const end = dayEndMs_AR(selectedDay);
+    return { start, end };
+  }, [selectedDay]);
 
+  const dayChartData = useMemo(() => {
+    const pts = dayRows
+      .map((r) => {
+        const x = Date.parse(r.ts);
+        const kw = toNum(r.kw_avg);
+        if (!Number.isFinite(x) || typeof kw !== "number") return null;
+        return { x, kw };
+      })
+      .filter(Boolean) as Array<{ x: number; kw: number }>;
+
+    pts.sort((a, b) => a.x - b.x);
+
+    // estira el eje a 00:00–24:00 aunque falten datos en extremos
+    return [
+      { x: dayDomain.start, kw: pts.length ? pts[0].kw : 0 },
+      ...pts,
+      { x: dayDomain.end, kw: pts.length ? pts[pts.length - 1].kw : 0 },
+    ];
+  }, [dayRows, dayDomain.start, dayDomain.end]);
+
+  const dayMaxPoint = useMemo(() => {
+    let best: { x: number; kw: number } | null = null;
+    for (const p of dayChartData) {
+      if (!best || p.kw > best.kw) best = p;
+    }
+    return best;
+  }, [dayChartData]);
+
+  // -------------------
+  // DAY KPIs
+  // -------------------
+  const dayKwAvg = useMemo(() => {
+    const vals = dayRows.map((r) => toNum(r.kw_avg)).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [dayRows]);
+
+  const dayPfMin = useMemo(() => {
+    const vals = dayRows.map((r) => toNum(r.pf_min)).filter((x): x is number => typeof x === "number");
+    return vals.length ? Math.min(...vals) : null;
+  }, [dayRows]);
+
+  const dayPfAvg = useMemo(() => {
+    const vals = dayRows.map((r) => toNum(r.pf_avg)).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [dayRows]);
+
+  // -------------------
+  // MONTH (igual que antes)
+  // -------------------
   const monthChartData = useMemo(() => {
-    return monthSeries.map((d) => {
-      const kwh = d.kwh ?? (d.kw_avg != null ? d.kw_avg * 24 : null); // fallback aprox
-      return {
-        day: d.day.slice(8, 10), // "15"
-        kwh: kwh ?? undefined,
-        pf: d.pf_avg ?? undefined,
-      };
-    });
-  }, [monthSeries]);
+    return monthRows.map((r) => ({
+      day: String(r.ts).slice(8, 10),
+      date: String(r.ts).slice(0, 10),
+      kwh: r.kwh_est ?? undefined,
+      pf: r.pf_avg ?? undefined,
+      kw_max: r.kw_max ?? undefined,
+      kw_avg: r.kw_avg ?? undefined,
+    }));
+  }, [monthRows]);
+
+  const monthKwhTotal = useMemo(() => {
+    const vals = monthRows.map((r) => r.kwh_est).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  }, [monthRows]);
+
+  const monthKwhAvg = useMemo(() => {
+    const vals = monthRows.map((r) => r.kwh_est).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [monthRows]);
+
+  const monthPfAvg = useMemo(() => {
+    const vals = monthRows.map((r) => r.pf_avg).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [monthRows]);
+
+  const monthPeak = useMemo(() => {
+    let best: { date: string; kwh: number } | null = null;
+    for (const r of monthChartData) {
+      const kwh = toNum(r.kwh);
+      if (typeof kwh !== "number") continue;
+      if (!best || kwh > best.kwh) best = { date: r.date, kwh };
+    }
+    return best;
+  }, [monthChartData]);
+
+  const monthCost = useMemo(() => {
+    if (monthKwhTotal == null) return null;
+    if (!Number.isFinite(tariffArsPerKwh) || tariffArsPerKwh <= 0) return null;
+    return monthKwhTotal * tariffArsPerKwh;
+  }, [monthKwhTotal, tariffArsPerKwh]);
+
+  const kwhSpikeThreshold = useMemo(() => {
+    if (monthKwhAvg == null) return null;
+    return monthKwhAvg * (1 + spikePct / 100);
+  }, [monthKwhAvg, spikePct]);
+
+  function barKind(row: any): "normal" | "pf" | "kwh" | "both" {
+    const pf = toNum(row?.pf);
+    const kwh = toNum(row?.kwh);
+    const lowPf = typeof pf === "number" && pf < pfThreshold;
+    const highKwh = typeof kwh === "number" && typeof kwhSpikeThreshold === "number" && kwh > kwhSpikeThreshold;
+    if (lowPf && highKwh) return "both";
+    if (lowPf) return "pf";
+    if (highKwh) return "kwh";
+    return "normal";
+  }
+  function barFill(kind: ReturnType<typeof barKind>) {
+    if (kind === "both") return "#fecaca";
+    if (kind === "pf") return "#fde68a";
+    if (kind === "kwh") return "#bfdbfe";
+    return "#e5e7eb";
+  }
 
   const kwNow = useMemo(() => absKw(latest?.p_kw), [latest?.p_kw]);
   const pfNow = useMemo(() => toNum(latest?.pf), [latest?.pf]);
-
-  function seriesMaxKw(pts: LivePoint[]) {
-    if (!pts.length) return null;
-    return pts.reduce((m, p) => Math.max(m, p.kw), 0);
-  }
-  function seriesAvgKw(pts: LivePoint[]) {
-    if (!pts.length) return null;
-    const s = pts.reduce((acc, p) => acc + (Number.isFinite(p.kw) ? p.kw : 0), 0);
-    return s / pts.length;
-  }
-  function seriesAvgPf(pts: LivePoint[]) {
-    const vals = pts.map((p) => p.pf).filter((x) => typeof x === "number") as number[];
-    if (!vals.length) return null;
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
-  }
-
-  const liveKwMax = useMemo(() => seriesMaxKw(series), [series]);
-  const liveKwhEst = useMemo(() => estimateKwhFromSeries(series), [series]);
-
-  const dayKwMax = useMemo(() => seriesMaxKw(daySeries), [daySeries]);
-  const dayKwAvg = useMemo(() => seriesAvgKw(daySeries), [daySeries]);
-  const dayPfAvg = useMemo(() => seriesAvgPf(daySeries), [daySeries]);
-  const dayKwhEst = useMemo(() => estimateKwhFromSeries(daySeries), [daySeries]);
-
-  const monthKwhTotal = useMemo(() => {
-    if (!monthSeries.length) return null;
-    const vals = monthSeries.map((d) => d.kwh ?? (d.kw_avg != null ? d.kw_avg * 24 : null));
-    const ok = vals.filter((x) => typeof x === "number") as number[];
-    if (!ok.length) return null;
-    return ok.reduce((a, b) => a + b, 0);
-  }, [monthSeries]);
-
-  const monthPfAvg = useMemo(() => {
-    const vals = monthSeries.map((d) => d.pf_avg).filter((x) => typeof x === "number") as number[];
-    if (!vals.length) return null;
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
-  }, [monthSeries]);
+  const liveKwMax = useMemo(() => (series.length ? Math.max(...series.map((x) => x.kw)) : null), [series]);
 
   const statusText = useMemo(() => {
     const err = mode === "live" ? liveError : histError;
@@ -440,89 +522,94 @@ export default function EnergyEfficiencyPage({
     return { ok: true, text: "OK" };
   }, [mode, liveError, histError, loadingHist]);
 
+  // Tooltip de DÍA: muestra el valor exacto del punto (kw) y la hora AR
+  const dayTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.payload;
+    const x = Number(d?.x);
+    const kw = toNum(d?.kw);
+    return (
+      <div className="bg-white border rounded-xl p-2 shadow-sm text-xs space-y-1">
+        <div className="font-medium">{fmtTimeFromMs_AR(x)}</div>
+        <div>
+          kW: <span className="font-medium">{fmt(kw, 2, " kW")}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const monthTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.payload;
+    const kwh = toNum(d?.kwh);
+    const pf = toNum(d?.pf);
+    const date = d?.date ?? label;
+
+    const cost = typeof kwh === "number" && tariffArsPerKwh > 0 ? kwh * tariffArsPerKwh : null;
+    const kind = barKind(d);
+
+    return (
+      <div className="bg-white border rounded-xl p-2 shadow-sm text-xs space-y-1">
+        <div className="font-medium">{date}</div>
+        <div>
+          Energía: <span className="font-medium">{fmt(kwh, 2, " kWh")}</span>
+        </div>
+        <div>
+          PF prom: <span className="font-medium">{fmt(pf, 3)}</span>
+        </div>
+        {cost != null && (
+          <div>
+            Costo: <span className="font-medium">{fmt(cost, 0, " ARS")}</span>
+          </div>
+        )}
+        {kind !== "normal" && (
+          <div className="pt-1">
+            {kind === "pf" && <span className="text-amber-700">⚠ PF bajo (&lt; {pfThreshold.toFixed(2)})</span>}
+            {kind === "kwh" && (
+              <span className="text-blue-700">⚠ Consumo alto (&gt; {fmt1(kwhSpikeThreshold, " kWh")})</span>
+            )}
+            {kind === "both" && <span className="text-red-700">⛔ PF bajo + consumo alto</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-3">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-2">
         <div>
-          <div className="text-sm font-medium text-gray-700">
-            Eficiencia Energética
-          </div>
-          <div className="text-xs text-gray-500">
-            LIVE (polling) + Histórico por día/mes.
-          </div>
+          <div className="text-sm font-medium text-gray-700">Eficiencia Energética</div>
+          <div className="text-xs text-gray-500">LIVE + Histórico (día/mes) + alertas + costo.</div>
         </div>
 
         <div className="flex flex-wrap gap-2 items-center text-xs">
-          {/* Mode */}
           <div className="flex items-center gap-1 border bg-white rounded-xl p-1">
-            <button
-              className={`px-2 py-1 rounded-lg ${
-                mode === "live" ? "bg-gray-900 text-white" : "text-gray-600"
-              }`}
-              onClick={() => {
-                setMode("live");
-                setHistError(null);
-                setDaySeries([]);
-                setMonthSeries([]);
-              }}
-            >
-              LIVE
-            </button>
-            <button
-              className={`px-2 py-1 rounded-lg ${
-                mode === "day" ? "bg-gray-900 text-white" : "text-gray-600"
-              }`}
-              onClick={() => {
-                setMode("day");
-                setSeries([]);
-                setLatest(null);
-                setLiveError(null);
-              }}
-            >
-              Día
-            </button>
-            <button
-              className={`px-2 py-1 rounded-lg ${
-                mode === "month" ? "bg-gray-900 text-white" : "text-gray-600"
-              }`}
-              onClick={() => {
-                setMode("month");
-                setSeries([]);
-                setLatest(null);
-                setLiveError(null);
-              }}
-            >
-              Mes
-            </button>
+            {(["live", "day", "month"] as const).map((m) => (
+              <button
+                key={m}
+                className={`px-2 py-1 rounded-lg ${
+                  mode === m ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => {
+                  setMode(m);
+                  if (m === "live") {
+                    setHistError(null);
+                    setDayRows([]);
+                    setMonthRows([]);
+                  } else {
+                    setSeries([]);
+                    setLatest(null);
+                    setLiveError(null);
+                  }
+                }}
+              >
+                {m === "live" ? "LIVE" : m === "day" ? "Día" : "Mes"}
+              </button>
+            ))}
           </div>
 
-          {/* Period selectors */}
-          {mode === "day" && (
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">Día:</span>
-              <input
-                type="date"
-                value={selectedDay}
-                onChange={(e) => setSelectedDay(e.target.value)}
-                className="border rounded-md px-2 py-1 text-xs bg-white"
-              />
-            </label>
-          )}
-
-          {mode === "month" && (
-            <label className="flex items-center gap-1">
-              <span className="text-gray-500">Mes:</span>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="border rounded-md px-2 py-1 text-xs bg-white"
-              />
-            </label>
-          )}
-
-          {/* Analyzer */}
           <label className="flex items-center gap-1">
             <span className="text-gray-500">Analizador:</span>
             <select
@@ -539,8 +626,105 @@ export default function EnergyEfficiencyPage({
               <option value={4}>ABB #4</option>
             </select>
           </label>
+
+          <SoftBadge ok={statusText.ok} text={statusText.text} />
         </div>
       </div>
+
+      {/* Config día */}
+      {mode === "day" && (
+        <div className="border rounded-2xl bg-white p-3">
+          <div className="flex items-center gap-2">
+            <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedDay(addDays(selectedDay, -1))}>
+              ← Ayer
+            </button>
+
+            <label className="flex items-center gap-1">
+              <span className="text-gray-500">Día:</span>
+              <input
+                type="date"
+                value={selectedDay}
+                onChange={(e) => setSelectedDay(e.target.value)}
+                className="border rounded-md px-2 py-1 text-xs bg-white"
+              />
+            </label>
+
+            <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedDay(today)}>
+              Hoy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Config mes */}
+      {mode === "month" && (
+        <div className="border rounded-2xl bg-white p-3">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(prevMonth(selectedMonth))}>
+                ← Mes ant.
+              </button>
+
+              <label className="flex items-center gap-1">
+                <span className="text-gray-500">Mes:</span>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="border rounded-md px-2 py-1 text-xs bg-white"
+                />
+              </label>
+
+              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(thisMonth)}>
+                Mes actual
+              </button>
+
+              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(nextMonth(selectedMonth))}>
+                Mes sig. →
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label className="text-[11px] text-gray-600">
+                Tarifa (ARS/kWh)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={tariffArsPerKwh}
+                  onChange={(e) => setTariffArsPerKwh(Number(e.target.value))}
+                  className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
+                />
+              </label>
+
+              <label className="text-[11px] text-gray-600">
+                Umbral PF
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={pfThreshold}
+                  onChange={(e) => setPfThreshold(clamp01(Number(e.target.value)))}
+                  className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
+                />
+              </label>
+
+              <label className="text-[11px] text-gray-600">
+                Spike kWh (% sobre prom)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={spikePct}
+                  onChange={(e) => setSpikePct(Math.max(0, Number(e.target.value)))}
+                  className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -549,159 +733,166 @@ export default function EnergyEfficiencyPage({
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">kW ahora</div>
               <div className="text-xl font-semibold">{fmt1(kwNow, " kW")}</div>
-              <div className="text-[11px] text-gray-400">
-                src: {latest?.source ?? "--"}
-              </div>
+              <div className="text-[11px] text-gray-400">src: {latest?.source ?? "--"}</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">kW pico (buffer)</div>
               <div className="text-xl font-semibold">{fmt1(liveKwMax, " kW")}</div>
-              <div className="text-[11px] text-gray-400">
-                últimos {series.length} pts
-              </div>
+              <div className="text-[11px] text-gray-400">últimos {series.length} pts</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">PF actual</div>
               <div className="text-xl font-semibold">{fmt(pfNow, 3)}</div>
-              <div className="text-[11px] text-gray-400">factor de potencia</div>
+              <div className="text-[11px] text-gray-400">calidad</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">Estado</div>
               <div className="text-sm font-medium">
-                {statusText.ok ? (
-                  <span className="text-green-600">{statusText.text}</span>
-                ) : (
-                  <span className="text-amber-600">{statusText.text}</span>
-                )}
-              </div>
-              <div className="text-[11px] text-gray-400">
-                kWh est: {fmt1(liveKwhEst, " kWh")}
+                {liveError ? <span className="text-amber-600">{liveError}</span> : <span className="text-green-600">OK</span>}
               </div>
             </div>
           </>
         ) : mode === "day" ? (
           <>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">Energía (estimada)</div>
-              <div className="text-xl font-semibold">{fmt1(dayKwhEst, " kWh")}</div>
-              <div className="text-[11px] text-gray-400">{selectedDay}</div>
+              <div className="text-[11px] text-gray-500">Día</div>
+              <div className="text-xl font-semibold">{selectedDay}</div>
+              <div className="text-[11px] text-gray-400">AR</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">kW promedio</div>
+              <div className="text-[11px] text-gray-500">kW prom (día)</div>
               <div className="text-xl font-semibold">{fmt1(dayKwAvg, " kW")}</div>
-              <div className="text-[11px] text-gray-400">muestras: {daySeries.length}</div>
+              <div className="text-[11px] text-gray-400">promedio</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">kW pico</div>
-              <div className="text-xl font-semibold">{fmt1(dayKwMax, " kW")}</div>
-              <div className="text-[11px] text-gray-400">día completo</div>
+              <div className="text-[11px] text-gray-500">Máximo del día</div>
+              <div className="text-xl font-semibold">{dayMaxPoint ? fmt1(dayMaxPoint.kw, " kW") : "--"}</div>
+              <div className="text-[11px] text-gray-400">{dayMaxPoint ? fmtTimeFromMs_AR(dayMaxPoint.x) : "--:--"}</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">PF promedio</div>
-              <div className="text-xl font-semibold">{fmt(dayPfAvg, 3)}</div>
+              <div className="text-[11px] text-gray-500">PF min / prom</div>
+              <div className="text-xl font-semibold">
+                {fmt(dayPfMin, 3)} / {fmt(dayPfAvg, 3)}
+              </div>
               <div className="text-[11px] text-gray-400">
-                {statusText.ok ? (
-                  <span className="text-green-600">{statusText.text}</span>
-                ) : (
-                  <span className="text-amber-600">{statusText.text}</span>
-                )}
+                {dayPfMin != null && dayPfMin < pfThreshold ? "⚠ PF bajo" : "OK"}
               </div>
             </div>
           </>
         ) : (
           <>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">kWh mes (ideal)</div>
+              <div className="text-[11px] text-gray-500">kWh mes</div>
               <div className="text-xl font-semibold">{fmt1(monthKwhTotal, " kWh")}</div>
               <div className="text-[11px] text-gray-400">{selectedMonth}</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">PF promedio</div>
+              <div className="text-[11px] text-gray-500">Costo estimado</div>
+              <div className="text-xl font-semibold">{monthCost == null ? "--" : fmt(monthCost, 0, " ARS")}</div>
+              <div className="text-[11px] text-gray-400">tarifa: {tariffArsPerKwh > 0 ? fmt(tariffArsPerKwh, 0, " ARS/kWh") : "--"}</div>
+            </div>
+            <div className="border rounded-2xl bg-white p-3">
+              <div className="text-[11px] text-gray-500">PF prom</div>
               <div className="text-xl font-semibold">{fmt(monthPfAvg, 3)}</div>
               <div className="text-[11px] text-gray-400">mes</div>
             </div>
             <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">Días con datos</div>
-              <div className="text-xl font-semibold">
-                {monthSeries.length ? monthSeries.length : "--"}
-              </div>
-              <div className="text-[11px] text-gray-400">agregado diario</div>
-            </div>
-            <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">Estado</div>
-              <div className="text-sm font-medium">
-                {statusText.ok ? (
-                  <span className="text-green-600">{statusText.text}</span>
-                ) : (
-                  <span className="text-amber-600">{statusText.text}</span>
-                )}
-              </div>
-              <div className="text-[11px] text-gray-400">
-                Nota: si no hay kWh real, se estima con kw_avg*24.
-              </div>
+              <div className="text-[11px] text-gray-500">Pico mensual</div>
+              <div className="text-xl font-semibold">{monthPeak ? fmt1(monthPeak.kwh, " kWh") : "--"}</div>
+              <div className="text-[11px] text-gray-400">{monthPeak ? monthPeak.date : "--"}</div>
             </div>
           </>
         )}
       </div>
 
-      {/* Gráfico */}
+      {/* Chart */}
       <div className="h-72 border rounded-2xl bg-white p-2">
         {mode !== "live" && loadingHist ? (
-          <div className="h-full flex items-center justify-center text-sm text-gray-500">
-            Cargando histórico…
-          </div>
+          <div className="h-full flex items-center justify-center text-sm text-gray-500">Cargando histórico…</div>
         ) : mode === "live" ? (
           liveChartData.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-sm text-gray-500">
-              Sin datos aún.
-            </div>
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos aún.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={liveChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="t" hide />
-                <YAxis />
+                <XAxis dataKey="t" />
+                <YAxis yAxisId="kw" />
+                <YAxis yAxisId="pf" orientation="right" domain={[-1, 1]} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="kw" name="abs(kW)" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="pf" name="PF" dot={false} strokeWidth={2} />
+                <Line yAxisId="kw" type="monotone" dataKey="kw" name="kW" dot={false} strokeWidth={2} />
+                <Line yAxisId="pf" type="monotone" dataKey="pf" name="PF" dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           )
         ) : mode === "day" ? (
           dayChartData.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-sm text-gray-500">
-              Sin datos para el día seleccionado.
-            </div>
+            <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos para el día.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dayChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="t" />
+
+                <XAxis
+                  dataKey="x"
+                  type="number"
+                  domain={[dayDomain.start, dayDomain.end]}
+                  tickFormatter={(ms) => fmtTimeFromMs_AR(Number(ms))}
+                  interval="preserveStartEnd"
+                  minTickGap={40}
+                />
+
                 <YAxis />
-                <Tooltip />
+
+                <Tooltip content={dayTooltip} />
                 <Legend />
-                <Line type="monotone" dataKey="kw" name="abs(kW)" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="pf" name="PF" dot={false} strokeWidth={2} />
+
+                {/* Línea vertical en el máximo del día */}
+                {dayMaxPoint && (
+                  <ReferenceLine
+                    x={dayMaxPoint.x}
+                    strokeDasharray="6 4"
+                    stroke="#ef4444"
+                    label={{
+                      value: `MAX ${fmt1(dayMaxPoint.kw, " kW")} @ ${fmtTimeFromMs_AR(dayMaxPoint.x)}`,
+                      position: "insideTopLeft",
+                      fontSize: 11,
+                    }}
+                  />
+                )}
+
+                <Line type="monotone" dataKey="kw" name="kW (minuto)" dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           )
         ) : monthChartData.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-sm text-gray-500">
-            Sin datos para el mes seleccionado.
-          </div>
+          <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos para el mes.</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthChartData}>
+            <BarChart
+              data={monthChartData}
+              onClick={(e: any) => {
+                const idx = e?.activeTooltipIndex;
+                if (typeof idx !== "number") return;
+                const row = monthChartData[idx];
+                if (!row?.date) return;
+                setSelectedDay(row.date);
+                setMode("day");
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="day" />
-              <YAxis />
-              <Tooltip />
+              <YAxis yAxisId="kwh" />
+              <YAxis yAxisId="pf" orientation="right" domain={[-1, 1]} />
+              <Tooltip content={monthTooltip} />
               <Legend />
-              <Bar dataKey="kwh" name="kWh / día" />
-              {/* Si querés ver PF en el mismo chart, mejor separarlo o usar un segundo eje.
-                  Acá lo dejo como línea simple para no complicar: */}
-              {/* <Line type="monotone" dataKey="pf" name="PF prom" dot={false} strokeWidth={2} /> */}
+              <Bar yAxisId="kwh" dataKey="kwh" name="kWh / día">
+                {monthChartData.map((row, idx) => {
+                  const kind = barKind(row);
+                  return <Cell key={idx} fill={barFill(kind)} />;
+                })}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         )}
