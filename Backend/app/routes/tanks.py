@@ -74,24 +74,27 @@ def list_tanks_config(request: Request, response: Response):
         return cached
 
     # 2) Cache MISS => DB
+    # ✅ Sumamos JOIN a locations para traer service_type
     sql = """
     select
-      tank_id,
-      name,
-      location_id,
-      location_name,
-      low_pct,
-      low_low_pct,
-      high_pct,
-      high_high_pct,
-      updated_by,
-      updated_at,
-      level_pct,        -- último nivel (de v_tank_latest)
-      age_sec,          -- antigüedad de la última lectura (segundos)
-      online,           -- true/false según umbral
-      alarma            -- (puede venir NULL si la vista aún no la tiene)
-    from public.v_tanks_with_config
-    order by tank_id
+      v.tank_id,
+      v.name,
+      v.location_id,
+      v.location_name,
+      l.service_type as service_type,   -- ✅ NUEVO
+      v.low_pct,
+      v.low_low_pct,
+      v.high_pct,
+      v.high_high_pct,
+      v.updated_by,
+      v.updated_at,
+      v.level_pct,        -- último nivel (de v_tank_latest)
+      v.age_sec,          -- antigüedad de la última lectura (segundos)
+      v.online,           -- true/false según umbral
+      v.alarma            -- (puede venir NULL si la vista aún no la tiene)
+    from public.v_tanks_with_config v
+    left join public.locations l on l.id = v.location_id
+    order by v.tank_id
     """
 
     t0 = time.perf_counter()
@@ -112,12 +115,19 @@ def list_tanks_config(request: Request, response: Response):
                 r.get("high_high_pct"),
             )
 
+        st = r.get("service_type")
+        # normalizamos por las dudas (y para datos viejos)
+        st = "cloacas" if str(st or "").strip().lower() == "cloacas" else "agua"
+
         out.append(
             {
                 "tank_id": r["tank_id"],
                 "name": r.get("name"),
                 "location_id": r.get("location_id"),
                 "location_name": r.get("location_name"),
+
+                # ✅ NUEVO
+                "service_type": st,
 
                 "low_pct": float(r["low_pct"]) if r.get("low_pct") is not None else None,
                 "low_low_pct": float(r["low_low_pct"]) if r.get("low_low_pct") is not None else None,

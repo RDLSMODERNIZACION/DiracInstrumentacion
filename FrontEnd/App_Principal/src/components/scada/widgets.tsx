@@ -2,6 +2,7 @@
 import React from "react";
 import { Badge } from "./ui";
 import { fmtLiters, sevMeta, severityOf } from "./utils";
+import type { ServiceType } from "./hooks/usePlant"; // ✅ NUEVO (tipado del service_type)
 
 export type ConnStatus = { online: boolean; ageSec: number; tone: "ok" | "warn" | "bad" };
 
@@ -21,7 +22,25 @@ function secSince(ts?: string | null) {
   return Math.max(0, Math.round((Date.now() - t) / 1000));
 }
 
+/* =====================
+   Helpers service_type
+===================== */
 
+function normServiceType(x: any): ServiceType {
+  const s = String(x ?? "").trim().toLowerCase();
+  return s === "cloacas" ? "cloacas" : "agua";
+}
+function getServiceTypeFromTank(tank: any, fallback?: ServiceType): ServiceType {
+  const st =
+    tank?.service_type ??
+    tank?.serviceType ??
+    tank?.location?.service_type ??
+    tank?.location?.serviceType ??
+    tank?.loc?.service_type ??
+    tank?.loc?.serviceType ??
+    fallback;
+  return normServiceType(st);
+}
 
 /* =====================
    TankCard
@@ -32,11 +51,13 @@ export function TankCard({
   onClick,
   signal = "ok",
   status,
+  serviceType, // ✅ NUEVO: permite forzarlo desde OverviewGrid
 }: {
   tank: any;
   onClick?: () => void;
   signal?: "ok" | "warn" | "bad";
   status?: ConnStatus;
+  serviceType?: ServiceType;
 }) {
   const sev = severityOf(tank.levelPct, tank.thresholds);
   const meta = sevMeta(sev);
@@ -55,6 +76,14 @@ export function TankCard({
   const dimClass =
     tone === "bad" ? "filter grayscale opacity-60" : tone === "warn" ? "filter saturate-50 opacity-90" : "";
 
+  // ✅ NUEVO: color del líquido según servicio
+  // Agua = azul (cyan), Cloacas = verde
+  const st = getServiceTypeFromTank(tank, serviceType);
+  const liquidClass =
+    st === "cloacas"
+      ? "bg-gradient-to-t from-emerald-800 via-emerald-600 to-emerald-300"
+      : "bg-gradient-to-t from-cyan-700 via-cyan-500 to-cyan-300";
+
   return (
     <button
       onClick={onClick}
@@ -68,6 +97,10 @@ export function TankCard({
           <Badge tone={conn.tone}>
             {conn.online ? `Online${Number.isFinite(conn.ageSec) ? ` · ${fmtAgoShort(conn.ageSec)}` : ""}` : "Offline"}
           </Badge>
+
+          {/* ✅ NUEVO: etiqueta de servicio (opcional, pero ayuda visual) */}
+          <Badge tone={st === "cloacas" ? "ok" : "ok"}>{st === "cloacas" ? "Cloacas" : "Agua"}</Badge>
+
           {/* Severidad por nivel */}
           <Badge tone={meta.tone}>{meta.label}</Badge>
         </div>
@@ -89,7 +122,9 @@ export function TankCard({
               className="absolute bottom-0 left-0 right-0 will-change-[height]"
               style={{ height: `${pct}%`, transition: "height 800ms cubic-bezier(0.2,0.8,0.2,1)" }}
             >
-              <div className="absolute inset-0 bg-gradient-to-t from-cyan-700 via-cyan-500 to-cyan-300" />
+              {/* ✅ ACÁ cambia el color */}
+              <div className={`absolute inset-0 ${liquidClass}`} />
+
               <div className="absolute -top-3 left-0 w-[220%] h-6 animate-wave [--wave-speed:7s] text-white/70">
                 <WaveSVG />
               </div>
@@ -123,12 +158,6 @@ export function TankCard({
     </button>
   );
 }
-
-
-
-
-
-
 
 /* =====================
    PumpCard – Vertical Compact
@@ -188,8 +217,6 @@ export function PumpCard({
     <button
       onClick={onClick}
       className={[
-        // ✅ MOBILE: full width real (sin max/min que la achiquen)
-        // ✅ DESKTOP: vuelve a ser "finita" como antes
         "group relative block w-full max-w-none min-w-0 sm:max-w-[150px] sm:min-w-[140px]",
         "h-full",
         "rounded-2xl border border-slate-200 bg-white",
@@ -199,7 +226,6 @@ export function PumpCard({
       ].join(" ")}
       aria-label={`Bomba ${title}`}
     >
-      {/* Glow sutil */}
       <div
         className={[
           "pointer-events-none absolute -top-8 -right-8 h-24 w-24 rounded-full blur-2xl",
@@ -207,9 +233,7 @@ export function PumpCard({
         ].join(" ")}
       />
 
-      {/* Layout vertical compacto */}
       <div className="relative z-10 flex h-full flex-col">
-        {/* Top: Nombre */}
         <div className="mb-2">
           <div className="flex items-center gap-1">
             <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
@@ -217,7 +241,6 @@ export function PumpCard({
           </div>
         </div>
 
-        {/* Centro: Impeller */}
         <div className="flex flex-1 items-center justify-center">
           <div className="relative grid h-14 w-14 place-items-center">
             <div className={`absolute inset-0 rounded-full ring-2 ${ring}`} />
@@ -236,7 +259,6 @@ export function PumpCard({
           </div>
         </div>
 
-        {/* Bottom: Chips */}
         <div className="mt-2 flex items-center justify-between">
           <span
             className={[
@@ -261,9 +283,7 @@ export function PumpCard({
           </span>
         </div>
 
-        <div className="mt-1 text-[10px] text-slate-500 text-right">
-          {canSpin ? "Lista" : !conn.online ? "Sin conexión" : "Apagada"}
-        </div>
+        <div className="mt-1 text-[10px] text-slate-500 text-right">{canSpin ? "Lista" : !conn.online ? "Sin conexión" : "Apagada"}</div>
       </div>
 
       <style>
