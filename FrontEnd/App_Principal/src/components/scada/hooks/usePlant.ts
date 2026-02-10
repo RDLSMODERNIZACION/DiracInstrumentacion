@@ -15,14 +15,28 @@ const DEFAULT_THRESHOLDS: Thresholds = {
   highCritical: 90,
 };
 
+// ✅ NUEVO: tipo de servicio para pintar/filtrar Agua vs Cloacas
+export type ServiceType = "agua" | "cloacas";
+
 type Tank = {
   id: number;
   name: string;
   location_id?: number | null;
   location_name?: string | null;
+  // ✅ NUEVO: service_type (puede venir en snake o camel, por compat)
+  service_type?: ServiceType | null;
+  serviceType?: ServiceType | null;
+
   locationId?: number | null;
   locationName?: string | null;
-  location?: { id?: number | null; name?: string | null };
+  location?: {
+    id?: number | null;
+    name?: string | null;
+    // ✅ NUEVO: service_type dentro de location (si te llega así)
+    service_type?: ServiceType | null;
+    serviceType?: ServiceType | null;
+  };
+
   levelPct?: number | null;
   age_sec?: number | null;
   ageSec?: number | null;
@@ -38,9 +52,20 @@ type Pump = {
   state?: "run" | "stop";
   location_id?: number | null;
   location_name?: string | null;
+
+  // ✅ NUEVO: service_type (mismo criterio que tanques)
+  service_type?: ServiceType | null;
+  serviceType?: ServiceType | null;
+
   locationId?: number | null;
   locationName?: string | null;
-  location?: { id?: number | null; name?: string | null };
+  location?: {
+    id?: number | null;
+    name?: string | null;
+    service_type?: ServiceType | null;
+    serviceType?: ServiceType | null;
+  };
+
   age_sec?: number | null;
   ageSec?: number | null;
   online?: boolean | null;
@@ -105,13 +130,15 @@ async function fetchJSON(path: string, opts?: { withAuth?: boolean }) {
   const res = await fetch(url, {
     method: "GET",
     headers: buildHeaders(withAuth),
-    // NO seteamos cache: "no-store" ni Cache-Control: no-cache
-    // dejamos que el browser y el backend manejen ETag / Cache-Control
   });
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`GET ${path} -> ${res.status} ${res.statusText}${txt ? ` | ${txt.slice(0, 200)}` : ""}`);
+    throw new Error(
+      `GET ${path} -> ${res.status} ${res.statusText}${
+        txt ? ` | ${txt.slice(0, 200)}` : ""
+      }`
+    );
   }
 
   return res.json();
@@ -122,7 +149,10 @@ async function fetchJSON(path: string, opts?: { withAuth?: boolean }) {
  * - dedupe de requests en vuelo por path
  * - cache local con TTL (evita doble fetch dentro del mismo intervalo)
  */
-async function getJSON(path: string, opts?: { withAuth?: boolean; ttlMs?: number }) {
+async function getJSON(
+  path: string,
+  opts?: { withAuth?: boolean; ttlMs?: number }
+) {
   const ttlMs = opts?.ttlMs ?? FRONT_TTL_MS;
   const withAuth = opts?.withAuth ?? true;
 
@@ -143,7 +173,6 @@ async function getJSON(path: string, opts?: { withAuth?: boolean; ttlMs?: number
       return data;
     })
     .catch((err) => {
-      // si falla, dejamos data previa si existía, pero limpiamos inflight
       if (JSON_CACHE[path]) JSON_CACHE[path].inflight = null;
       throw err;
     });
@@ -152,7 +181,10 @@ async function getJSON(path: string, opts?: { withAuth?: boolean; ttlMs?: number
   return inflight;
 }
 
-async function getFirstJSON(paths: string[], opts?: { withAuth?: boolean; ttlMs?: number }) {
+async function getFirstJSON(
+  paths: string[],
+  opts?: { withAuth?: boolean; ttlMs?: number }
+) {
   let lastErr: any = null;
   for (const p of paths) {
     try {
@@ -174,6 +206,25 @@ function normOnline(online: any, ageSec: any) {
   return Number.isFinite(age) ? age <= ONLINE_DEAD_SEC : false;
 }
 
+// ✅ NUEVO: normalizar service_type desde cualquier forma posible
+function normServiceType(x: any): ServiceType {
+  const raw = String(x ?? "")
+    .trim()
+    .toLowerCase();
+  return raw === "cloacas" ? "cloacas" : "agua";
+}
+
+function extractServiceType(r: any): ServiceType {
+  // prioridad: campo directo -> dentro de location
+  const st =
+    r?.service_type ??
+    r?.serviceType ??
+    r?.location?.service_type ??
+    r?.location?.serviceType ??
+    null;
+  return normServiceType(st);
+}
+
 function mapTanks(rows: any[]): Tank[] {
   return rows.map((r) => {
     const id = Number(r.tank_id ?? r.id);
@@ -183,22 +234,38 @@ function mapTanks(rows: any[]): Tank[] {
     const levelPct = typeof r.level_pct === "number" ? r.level_pct : undefined;
     const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
     const online = normOnline(r.online, age_sec);
+
     const alarm: Tank["alarm"] =
-      typeof r.alarma === "string" && (r.alarma === "normal" || r.alarma === "alerta" || r.alarma === "critico")
+      typeof r.alarma === "string" &&
+      (r.alarma === "normal" ||
+        r.alarma === "alerta" ||
+        r.alarma === "critico")
         ? r.alarma
         : "normal";
+
+    const service_type = extractServiceType(r);
 
     return {
       id,
       name,
       location_id,
       location_name,
+
+      // ✅ NUEVO
+      service_type,
+      serviceType: service_type,
+
       online,
       levelPct,
       alarm,
       locationId: location_id,
       locationName: location_name,
-      location: { id: location_id, name: location_name },
+      location: {
+        id: location_id,
+        name: location_name,
+        service_type,
+        serviceType: service_type,
+      },
       ageSec: age_sec,
       age_sec,
       thresholds: {
@@ -221,15 +288,27 @@ function mapPumps(rows: any[]): Pump[] {
     const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
     const online = typeof r.online === "boolean" ? r.online : undefined;
 
+    const service_type = extractServiceType(r);
+
     return {
       id,
       name,
       state,
       location_id,
       location_name,
+
+      // ✅ NUEVO
+      service_type,
+      serviceType: service_type,
+
       locationId: location_id,
       locationName: location_name,
-      location: { id: location_id, name: location_name },
+      location: {
+        id: location_id,
+        name: location_name,
+        service_type,
+        serviceType: service_type,
+      },
       latest: r.event_ts ? { ts: r.event_ts } : undefined,
       ...(age_sec !== undefined ? { age_sec } : {}),
       ...(online !== undefined ? { online } : {}),
@@ -245,7 +324,9 @@ function isCritical(level: number | null | undefined, th?: Thresholds): boolean 
 
 function computeKpis(tanks: Tank[]): Kpis {
   const levels = tanks.map((t) => (typeof t.levelPct === "number" ? t.levelPct : 0));
-  const avg = levels.length ? Math.round(levels.reduce((a, b) => a + b, 0) / levels.length) : 0;
+  const avg = levels.length
+    ? Math.round(levels.reduce((a, b) => a + b, 0) / levels.length)
+    : 0;
 
   const crit = tanks.reduce((acc, t) => {
     if (t.alarm === "critico") return acc + 1;
@@ -261,19 +342,22 @@ function getLocId(x: { location_id?: any; locationId?: any; location?: any }) {
 }
 
 // === Hook principal (sin flicker) ===
-export function usePlant(pollMs = 1000, allowedLocationIds?: Set<number>): UsePlant {
+// ✅ NUEVO: podés filtrar por tipo de servicio desde la UI (pestañas)
+export function usePlant(
+  pollMs = 1000,
+  allowedLocationIds?: Set<number>,
+  opts?: { serviceType?: ServiceType | "all" }
+): UsePlant {
   const [plant, setPlant] = React.useState<Plant>({ tanks: [], pumps: [] });
   const [loading, setLoading] = React.useState<boolean>(true);
   const [err, setErr] = React.useState<unknown>(null);
   const [kpis, setKpis] = React.useState<Kpis>({ avg: 0, crit: 0 });
 
-  // snapshot actual para cálculo de KPIs cuando una mitad falla
   const plantRef = React.useRef<Plant>(plant);
   React.useEffect(() => {
     plantRef.current = plant;
   }, [plant]);
 
-  // evitar llamadas superpuestas
   const inflightRef = React.useRef(false);
 
   const fetchAll = React.useCallback(async () => {
@@ -283,7 +367,6 @@ export function usePlant(pollMs = 1000, allowedLocationIds?: Set<number>): UsePl
     try {
       setErr(null);
 
-      // Si config endpoints son públicos, NO mandamos Authorization => evita preflight
       const withAuthForConfig = !CONFIG_ENDPOINTS_PUBLIC;
 
       const [tanksRes, pumpsRes] = await Promise.allSettled([
@@ -297,14 +380,18 @@ export function usePlant(pollMs = 1000, allowedLocationIds?: Set<number>): UsePl
       const mappedTanks = tanksOk ? mapTanks(tanksRes.value as any[]) : plantRef.current.tanks;
       const mappedPumps = pumpsOk ? mapPumps(pumpsRes.value as any[]) : plantRef.current.pumps;
 
-      // 🧠 filtro: set vacío = “sin filtro”
+      // 🧠 filtro por location_ids
       const filterSet = allowedLocationIds && allowedLocationIds.size ? allowedLocationIds : undefined;
-      const pass = (locId: any) => !filterSet || (locId != null && filterSet.has(Number(locId)));
+      const passLoc = (locId: any) => !filterSet || (locId != null && filterSet.has(Number(locId)));
 
-      const filtTanks = mappedTanks.filter((t) => pass(getLocId(t)));
-      const filtPumps = mappedPumps.filter((p) => pass(getLocId(p)));
+      // ✅ NUEVO: filtro por service_type (para pestañas Agua/Cloacas)
+      const st = opts?.serviceType ?? "all";
+      const passSvc = (svc: any) =>
+        st === "all" ? true : normServiceType(svc) === st;
 
-      // merge conservando "latest" si existía
+      const filtTanks = mappedTanks.filter((t) => passLoc(getLocId(t)) && passSvc(t.service_type ?? t.location?.service_type));
+      const filtPumps = mappedPumps.filter((p) => passLoc(getLocId(p)) && passSvc(p.service_type ?? p.location?.service_type));
+
       setPlant((prev) => {
         const mergedTanks = filtTanks.map((t) => {
           const old = prev.tanks.find((x) => x.id === t.id);
@@ -325,7 +412,7 @@ export function usePlant(pollMs = 1000, allowedLocationIds?: Set<number>): UsePl
     } finally {
       inflightRef.current = false;
     }
-  }, [allowedLocationIds]);
+  }, [allowedLocationIds, opts?.serviceType]);
 
   React.useEffect(() => {
     let timer: number | null = null;

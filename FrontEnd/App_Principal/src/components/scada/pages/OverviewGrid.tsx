@@ -1,6 +1,7 @@
 // src/components/scada/pages/OverviewGrid.tsx
 import React from "react";
 import { TankCard, PumpCard } from "../widgets";
+import type { ServiceType } from "../hooks/usePlant";
 
 export type ConnStatus = { online: boolean; ageSec: number; tone: "ok" | "warn" | "bad" };
 
@@ -36,23 +37,35 @@ type AssetLocLink =
       location?: { id?: number | null; code?: string | null; name?: string | null } | null;
     };
 
-type GroupItem = | { kind: "tank"; obj: any } | { kind: "pump"; obj: any };
+type GroupItem = { kind: "tank"; obj: any } | { kind: "pump"; obj: any };
 
 type Group = {
   key: string;
   locId: number | null;
   groupName: string;
   groupCode?: string | null;
+  // ✅ NUEVO: tipo de servicio del grupo (para pestañas y color)
+  serviceType: ServiceType;
   items: GroupItem[];
   tanks: number;
   pumps: number;
 };
 
-function accentForGroup(_key: string) {
+function accentForGroup(_key: string, serviceType: ServiceType) {
+  // ✅ Agua: azul suave (default actual)
+  // ✅ Cloacas: verde suave
+  if (serviceType === "cloacas") {
+    return {
+      stripe: "rgba(34,197,94,0.85)", // green-500-ish
+      pillBg: "rgba(34,197,94,0.10)",
+      pillBd: "rgba(34,197,94,0.35)",
+      pillTx: "rgb(15,23,42)",
+    };
+  }
   return {
-    stripe: "rgba(198,198,199,1)",
-    pillBg: "rgba(15,23,42,0.06)",
-    pillBd: "rgba(15,23,42,0.18)",
+    stripe: "rgba(56,189,248,0.95)", // sky-400-ish
+    pillBg: "rgba(56,189,248,0.10)",
+    pillBd: "rgba(56,189,248,0.35)",
     pillTx: "rgb(15,23,42)",
   };
 }
@@ -71,6 +84,22 @@ function getLocNameFromAsset(a: any): string | null {
     if (typeof v === "string" && v.trim()) return v;
   }
   return null;
+}
+function getServiceTypeFromAsset(a: any): ServiceType {
+  const cands = [
+    a?.service_type,
+    a?.serviceType,
+    a?.location?.service_type,
+    a?.location?.serviceType,
+    a?.loc?.service_type,
+    a?.loc?.serviceType,
+  ];
+  for (const v of cands) {
+    const s = String(v ?? "").trim().toLowerCase();
+    if (s === "cloacas") return "cloacas";
+    if (s === "agua") return "agua";
+  }
+  return "agua";
 }
 
 export function OverviewGrid({
@@ -110,7 +139,11 @@ export function OverviewGrid({
 
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
-    return { status: { ...status, tone } };
+
+    // ✅ NUEVO: pasa el serviceType a la card (para que pinte verde si cloacas)
+    const serviceType = getServiceTypeFromAsset(t);
+
+    return { status: { ...status, tone }, serviceType };
   };
 
   const pumpCardProps = (p: any) => {
@@ -121,7 +154,11 @@ export function OverviewGrid({
 
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
-    return { status: { ...status, tone } };
+
+    // por si querés pintar bombas distinto más adelante
+    const serviceType = getServiceTypeFromAsset(p);
+
+    return { status: { ...status, tone }, serviceType };
   };
 
   const isConnectedItem = React.useCallback(
@@ -142,8 +179,11 @@ export function OverviewGrid({
   const [showPump, setShowPump] = React.useState(true);
   const [showAll, setShowAll] = React.useState(false); // default: solo conectados
 
+  // ✅ NUEVO: pestañas Agua | Cloacas
+  const [svcTab, setSvcTab] = React.useState<ServiceType>("agua");
+
   const linkMap = React.useMemo(() => {
-    const map = new Map<string, { locId: number | null; code?: string | null; name?: string | null }>();
+    const map = new Map<string, { locId: number | null; code?: string | null; name?: string | null; serviceType?: ServiceType }>();
     (assetLocs ?? []).forEach((l) => {
       const locId =
         Number.isFinite(Number(l.location_id)) && Number(l.location_id) > 0
@@ -153,7 +193,13 @@ export function OverviewGrid({
           : null;
       const code = (l as any).location_code ?? l.code ?? l.location?.code ?? null;
       const name = (l as any).location_name ?? l.name ?? l.location?.name ?? null;
-      map.set(`${l.asset_type}:${l.asset_id}`, { locId, code, name });
+
+      // si algún día assetLocs también trae service_type
+      const stRaw = (l as any).service_type ?? (l as any).serviceType ?? (l as any).location_service_type ?? null;
+      const serviceType: ServiceType | undefined =
+        String(stRaw ?? "").trim().toLowerCase() === "cloacas" ? "cloacas" : stRaw != null ? "agua" : undefined;
+
+      map.set(`${l.asset_type}:${l.asset_id}`, { locId, code, name, serviceType });
     });
     return map;
   }, [assetLocs]);
@@ -162,7 +208,12 @@ export function OverviewGrid({
   const groups = React.useMemo(() => {
     const out = new Map<string, Group>();
 
-    const ensureGroup = (locId: number | null, name?: string | null, code?: string | null): Group => {
+    const ensureGroup = (
+      locId: number | null,
+      name?: string | null,
+      code?: string | null,
+      serviceType: ServiceType = "agua"
+    ): Group => {
       const key = locId != null ? `loc:${locId}` : "none";
       let g = out.get(key);
       if (!g) {
@@ -171,11 +222,15 @@ export function OverviewGrid({
           locId,
           groupName: name ?? (locId == null ? "Sin localidad" : `Loc ${locId}`),
           groupCode: code ?? undefined,
+          serviceType,
           items: [],
           tanks: 0,
           pumps: 0,
         };
         out.set(key, g);
+      } else {
+        // si el grupo se creó sin serviceType y luego vemos uno, lo ajustamos
+        if (g.serviceType !== "cloacas" && serviceType === "cloacas") g.serviceType = "cloacas";
       }
       return g;
     };
@@ -183,11 +238,13 @@ export function OverviewGrid({
     (plant?.tanks ?? []).forEach((t: any) => {
       const nid = t.tankId ?? t.id;
       const link = linkMap.get(`tank:${nid}`);
-      const g = ensureGroup(
-        getLocIdFromAsset(t) ?? link?.locId ?? null,
-        getLocNameFromAsset(t) ?? link?.name ?? undefined,
-        link?.code ?? undefined
-      );
+
+      const locId = getLocIdFromAsset(t) ?? link?.locId ?? null;
+      const locName = getLocNameFromAsset(t) ?? link?.name ?? undefined;
+
+      const serviceType = getServiceTypeFromAsset(t) ?? link?.serviceType ?? "agua";
+
+      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType);
       g.items.push({ kind: "tank", obj: t });
       g.tanks++;
     });
@@ -195,11 +252,13 @@ export function OverviewGrid({
     (plant?.pumps ?? []).forEach((p: any) => {
       const nid = p.pumpId ?? p.id;
       const link = linkMap.get(`pump:${nid}`);
-      const g = ensureGroup(
-        getLocIdFromAsset(p) ?? link?.locId ?? null,
-        getLocNameFromAsset(p) ?? link?.name ?? undefined,
-        link?.code ?? undefined
-      );
+
+      const locId = getLocIdFromAsset(p) ?? link?.locId ?? null;
+      const locName = getLocNameFromAsset(p) ?? link?.name ?? undefined;
+
+      const serviceType = getServiceTypeFromAsset(p) ?? link?.serviceType ?? "agua";
+
+      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType);
       g.items.push({ kind: "pump", obj: p });
       g.pumps++;
     });
@@ -223,9 +282,23 @@ export function OverviewGrid({
     return list;
   }, [plant?.tanks, plant?.pumps, linkMap]);
 
+  // ✅ NUEVO: contar por servicio para mostrar en las pestañas
+  const svcCounts = React.useMemo(() => {
+    let agua = 0;
+    let cloacas = 0;
+    for (const g of groups) {
+      if (g.serviceType === "cloacas") cloacas++;
+      else agua++;
+    }
+    return { agua, cloacas };
+  }, [groups]);
+
   const filteredGroups = React.useMemo(() => {
     const res: Group[] = [];
     for (const g of groups) {
+      // ✅ filtro por pestaña
+      if (g.serviceType !== svcTab) continue;
+
       if (locFilter !== "ALL") {
         if (locFilter === "NONE" && g.locId !== null) continue;
         if (typeof locFilter === "number" && g.locId !== locFilter) continue;
@@ -243,25 +316,24 @@ export function OverviewGrid({
       });
     }
     return res;
-  }, [groups, locFilter, showTank, showPump, showAll, isConnectedItem]);
+  }, [groups, svcTab, locFilter, showTank, showPump, showAll, isConnectedItem]);
 
   // ====== RENDER ======
-  // ✅ Mobile (grid-cols-1): TODO ocupa 100% ancho.
-  // ✅ Forzamos stretch real en grid + items.
-  // ✅ Desde sm: tanques 2 columnas; bombas 1.
   const renderItemCard = (it: GroupItem) => {
     if (it.kind === "tank") {
       const t = it.obj;
+      const props = tankCardProps(t);
       return (
         <div key={`wrap-t-${t.id}`} className="col-span-1 sm:col-span-2 w-full justify-self-stretch">
-          <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...tankCardProps(t)} />
+          <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...props} />
         </div>
       );
     }
     const p = it.obj;
+    const props = pumpCardProps(p);
     return (
       <div key={`wrap-p-${p.id}`} className="col-span-1 w-full justify-self-stretch">
-        <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...pumpCardProps(p)} />
+        <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...props} />
       </div>
     );
   };
@@ -271,6 +343,32 @@ export function OverviewGrid({
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white/80 backdrop-blur shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
+          {/* ✅ NUEVO: Tabs Agua | Cloacas */}
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Servicio</label>
+            <div className="inline-flex w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
+              <button
+                onClick={() => setSvcTab("agua")}
+                className={[
+                  "flex-1 sm:flex-none px-3 py-2 text-sm transition",
+                  svcTab === "agua" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                Agua <span className="opacity-80">({svcCounts.agua})</span>
+              </button>
+              <div className="w-px bg-slate-300" />
+              <button
+                onClick={() => setSvcTab("cloacas")}
+                className={[
+                  "flex-1 sm:flex-none px-3 py-2 text-sm transition",
+                  svcTab === "cloacas" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                Cloacas <span className="opacity-80">({svcCounts.cloacas})</span>
+              </button>
+            </div>
+          </div>
+
           {/* Selector ubicación */}
           <div className="flex-1 min-w-0">
             <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>
@@ -285,11 +383,13 @@ export function OverviewGrid({
             >
               <option value="ALL">Todas</option>
               <option value="NONE">Sin localidad</option>
-              {groups.filter((g) => g.locId != null).map((g) => (
-                <option key={g.key} value={String(g.locId)}>
-                  {g.groupName}
-                </option>
-              ))}
+              {groups
+                .filter((g) => g.locId != null && g.serviceType === svcTab)
+                .map((g) => (
+                  <option key={g.key} value={String(g.locId)}>
+                    {g.groupName}
+                  </option>
+                ))}
             </select>
           </div>
         </div>
@@ -332,20 +432,46 @@ export function OverviewGrid({
             </button>
           </div>
         </div>
+
+        {debug ? (
+          <div className="text-xs text-slate-600">
+            tab=<b>{svcTab}</b> grupos={groups.length} filtrados={filteredGroups.length}
+          </div>
+        ) : null}
       </div>
 
       {/* Grupos */}
       <section className="space-y-3 sm:space-y-4">
         {filteredGroups.map((g) => {
-          const acc = accentForGroup(g.key);
+          const acc = accentForGroup(g.key, g.serviceType);
           return (
             <div
               key={g.key}
               className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-4"
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
-              {/* ✅ Mobile: 1 columna => bombas y tanques full width */}
-              {/* ✅ Forzamos estirado horizontal de items */}
+              {/* Header del grupo */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate">
+                    {g.groupName}
+                    {g.groupCode ? <span className="ml-2 text-xs text-slate-500">({g.groupCode})</span> : null}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className="px-2 py-1 rounded-full text-xs border"
+                    style={{ background: acc.pillBg, borderColor: acc.pillBd, color: acc.pillTx }}
+                  >
+                    {g.serviceType === "cloacas" ? "Cloacas" : "Agua"}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    TK {g.tanks} · PU {g.pumps}
+                  </span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2 sm:gap-3 items-stretch justify-items-stretch">
                 {g.items.map(renderItemCard)}
               </div>
