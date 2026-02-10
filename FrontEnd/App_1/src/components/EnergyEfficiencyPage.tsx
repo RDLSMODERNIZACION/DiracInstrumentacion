@@ -39,12 +39,12 @@ type KpiMinuteRow = {
 };
 
 type KpiDayRow = {
-  ts: string; // YYYY-MM-DD
+  ts: string; // YYYY-MM-DD o date
   kwh_est: number | null;
   kw_avg: number | null;
   kw_max: number | null;
   pf_avg: number | null;
-  pf_min: number | null;
+  pf_min: number | null; // lo usamos para “en algún momento estuvo bajo”
   samples: number | null;
 };
 
@@ -83,6 +83,7 @@ function addDays(dateStr: string, delta: number) {
 
 // TZ Argentina
 const AR_TZ = "America/Argentina/Buenos_Aires";
+const PF_REF = 0.95; // umbral fijo para pintar rojo si estuvo bajo “en algún momento”
 
 function startOfDayISO_AR(dateStr: string) {
   return `${dateStr}T00:00:00-03:00`;
@@ -185,12 +186,6 @@ function SoftBadge({ ok, text }: { ok: boolean; text: string }) {
   );
 }
 
-function clamp01(x: number) {
-  if (x < 0) return 0;
-  if (x > 1) return 1;
-  return x;
-}
-
 export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1 }: Props) {
   const [analyzerId, setAnalyzerId] = useState<number>(initialAnalyzerId);
   const [mode, setMode] = useState<Mode>("live");
@@ -201,41 +196,32 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   const [selectedDay, setSelectedDay] = useState<string>(today);
   const [selectedMonth, setSelectedMonth] = useState<string>(thisMonth);
 
-  // ALERT CONFIG (mes)
-  const [pfThreshold, setPfThreshold] = useState<number>(0.85);
+  // Mes: spike de kWh (% sobre promedio) + tarifa configurable
   const [spikePct, setSpikePct] = useState<number>(25);
-
-  // TARIFA
   const [tariffArsPerKwh, setTariffArsPerKwh] = useState<number>(0);
 
   useEffect(() => {
     const t = localStorage.getItem("dirac.tariff_ars_kwh");
-    const p = localStorage.getItem("dirac.pf_threshold");
     const s = localStorage.getItem("dirac.kwh_spike_pct");
     if (t) {
       const n = Number(t);
       if (Number.isFinite(n)) setTariffArsPerKwh(n);
-    }
-    if (p) {
-      const n = Number(p);
-      if (Number.isFinite(n)) setPfThreshold(clamp01(n));
     }
     if (s) {
       const n = Number(s);
       if (Number.isFinite(n)) setSpikePct(Math.max(0, n));
     }
   }, []);
-
   useEffect(() => localStorage.setItem("dirac.tariff_ars_kwh", String(tariffArsPerKwh)), [tariffArsPerKwh]);
-  useEffect(() => localStorage.setItem("dirac.pf_threshold", String(pfThreshold)), [pfThreshold]);
   useEffect(() => localStorage.setItem("dirac.kwh_spike_pct", String(spikePct)), [spikePct]);
 
-  // LIVE state
+  // LIVE
   const [latest, setLatest] = useState<LatestReading | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [series, setSeries] = useState<LivePoint[]>([]);
+  const lastLiveTimerRef = useRef<any>(null);
 
-  // HIST state
+  // HIST
   const [histError, setHistError] = useState<string | null>(null);
   const [dayRows, setDayRows] = useState<KpiMinuteRow[]>([]);
   const [monthRows, setMonthRows] = useState<KpiDayRow[]>([]);
@@ -254,9 +240,9 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   // Polling LIVE
   useEffect(() => {
     if (mode !== "live") return;
+
     let alive = true;
     const ctrl = new AbortController();
-    let t: any;
 
     async function tick() {
       try {
@@ -285,7 +271,7 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         }
       } finally {
         if (!alive) return;
-        t = setTimeout(tick, 2000);
+        lastLiveTimerRef.current = setTimeout(tick, 2000);
       }
     }
 
@@ -293,7 +279,7 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return () => {
       alive = false;
       ctrl.abort();
-      if (t) clearTimeout(t);
+      if (lastLiveTimerRef.current) clearTimeout(lastLiveTimerRef.current);
     };
   }, [analyzerId, mode]);
 
@@ -387,10 +373,7 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   );
 
   // -------------------
-  // DAY chart (FIXED)
-  // - x: timestamp ms (numérico)
-  // - kw: valor de ese minuto (no promedio general)
-  // - Línea vertical en el máximo del día
+  // DAY chart (OK) + max vertical line
   // -------------------
   const dayDomain = useMemo(() => {
     const start = dayStartMs_AR(selectedDay);
@@ -410,7 +393,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
 
     pts.sort((a, b) => a.x - b.x);
 
-    // estira el eje a 00:00–24:00 aunque falten datos en extremos
     return [
       { x: dayDomain.start, kw: pts.length ? pts[0].kw : 0 },
       ...pts,
@@ -426,36 +408,45 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return best;
   }, [dayChartData]);
 
-  // -------------------
-  // DAY KPIs
-  // -------------------
+  // KPIs día
   const dayKwAvg = useMemo(() => {
     const vals = dayRows.map((r) => toNum(r.kw_avg)).filter((x): x is number => typeof x === "number");
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [dayRows]);
-
+  const dayPfAvg = useMemo(() => {
+    const vals = dayRows.map((r) => toNum(r.pf_avg)).filter((x): x is number => typeof x === "number");
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [dayRows]);
   const dayPfMin = useMemo(() => {
     const vals = dayRows.map((r) => toNum(r.pf_min)).filter((x): x is number => typeof x === "number");
     return vals.length ? Math.min(...vals) : null;
   }, [dayRows]);
 
-  const dayPfAvg = useMemo(() => {
-    const vals = dayRows.map((r) => toNum(r.pf_avg)).filter((x): x is number => typeof x === "number");
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  }, [dayRows]);
-
   // -------------------
-  // MONTH (igual que antes)
+  // MONTH chart: kWh/día (barras) + kW avg (línea) + kWh acumulado (línea)
+  // Colores:
+  // - rojo si pf_min < 0.95 (algún momento)
+  // - azul si kWh spike (> prom*(1+spikePct))
   // -------------------
   const monthChartData = useMemo(() => {
-    return monthRows.map((r) => ({
-      day: String(r.ts).slice(8, 10),
-      date: String(r.ts).slice(0, 10),
-      kwh: r.kwh_est ?? undefined,
-      pf: r.pf_avg ?? undefined,
-      kw_max: r.kw_max ?? undefined,
-      kw_avg: r.kw_avg ?? undefined,
-    }));
+    const rows = [...monthRows].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+    let cum = 0;
+
+    return rows.map((r) => {
+      const kwh = toNum(r.kwh_est);
+      if (typeof kwh === "number") cum += kwh;
+
+      return {
+        day: String(r.ts).slice(8, 10),
+        date: String(r.ts).slice(0, 10),
+        kwh: kwh ?? undefined,
+        kwh_cum: cum,
+        kw_avg: toNum(r.kw_avg) ?? undefined,
+        kw_max: toNum(r.kw_max) ?? undefined,
+        pf_avg: toNum(r.pf_avg) ?? undefined,
+        pf_min: toNum(r.pf_min) ?? undefined,
+      };
+    });
   }, [monthRows]);
 
   const monthKwhTotal = useMemo(() => {
@@ -468,17 +459,35 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [monthRows]);
 
+  // PF “cuadradito” debe ser PROMEDIO / MIN del mes
   const monthPfAvg = useMemo(() => {
     const vals = monthRows.map((r) => r.pf_avg).filter((x): x is number => typeof x === "number");
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [monthRows]);
 
+  const monthPfMin = useMemo(() => {
+    const vals = monthRows.map((r) => r.pf_min).filter((x): x is number => typeof x === "number");
+    return vals.length ? Math.min(...vals) : null;
+  }, [monthRows]);
+
+  // kWh pico del mes
   const monthPeak = useMemo(() => {
     let best: { date: string; kwh: number } | null = null;
     for (const r of monthChartData) {
       const kwh = toNum(r.kwh);
       if (typeof kwh !== "number") continue;
       if (!best || kwh > best.kwh) best = { date: r.date, kwh };
+    }
+    return best;
+  }, [monthChartData]);
+
+  // kW pico del mes (y su día) — clickable card -> ir a modo día
+  const monthKwPeak = useMemo(() => {
+    let best: { date: string; kw: number } | null = null;
+    for (const r of monthChartData) {
+      const kw = toNum(r.kw_max);
+      if (typeof kw !== "number") continue;
+      if (!best || kw > best.kw) best = { date: r.date, kw };
     }
     return best;
   }, [monthChartData]);
@@ -495,22 +504,27 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   }, [monthKwhAvg, spikePct]);
 
   function barKind(row: any): "normal" | "pf" | "kwh" | "both" {
-    const pf = toNum(row?.pf);
+    const pfMin = toNum(row?.pf_min);
     const kwh = toNum(row?.kwh);
-    const lowPf = typeof pf === "number" && pf < pfThreshold;
-    const highKwh = typeof kwh === "number" && typeof kwhSpikeThreshold === "number" && kwh > kwhSpikeThreshold;
-    if (lowPf && highKwh) return "both";
-    if (lowPf) return "pf";
+
+    const lowPfSomeMoment = typeof pfMin === "number" && pfMin < PF_REF;
+    const highKwh =
+      typeof kwh === "number" && typeof kwhSpikeThreshold === "number" && kwh > kwhSpikeThreshold;
+
+    if (lowPfSomeMoment && highKwh) return "both";
+    if (lowPfSomeMoment) return "pf";
     if (highKwh) return "kwh";
     return "normal";
   }
+
   function barFill(kind: ReturnType<typeof barKind>) {
     if (kind === "both") return "#fecaca";
-    if (kind === "pf") return "#fde68a";
+    if (kind === "pf") return "#fecaca";
     if (kind === "kwh") return "#bfdbfe";
     return "#e5e7eb";
   }
 
+  // LIVE KPIs
   const kwNow = useMemo(() => absKw(latest?.p_kw), [latest?.p_kw]);
   const pfNow = useMemo(() => toNum(latest?.pf), [latest?.pf]);
   const liveKwMax = useMemo(() => (series.length ? Math.max(...series.map((x) => x.kw)) : null), [series]);
@@ -522,8 +536,8 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return { ok: true, text: "OK" };
   }, [mode, liveError, histError, loadingHist]);
 
-  // Tooltip de DÍA: muestra el valor exacto del punto (kw) y la hora AR
-  const dayTooltip = ({ active, payload, label }: any) => {
+  // Tooltip día
+  const dayTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
     const x = Number(d?.x);
@@ -538,15 +552,23 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     );
   };
 
+  // Tooltip mes
   const monthTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
-    const kwh = toNum(d?.kwh);
-    const pf = toNum(d?.pf);
+
     const date = d?.date ?? label;
+    const kwh = toNum(d?.kwh);
+    const kwhCum = toNum(d?.kwh_cum);
+    const kwAvg = toNum(d?.kw_avg);
+    const pfAvg = toNum(d?.pf_avg);
+    const pfMin = toNum(d?.pf_min);
 
     const cost = typeof kwh === "number" && tariffArsPerKwh > 0 ? kwh * tariffArsPerKwh : null;
-    const kind = barKind(d);
+
+    const lowPfSomeMoment = typeof pfMin === "number" && pfMin < PF_REF;
+    const highKwh =
+      typeof kwh === "number" && typeof kwhSpikeThreshold === "number" && kwh > kwhSpikeThreshold;
 
     return (
       <div className="bg-white border rounded-xl p-2 shadow-sm text-xs space-y-1">
@@ -555,20 +577,27 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
           Energía: <span className="font-medium">{fmt(kwh, 2, " kWh")}</span>
         </div>
         <div>
-          PF prom: <span className="font-medium">{fmt(pf, 3)}</span>
+          Acumulado: <span className="font-medium">{fmt(kwhCum, 2, " kWh")}</span>
+        </div>
+        <div>
+          kW prom: <span className="font-medium">{fmt(kwAvg, 2, " kW")}</span>
+        </div>
+        <div>
+          PF prom: <span className="font-medium">{fmt(pfAvg, 3)}</span>
         </div>
         {cost != null && (
           <div>
             Costo: <span className="font-medium">{fmt(cost, 0, " ARS")}</span>
           </div>
         )}
-        {kind !== "normal" && (
+        {(lowPfSomeMoment || highKwh) && (
           <div className="pt-1">
-            {kind === "pf" && <span className="text-amber-700">⚠ PF bajo (&lt; {pfThreshold.toFixed(2)})</span>}
-            {kind === "kwh" && (
-              <span className="text-blue-700">⚠ Consumo alto (&gt; {fmt1(kwhSpikeThreshold, " kWh")})</span>
+            {lowPfSomeMoment && (
+              <div className="text-red-700">⛔ PF bajo en algún momento (min &lt; {PF_REF.toFixed(2)})</div>
             )}
-            {kind === "both" && <span className="text-red-700">⛔ PF bajo + consumo alto</span>}
+            {highKwh && (
+              <div className="text-blue-700">⚠ Consumo alto (&gt; {fmt1(kwhSpikeThreshold, " kWh")})</div>
+            )}
           </div>
         )}
       </div>
@@ -635,7 +664,10 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
       {mode === "day" && (
         <div className="border rounded-2xl bg-white p-3">
           <div className="flex items-center gap-2">
-            <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedDay(addDays(selectedDay, -1))}>
+            <button
+              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50"
+              onClick={() => setSelectedDay(addDays(selectedDay, -1))}
+            >
               ← Ayer
             </button>
 
@@ -649,7 +681,10 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               />
             </label>
 
-            <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedDay(today)}>
+            <button
+              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50"
+              onClick={() => setSelectedDay(today)}
+            >
               Hoy
             </button>
           </div>
@@ -661,7 +696,10 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         <div className="border rounded-2xl bg-white p-3">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
             <div className="flex items-center gap-2">
-              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(prevMonth(selectedMonth))}>
+              <button
+                className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50"
+                onClick={() => setSelectedMonth(prevMonth(selectedMonth))}
+              >
                 ← Mes ant.
               </button>
 
@@ -675,16 +713,22 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                 />
               </label>
 
-              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(thisMonth)}>
+              <button
+                className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50"
+                onClick={() => setSelectedMonth(thisMonth)}
+              >
                 Mes actual
               </button>
 
-              <button className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50" onClick={() => setSelectedMonth(nextMonth(selectedMonth))}>
+              <button
+                className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-50"
+                onClick={() => setSelectedMonth(nextMonth(selectedMonth))}
+              >
                 Mes sig. →
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
               <label className="text-[11px] text-gray-600">
                 Tarifa (ARS/kWh)
                 <input
@@ -693,19 +737,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                   step={1}
                   value={tariffArsPerKwh}
                   onChange={(e) => setTariffArsPerKwh(Number(e.target.value))}
-                  className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
-                />
-              </label>
-
-              <label className="text-[11px] text-gray-600">
-                Umbral PF
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={pfThreshold}
-                  onChange={(e) => setPfThreshold(clamp01(Number(e.target.value)))}
                   className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
                 />
               </label>
@@ -721,13 +752,17 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                   className="mt-1 w-full border rounded-md px-2 py-1 text-xs bg-white"
                 />
               </label>
+
+              <div className="text-[11px] text-gray-500">
+                PF ref (rojo): <span className="font-medium">{PF_REF.toFixed(2)}</span>
+              </div>
             </div>
           </div>
         </div>
       )}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
         {mode === "live" ? (
           <>
             <div className="border rounded-2xl bg-white p-3">
@@ -735,16 +770,19 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               <div className="text-xl font-semibold">{fmt1(kwNow, " kW")}</div>
               <div className="text-[11px] text-gray-400">src: {latest?.source ?? "--"}</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">kW pico (buffer)</div>
               <div className="text-xl font-semibold">{fmt1(liveKwMax, " kW")}</div>
               <div className="text-[11px] text-gray-400">últimos {series.length} pts</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">PF actual</div>
               <div className="text-xl font-semibold">{fmt(pfNow, 3)}</div>
               <div className="text-[11px] text-gray-400">calidad</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">Estado</div>
               <div className="text-sm font-medium">
@@ -759,23 +797,26 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               <div className="text-xl font-semibold">{selectedDay}</div>
               <div className="text-[11px] text-gray-400">AR</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">kW prom (día)</div>
               <div className="text-xl font-semibold">{fmt1(dayKwAvg, " kW")}</div>
               <div className="text-[11px] text-gray-400">promedio</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">Máximo del día</div>
               <div className="text-xl font-semibold">{dayMaxPoint ? fmt1(dayMaxPoint.kw, " kW") : "--"}</div>
               <div className="text-[11px] text-gray-400">{dayMaxPoint ? fmtTimeFromMs_AR(dayMaxPoint.x) : "--:--"}</div>
             </div>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">PF min / prom</div>
               <div className="text-xl font-semibold">
                 {fmt(dayPfMin, 3)} / {fmt(dayPfAvg, 3)}
               </div>
               <div className="text-[11px] text-gray-400">
-                {dayPfMin != null && dayPfMin < pfThreshold ? "⚠ PF bajo" : "OK"}
+                {dayPfMin != null && dayPfMin < PF_REF ? `⚠ PF bajo (< ${PF_REF.toFixed(2)})` : "OK"}
               </div>
             </div>
           </>
@@ -786,20 +827,41 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               <div className="text-xl font-semibold">{fmt1(monthKwhTotal, " kWh")}</div>
               <div className="text-[11px] text-gray-400">{selectedMonth}</div>
             </div>
+
+            {/* (SACADO) kWh acumulado (fin) */}
+
+            <div className="border rounded-2xl bg-white p-3">
+              <div className="text-[11px] text-gray-500">PF prom / PF min (mes)</div>
+              <div className="text-xl font-semibold">
+                {fmt(monthPfAvg, 3)} / {fmt(monthPfMin, 3)}
+              </div>
+              <div className="text-[11px] text-gray-400">
+                {monthPfMin != null && monthPfMin < PF_REF ? `⚠ hubo PF < ${PF_REF.toFixed(2)}` : "OK"}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="border rounded-2xl bg-white p-3 text-left hover:bg-gray-50 active:bg-gray-100 transition"
+              onClick={() => {
+                if (!monthKwPeak) return;
+                setSelectedDay(monthKwPeak.date);
+                setMode("day");
+              }}
+              title={monthKwPeak ? `Ir al día ${monthKwPeak.date}` : ""}
+            >
+              <div className="text-[11px] text-gray-500">kW pico (mes)</div>
+              <div className="text-xl font-semibold">{monthKwPeak ? fmt1(monthKwPeak.kw, " kW") : "--"}</div>
+              <div className="text-[11px] text-gray-400">{monthKwPeak ? monthKwPeak.date : "--"}</div>
+            </button>
+
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">Costo estimado</div>
               <div className="text-xl font-semibold">{monthCost == null ? "--" : fmt(monthCost, 0, " ARS")}</div>
-              <div className="text-[11px] text-gray-400">tarifa: {tariffArsPerKwh > 0 ? fmt(tariffArsPerKwh, 0, " ARS/kWh") : "--"}</div>
-            </div>
-            <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">PF prom</div>
-              <div className="text-xl font-semibold">{fmt(monthPfAvg, 3)}</div>
-              <div className="text-[11px] text-gray-400">mes</div>
-            </div>
-            <div className="border rounded-2xl bg-white p-3">
-              <div className="text-[11px] text-gray-500">Pico mensual</div>
-              <div className="text-xl font-semibold">{monthPeak ? fmt1(monthPeak.kwh, " kWh") : "--"}</div>
-              <div className="text-[11px] text-gray-400">{monthPeak ? monthPeak.date : "--"}</div>
+              <div className="text-[11px] text-gray-400">
+                tarifa: {tariffArsPerKwh > 0 ? fmt(tariffArsPerKwh, 0, " ARS/kWh") : "--"} · pico kWh:{" "}
+                {monthPeak ? `${fmt1(monthPeak.kwh, " kWh")} (${monthPeak.date})` : "--"}
+              </div>
             </div>
           </>
         )}
@@ -810,7 +872,9 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         {mode !== "live" && loadingHist ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">Cargando histórico…</div>
         ) : mode === "live" ? (
-          liveChartData.length === 0 ? (
+          liveError ? (
+            <div className="h-full flex items-center justify-center text-sm text-amber-700">{liveError}</div>
+          ) : liveChartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos aún.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -827,7 +891,9 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
             </ResponsiveContainer>
           )
         ) : mode === "day" ? (
-          dayChartData.length === 0 ? (
+          histError ? (
+            <div className="h-full flex items-center justify-center text-sm text-amber-700">{histError}</div>
+          ) : dayChartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos para el día.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -848,7 +914,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                 <Tooltip content={dayTooltip} />
                 <Legend />
 
-                {/* Línea vertical en el máximo del día */}
                 {dayMaxPoint && (
                   <ReferenceLine
                     x={dayMaxPoint.x}
@@ -866,6 +931,8 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               </LineChart>
             </ResponsiveContainer>
           )
+        ) : histError ? (
+          <div className="h-full flex items-center justify-center text-sm text-amber-700">{histError}</div>
         ) : monthChartData.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">Sin datos para el mes.</div>
         ) : (
@@ -884,15 +951,20 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="day" />
               <YAxis yAxisId="kwh" />
-              <YAxis yAxisId="pf" orientation="right" domain={[-1, 1]} />
+              <YAxis yAxisId="kw" orientation="right" />
               <Tooltip content={monthTooltip} />
               <Legend />
+
               <Bar yAxisId="kwh" dataKey="kwh" name="kWh / día">
                 {monthChartData.map((row, idx) => {
                   const kind = barKind(row);
                   return <Cell key={idx} fill={barFill(kind)} />;
                 })}
               </Bar>
+
+              <Line yAxisId="kw" type="monotone" dataKey="kw_avg" name="kW prom (día)" dot={false} strokeWidth={2} />
+
+              <Line yAxisId="kwh" type="monotone" dataKey="kwh_cum" name="kWh acumulado" dot={false} strokeWidth={2} />
             </BarChart>
           </ResponsiveContainer>
         )}
