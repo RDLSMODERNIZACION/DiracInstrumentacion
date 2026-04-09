@@ -111,6 +111,57 @@ def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------
+# GET /components/network_analyzers
+# Lista analizadores (filtrable por ubicación)
+# ------------------------------------------------------------
+@router.get("")
+def list_network_analyzers(
+    location_id: Optional[int] = Query(None, description="Filtra por ubicación"),
+    company_id: Optional[int] = Query(None, description="Filtra por empresa"),
+    active_only: bool = Query(True, description="Si true, devuelve solo analizadores activos"),
+):
+    """
+    Lista analizadores de red.
+    Útil para que el front de eficiencia pueda resolver qué analizador/es
+    pertenecen a la ubicación seleccionada.
+    """
+    sql = """
+        select
+            na.id,
+            na.name,
+            na.location_id,
+            l.name as location_name,
+            l.company_id,
+            na.model,
+            na.ip,
+            na.port,
+            na.unit_id,
+            na.active,
+            na.created_at
+        from public.network_analyzers na
+        left join public.locations l on l.id = na.location_id
+        where (%(location_id)s is null or na.location_id = %(location_id)s)
+          and (%(company_id)s is null or l.company_id = %(company_id)s)
+          and (%(active_only)s = false or na.active = true)
+        order by na.id
+    """
+
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                sql,
+                {
+                    "location_id": location_id,
+                    "company_id": company_id,
+                    "active_only": active_only,
+                },
+            )
+            rows = cur.fetchall() or []
+
+    return rows
+
+
+# ------------------------------------------------------------
 # POST /components/network_analyzers/{analyzer_id}/snapshot
 # Inserta una lectura completa del analizador
 # ------------------------------------------------------------
@@ -331,7 +382,6 @@ def get_history(
             rows = cur.fetchall()
 
     if not rows:
-        # opcional: 404 para que el front distinga "sin historia"
         raise HTTPException(status_code=404, detail="No history for range")
 
     return {
@@ -341,3 +391,4 @@ def get_history(
         "to": to_ts,
         "points": rows,
     }
+}
