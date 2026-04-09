@@ -391,4 +391,3 @@ def get_history(
         "to": to_ts,
         "points": rows,
     }
-}
