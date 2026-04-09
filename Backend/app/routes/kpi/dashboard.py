@@ -17,13 +17,57 @@ router = APIRouter(prefix="/kpi", tags=["kpi"])
 def kpi_ping():
     return {"ok": True, "module": "kpi", "tz": LOCAL_TZ}
 
-# ---- Estado de bombas (v_pumps_with_status) ----
-@router.get("/pumps/status", summary="Estado de bombas (vista kpi.v_pumps_with_status)")
+# ---- Estado de bombas / listado liviano ----
+@router.get("/pumps/status", summary="Bombas para selector o estado operativo")
 def list_pumps_status(
     company_id: Optional[int] = Query(None, description="Filtra por empresa"),
-    location_id: Optional[int] = Query(None, description="Filtra por localidad específica")
+    location_id: Optional[int] = Query(None, description="Filtra por localidad específica"),
+    include_status: bool = Query(False, description="Si true, agrega estado/heartbeat/latest event"),
 ):
-    _log_scope("/pumps/status", company_id=company_id, location_id=location_id)
+    _log_scope(
+        "/pumps/status",
+        company_id=company_id,
+        location_id=location_id,
+        include_status=include_status,
+    )
+
+    # ---------- MODO LIVIANO: ideal para selectores ----------
+    if not include_status:
+        sql = """
+        SELECT
+          p.id AS pump_id,
+          p.name,
+          p.location_id,
+          l.name AS location_name
+        FROM public.pumps p
+        JOIN public.locations l ON l.id = p.location_id
+        WHERE (%s::bigint IS NULL OR l.company_id = %s::bigint)
+          AND (%s::bigint IS NULL OR l.id = %s::bigint)
+        ORDER BY p.id
+        """
+        params: List[Any] = [company_id, company_id, location_id, location_id]
+
+        with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            logger.debug(
+                "[KPI] /pumps/status LIVIANO SQL WHERE company_id=%s, location_id=%s",
+                company_id, location_id
+            )
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            _log_rows("/pumps/status[lite]", rows)
+            _log_distinct_company_of_locations(cur, "/pumps/status[lite]", company_id, rows)
+
+        return [
+            {
+                "pump_id": r["pump_id"],
+                "name": r["name"],
+                "location_id": r["location_id"],
+                "location_name": r["location_name"],
+            }
+            for r in rows
+        ]
+
+    # ---------- MODO PESADO: operativo / estado ----------
     sql = """
     SELECT
       v.pump_id, v.name, v.location_id, v.location_name, v.state,
@@ -31,20 +75,20 @@ def list_pumps_status(
     FROM kpi.v_pumps_with_status v
     JOIN public.locations l ON l.id = v.location_id
     WHERE (%s::bigint IS NULL OR l.company_id = %s::bigint)
+      AND (%s::bigint IS NULL OR l.id = %s::bigint)
+    ORDER BY v.pump_id
     """
-    params: List[Any] = [company_id, company_id]
-    if location_id is not None:
-        sql += " AND l.id = %s::bigint"
-        params.append(location_id)
-    sql += " ORDER BY v.pump_id"
+    params = [company_id, company_id, location_id, location_id]
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        logger.debug("[KPI] /pumps/status ejecutando SQL (firma) WHERE company_id=%s, location_id=%s",
-                     company_id, location_id)
+        logger.debug(
+            "[KPI] /pumps/status PESADO SQL WHERE company_id=%s, location_id=%s",
+            company_id, location_id
+        )
         cur.execute(sql, tuple(params))
         rows = cur.fetchall()
-        _log_rows("/pumps/status", rows)
-        _log_distinct_company_of_locations(cur, "/pumps/status", company_id, rows)
+        _log_rows("/pumps/status[full]", rows)
+        _log_distinct_company_of_locations(cur, "/pumps/status[full]", company_id, rows)
 
     out = []
     for r in rows:

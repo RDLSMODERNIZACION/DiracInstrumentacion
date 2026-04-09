@@ -66,12 +66,16 @@ export default function Widget() {
   useEffect(() => {
     let mounted = true;
 
+    // limpiar inmediatamente al cambiar ubicación
+    setPumpOptions([]);
+    setTankOptions([]);
+    setSelectedPumpIds("all");
+    setSelectedTankIds("all");
+
     if (!locId) {
-      setPumpOptions([]);
-      setTankOptions([]);
-      setSelectedPumpIds("all");
-      setSelectedTankIds("all");
-      return;
+      return () => {
+        mounted = false;
+      };
     }
 
     (async () => {
@@ -80,13 +84,16 @@ export default function Widget() {
           listPumps({ locationId: locId }),
           listTanks({ locationId: locId }),
         ]);
+
         if (!mounted) return;
-        setPumpOptions(p);
-        setTankOptions(t);
-        setSelectedPumpIds("all");
-        setSelectedTankIds("all");
+
+        setPumpOptions(Array.isArray(p) ? p : []);
+        setTankOptions(Array.isArray(t) ? t : []);
       } catch (e) {
+        if (!mounted) return;
         console.error("[filters] list error:", e);
+        setPumpOptions([]);
+        setTankOptions([]);
       }
     })();
 
@@ -102,13 +109,13 @@ export default function Widget() {
   const liveSync = useLiveOps({
     locationId: locId,
     periodHours: 24,
-    bucket: "5min", // ✅ antes estaba 1min (eso te mataba)
+    bucket: "5min",
     pollMs,
     pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
     tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
   });
 
-  // Playback + dominio + series (lo usamos pero SOLO lo mostramos dentro de Auditoría)
+  // Playback + dominio + series
   const playback = usePlayback({
     locId,
     tab,
@@ -119,7 +126,7 @@ export default function Widget() {
     selectedTankIds,
   });
 
-  // Auditoría (segunda ubicación; usa el MISMO dominio del playback)
+  // Auditoría
   const [auditEnabled, setAuditEnabled] = useState(false);
   const [auditLoc, setAuditLoc] = useState<number | "">("");
   const audit = useAudit({
