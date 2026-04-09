@@ -140,22 +140,26 @@ def list_network_analyzers(
             na.created_at
         from public.network_analyzers na
         left join public.locations l on l.id = na.location_id
-        where (%(location_id)s is null or na.location_id = %(location_id)s)
-          and (%(company_id)s is null or l.company_id = %(company_id)s)
-          and (%(active_only)s = false or na.active = true)
-        order by na.id
+        where 1=1
     """
+    params: Dict[str, Any] = {}
+
+    if location_id is not None:
+        sql += " and na.location_id = %(location_id)s"
+        params["location_id"] = location_id
+
+    if company_id is not None:
+        sql += " and l.company_id = %(company_id)s"
+        params["company_id"] = company_id
+
+    if active_only:
+        sql += " and na.active = true"
+
+    sql += " order by na.id"
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                sql,
-                {
-                    "location_id": location_id,
-                    "company_id": company_id,
-                    "active_only": active_only,
-                },
-            )
+            cur.execute(sql, params)
             rows = cur.fetchall() or []
 
     return rows
