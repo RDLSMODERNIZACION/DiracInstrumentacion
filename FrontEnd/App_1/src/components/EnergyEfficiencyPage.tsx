@@ -16,7 +16,24 @@ import {
 
 import { getApiRoot, getApiHeaders } from "@/lib/config";
 
-type Props = { analyzerId?: number };
+type Props = {
+  analyzerId?: number;
+  locationId?: number;
+};
+
+type AnalyzerOption = {
+  id: number;
+  name: string;
+  location_id: number | null;
+  location_name?: string | null;
+  company_id?: number | null;
+  model?: string | null;
+  ip?: string | null;
+  port?: number | null;
+  unit_id?: number | null;
+  active?: boolean;
+  created_at?: string | null;
+};
 
 type LatestReading = {
   id: number;
@@ -39,12 +56,12 @@ type KpiMinuteRow = {
 };
 
 type KpiDayRow = {
-  ts: string; // YYYY-MM-DD o date
+  ts: string;
   kwh_est: number | null;
   kw_avg: number | null;
   kw_max: number | null;
   pf_avg: number | null;
-  pf_min: number | null; // lo usamos para “en algún momento estuvo bajo”
+  pf_min: number | null;
   samples: number | null;
 };
 
@@ -83,7 +100,7 @@ function addDays(dateStr: string, delta: number) {
 
 // TZ Argentina
 const AR_TZ = "America/Argentina/Buenos_Aires";
-const PF_REF = 0.95; // umbral fijo para pintar rojo si estuvo bajo “en algún momento”
+const PF_REF = 0.95;
 
 function startOfDayISO_AR(dateStr: string) {
   return `${dateStr}T00:00:00-03:00`;
@@ -125,6 +142,26 @@ function nextMonth(monthStr: string) {
   const d = new Date(Date.UTC(y, m - 1, 1));
   d.setUTCMonth(d.getUTCMonth() + 1);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+async function fetchAnalyzersByLocation(locationId: number, signal?: AbortSignal): Promise<AnalyzerOption[]> {
+  const root = getApiRoot();
+  const url = `${root}/components/network_analyzers?location_id=${locationId}`;
+
+  const r = await fetch(url, {
+    method: "GET",
+    headers: getApiHeaders({ "Content-Type": undefined as any }),
+    cache: "no-store",
+    signal,
+  });
+
+  if (!r.ok) {
+    const txt = await r.text().catch(() => "");
+    throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
+  }
+
+  const json = await r.json();
+  return Array.isArray(json) ? json : json?.value ?? [];
 }
 
 async function fetchLatestNoScope(analyzerId: number, signal?: AbortSignal): Promise<LatestReading> {
@@ -186,9 +223,16 @@ function SoftBadge({ ok, text }: { ok: boolean; text: string }) {
   );
 }
 
-export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1 }: Props) {
+export default function EnergyEfficiencyPage({
+  analyzerId: initialAnalyzerId = 1,
+  locationId,
+}: Props) {
   const [analyzerId, setAnalyzerId] = useState<number>(initialAnalyzerId);
   const [mode, setMode] = useState<Mode>("live");
+
+  const [analyzers, setAnalyzers] = useState<AnalyzerOption[]>([]);
+  const [loadingAnalyzers, setLoadingAnalyzers] = useState(false);
+  const [analyzersError, setAnalyzersError] = useState<string | null>(null);
 
   const today = useMemo(() => isoDate(new Date()), []);
   const thisMonth = useMemo(() => today.slice(0, 7), [today]);
@@ -196,7 +240,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   const [selectedDay, setSelectedDay] = useState<string>(today);
   const [selectedMonth, setSelectedMonth] = useState<string>(thisMonth);
 
-  // Mes: spike de kWh (% sobre promedio) + tarifa configurable
   const [spikePct, setSpikePct] = useState<number>(25);
   const [tariffArsPerKwh, setTariffArsPerKwh] = useState<number>(0);
 
@@ -215,13 +258,11 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
   useEffect(() => localStorage.setItem("dirac.tariff_ars_kwh", String(tariffArsPerKwh)), [tariffArsPerKwh]);
   useEffect(() => localStorage.setItem("dirac.kwh_spike_pct", String(spikePct)), [spikePct]);
 
-  // LIVE
   const [latest, setLatest] = useState<LatestReading | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [series, setSeries] = useState<LivePoint[]>([]);
   const lastLiveTimerRef = useRef<any>(null);
 
-  // HIST
   const [histError, setHistError] = useState<string | null>(null);
   const [dayRows, setDayRows] = useState<KpiMinuteRow[]>([]);
   const [monthRows, setMonthRows] = useState<KpiDayRow[]>([]);
@@ -237,9 +278,53 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     setLoadingHist(false);
   }
 
-  // Polling LIVE
+  useEffect(() => {
+    if (!locationId) {
+      setAnalyzers([]);
+      setAnalyzersError(null);
+      setLoadingAnalyzers(false);
+      return;
+    }
+
+    let alive = true;
+    const ctrl = new AbortController();
+
+    async function run() {
+      try {
+        setLoadingAnalyzers(true);
+        setAnalyzersError(null);
+
+        const rows = await fetchAnalyzersByLocation(locationId, ctrl.signal);
+        if (!alive) return;
+
+        setAnalyzers(rows);
+
+        const exists = rows.some((a) => a.id === analyzerId);
+        if (!exists && rows.length > 0) {
+          setAnalyzerId(rows[0].id);
+          resetAll();
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setAnalyzers([]);
+        setAnalyzersError(e?.message ?? String(e));
+      } finally {
+        if (!alive) return;
+        setLoadingAnalyzers(false);
+      }
+    }
+
+    run();
+
+    return () => {
+      alive = false;
+      ctrl.abort();
+    };
+  }, [locationId]);
+
   useEffect(() => {
     if (mode !== "live") return;
+    if (!analyzerId) return;
 
     let alive = true;
     const ctrl = new AbortController();
@@ -283,9 +368,9 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     };
   }, [analyzerId, mode]);
 
-  // Fetch HIST
   useEffect(() => {
     if (mode === "live") return;
+    if (!analyzerId) return;
 
     let alive = true;
     const ctrl = new AbortController();
@@ -359,9 +444,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     };
   }, [mode, analyzerId, selectedDay, selectedMonth]);
 
-  // -------------------
-  // LIVE chart
-  // -------------------
   const liveChartData = useMemo(
     () =>
       series.map((p) => ({
@@ -372,9 +454,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     [series]
   );
 
-  // -------------------
-  // DAY chart (OK) + max vertical line
-  // -------------------
   const dayDomain = useMemo(() => {
     const start = dayStartMs_AR(selectedDay);
     const end = dayEndMs_AR(selectedDay);
@@ -408,26 +487,21 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return best;
   }, [dayChartData]);
 
-  // KPIs día
   const dayKwAvg = useMemo(() => {
     const vals = dayRows.map((r) => toNum(r.kw_avg)).filter((x): x is number => typeof x === "number");
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [dayRows]);
+
   const dayPfAvg = useMemo(() => {
     const vals = dayRows.map((r) => toNum(r.pf_avg)).filter((x): x is number => typeof x === "number");
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [dayRows]);
+
   const dayPfMin = useMemo(() => {
     const vals = dayRows.map((r) => toNum(r.pf_min)).filter((x): x is number => typeof x === "number");
     return vals.length ? Math.min(...vals) : null;
   }, [dayRows]);
 
-  // -------------------
-  // MONTH chart: kWh/día (barras) + kW avg (línea) + kWh acumulado (línea)
-  // Colores:
-  // - rojo si pf_min < 0.95 (algún momento)
-  // - azul si kWh spike (> prom*(1+spikePct))
-  // -------------------
   const monthChartData = useMemo(() => {
     const rows = [...monthRows].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
     let cum = 0;
@@ -459,7 +533,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [monthRows]);
 
-  // PF “cuadradito” debe ser PROMEDIO / MIN del mes
   const monthPfAvg = useMemo(() => {
     const vals = monthRows.map((r) => r.pf_avg).filter((x): x is number => typeof x === "number");
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -470,7 +543,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return vals.length ? Math.min(...vals) : null;
   }, [monthRows]);
 
-  // kWh pico del mes
   const monthPeak = useMemo(() => {
     let best: { date: string; kwh: number } | null = null;
     for (const r of monthChartData) {
@@ -481,7 +553,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return best;
   }, [monthChartData]);
 
-  // kW pico del mes (y su día) — clickable card -> ir a modo día
   const monthKwPeak = useMemo(() => {
     let best: { date: string; kw: number } | null = null;
     for (const r of monthChartData) {
@@ -524,19 +595,18 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     return "#e5e7eb";
   }
 
-  // LIVE KPIs
   const kwNow = useMemo(() => absKw(latest?.p_kw), [latest?.p_kw]);
   const pfNow = useMemo(() => toNum(latest?.pf), [latest?.pf]);
   const liveKwMax = useMemo(() => (series.length ? Math.max(...series.map((x) => x.kw)) : null), [series]);
 
   const statusText = useMemo(() => {
-    const err = mode === "live" ? liveError : histError;
+    const err = analyzersError || (mode === "live" ? liveError : histError);
     if (err) return { ok: false, text: err };
+    if (loadingAnalyzers) return { ok: true, text: "Cargando analizadores…" };
     if (mode !== "live" && loadingHist) return { ok: true, text: "Cargando…" };
     return { ok: true, text: "OK" };
-  }, [mode, liveError, histError, loadingHist]);
+  }, [analyzersError, mode, liveError, histError, loadingHist, loadingAnalyzers]);
 
-  // Tooltip día
   const dayTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
@@ -552,7 +622,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
     );
   };
 
-  // Tooltip mes
   const monthTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
@@ -606,7 +675,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
 
   return (
     <div className="space-y-3">
-      {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-2">
         <div>
           <div className="text-sm font-medium text-gray-700">Eficiencia Energética</div>
@@ -648,11 +716,19 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                 resetAll();
               }}
               className="border rounded-md px-2 py-1 text-xs bg-white"
+              disabled={loadingAnalyzers || analyzers.length === 0}
             >
-              <option value={1}>ABB #1</option>
-              <option value={2}>ABB #2</option>
-              <option value={3}>ABB #3</option>
-              <option value={4}>ABB #4</option>
+              {loadingAnalyzers ? (
+                <option value="">Cargando...</option>
+              ) : analyzers.length === 0 ? (
+                <option value="">{locationId ? "Sin analizadores" : "Sin locationId"}</option>
+              ) : (
+                analyzers.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
@@ -660,7 +736,12 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         </div>
       </div>
 
-      {/* Config día */}
+      {analyzersError && (
+        <div className="text-[11px] text-amber-700 border rounded-xl bg-amber-50 border-amber-200 px-3 py-2">
+          {analyzersError}
+        </div>
+      )}
+
       {mode === "day" && (
         <div className="border rounded-2xl bg-white p-3">
           <div className="flex items-center gap-2">
@@ -691,7 +772,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         </div>
       )}
 
-      {/* Config mes */}
       {mode === "month" && (
         <div className="border rounded-2xl bg-white p-3">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
@@ -761,7 +841,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         </div>
       )}
 
-      {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
         {mode === "live" ? (
           <>
@@ -828,8 +907,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               <div className="text-[11px] text-gray-400">{selectedMonth}</div>
             </div>
 
-            {/* (SACADO) kWh acumulado (fin) */}
-
             <div className="border rounded-2xl bg-white p-3">
               <div className="text-[11px] text-gray-500">PF prom / PF min (mes)</div>
               <div className="text-xl font-semibold">
@@ -867,7 +944,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
         )}
       </div>
 
-      {/* Chart */}
       <div className="h-72 border rounded-2xl bg-white p-2">
         {mode !== "live" && loadingHist ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">Cargando histórico…</div>
@@ -899,7 +975,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dayChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
-
                 <XAxis
                   dataKey="x"
                   type="number"
@@ -908,12 +983,9 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                   interval="preserveStartEnd"
                   minTickGap={40}
                 />
-
                 <YAxis />
-
                 <Tooltip content={dayTooltip} />
                 <Legend />
-
                 {dayMaxPoint && (
                   <ReferenceLine
                     x={dayMaxPoint.x}
@@ -926,7 +998,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
                     }}
                   />
                 )}
-
                 <Line type="monotone" dataKey="kw" name="kW (minuto)" dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
@@ -963,7 +1034,6 @@ export default function EnergyEfficiencyPage({ analyzerId: initialAnalyzerId = 1
               </Bar>
 
               <Line yAxisId="kw" type="monotone" dataKey="kw_avg" name="kW prom (día)" dot={false} strokeWidth={2} />
-
               <Line yAxisId="kwh" type="monotone" dataKey="kwh_cum" name="kWh acumulado" dot={false} strokeWidth={2} />
             </BarChart>
           </ResponsiveContainer>
