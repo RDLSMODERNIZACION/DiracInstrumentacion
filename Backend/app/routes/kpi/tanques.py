@@ -12,13 +12,57 @@ from ._common import (
 
 router = APIRouter(prefix="/kpi", tags=["kpi-tanques"])
 
-# ---- Últimos niveles + config ----
-@router.get("/tanks/latest", summary="Últimos niveles y config de tanques (kpi.v_tanks_with_config)")
+# ---- Últimos niveles + config / listado liviano ----
+@router.get("/tanks/latest", summary="Tanques para selector o estado live")
 def list_tanks_latest(
     company_id: Optional[int] = Query(None, description="Filtra por empresa"),
-    location_id: Optional[int] = Query(None, description="Filtra por localidad específica")
+    location_id: Optional[int] = Query(None, description="Filtra por localidad específica"),
+    include_live: bool = Query(False, description="Si true, agrega nivel/config/alarma/online"),
 ):
-    _log_scope("/tanks/latest", company_id=company_id, location_id=location_id)
+    _log_scope(
+        "/tanks/latest",
+        company_id=company_id,
+        location_id=location_id,
+        include_live=include_live,
+    )
+
+    # ---------- MODO LIVIANO: ideal para selectores ----------
+    if not include_live:
+        sql = """
+        SELECT
+          t.id AS tank_id,
+          t.name,
+          t.location_id,
+          l.name AS location_name
+        FROM public.tanks t
+        JOIN public.locations l ON l.id = t.location_id
+        WHERE (%s::bigint IS NULL OR l.company_id = %s::bigint)
+          AND (%s::bigint IS NULL OR l.id = %s::bigint)
+        ORDER BY t.id
+        """
+        params: List[Any] = [company_id, company_id, location_id, location_id]
+
+        with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            logger.debug(
+                "[KPI] /tanks/latest LIVIANO SQL WHERE company_id=%s, location_id=%s",
+                company_id, location_id
+            )
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            _log_rows("/tanks/latest[lite]", rows)
+            _log_distinct_company_of_locations(cur, "/tanks/latest[lite]", company_id, rows)
+
+        return [
+            {
+                "tank_id": r["tank_id"],
+                "name": r["name"],
+                "location_id": r["location_id"],
+                "location_name": r["location_name"],
+            }
+            for r in rows
+        ]
+
+    # ---------- MODO PESADO: live/config ----------
     sql = """
     SELECT
       v.tank_id, v.name, v.location_id, v.location_name,
@@ -27,20 +71,20 @@ def list_tanks_latest(
     FROM kpi.v_tanks_with_config v
     JOIN public.locations l ON l.id = v.location_id
     WHERE (%s::bigint IS NULL OR l.company_id = %s::bigint)
+      AND (%s::bigint IS NULL OR l.id = %s::bigint)
+    ORDER BY v.tank_id
     """
-    params: List[Any] = [company_id, company_id]
-    if location_id is not None:
-        sql += " AND l.id = %s::bigint"
-        params.append(location_id)
-    sql += " ORDER BY v.tank_id"
+    params: List[Any] = [company_id, company_id, location_id, location_id]
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        logger.debug("[KPI] /tanks/latest ejecutando SQL (firma) WHERE company_id=%s, location_id=%s",
-                     company_id, location_id)
+        logger.debug(
+            "[KPI] /tanks/latest PESADO SQL WHERE company_id=%s, location_id=%s",
+            company_id, location_id
+        )
         cur.execute(sql, tuple(params))
         rows = cur.fetchall()
-        _log_rows("/tanks/latest", rows)
-        _log_distinct_company_of_locations(cur, "/tanks/latest", company_id, rows)
+        _log_rows("/tanks/latest[full]", rows)
+        _log_distinct_company_of_locations(cur, "/tanks/latest[full]", company_id, rows)
 
     out = []
     for r in rows:
