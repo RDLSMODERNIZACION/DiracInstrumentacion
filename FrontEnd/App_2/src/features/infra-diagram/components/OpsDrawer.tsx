@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { UINode } from "../types";
 import { issuePumpCommand } from "../services/pumps";
+import { API_BASE } from "@/lib/api";
 
 type Props = {
   open: boolean;
@@ -182,7 +183,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
     if (!pumpId) return;
     setMaintErr(null);
     try {
-      const r = await fetch(`/infraestructura/pumps/${pumpId}/maintenance`, {
+      const r = await fetch(`${API_BASE}/infraestructura/pumps/${pumpId}/maintenance`, {
         method: "GET",
         headers: { Accept: "application/json" },
       });
@@ -222,7 +223,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
     setMaintErr(null);
 
     try {
-      const r = await fetch(`/infraestructura/pumps/${pumpId}/maintenance`, {
+      const r = await fetch(`${API_BASE}/infraestructura/pumps/${pumpId}/maintenance`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -262,7 +263,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
     setMaintErr(null);
 
     try {
-      const r = await fetch(`/infraestructura/pumps/maintenance/${currentOrder.id}`, {
+      const r = await fetch(`${API_BASE}/infraestructura/pumps/maintenance/${currentOrder.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -336,11 +337,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
           <button type="button" onClick={() => setTab("acciones")} style={tabBtn(tab === "acciones")}>
             Acciones
           </button>
-          <button
-            type="button"
-            onClick={() => setTab("mantenimiento")}
-            style={tabBtn(tab === "mantenimiento")}
-          >
+          <button type="button" onClick={() => setTab("mantenimiento")} style={tabBtn(tab === "mantenimiento")}>
             Mantenimiento
           </button>
         </div>
