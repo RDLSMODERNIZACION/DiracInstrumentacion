@@ -1,8 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { UINode } from "../../types";
-
-// ❌ NO usar fetchJSON acá porque te agrega ?company_id=...
-// ✅ Usar API_BASE directo (sin scope)
 import { API_BASE } from "@/lib/api";
 
 function toNum(v: any): number | null {
@@ -39,13 +36,10 @@ type LatestReading = {
   id: number;
   analyzer_id: number | null;
   ts: string | null;
-
   p_kw: number | null;
   pf: number | null;
-
   e_kwh_import: number | null;
   e_kwh_export: number | null;
-
   v_l1l2?: number | null;
   v_l3l2?: number | null;
   v_l1l3?: number | null;
@@ -53,22 +47,18 @@ type LatestReading = {
   i_l2?: number | null;
   i_l3?: number | null;
   hz?: number | null;
-
   raw?: any;
   source?: string | null;
 };
 
 function extractAnalyzerId(n: UINode & any): number | null {
-  // ✅ preferimos analyzer_id si existe
   const a = n?.analyzer_id ?? n?.analyzerId ?? n?.analyzer?.id;
   const na = toNum(a);
   if (na !== null && na > 0) return Math.trunc(na);
 
-  // fallback: si el id del nodo es "1" o "001"
   const idNum = toNum(n?.id);
   if (idNum !== null && idNum > 0) return Math.trunc(idNum);
 
-  // fallback si es algo tipo "NA-1"
   const m = String(n?.id ?? "").match(/(\d+)/);
   if (m?.[1]) {
     const k = Number(m[1]);
@@ -90,7 +80,6 @@ async function fetchLatestNoScope(analyzerId: number, signal?: AbortSignal): Pro
 
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
-    // 404: "No readings found" o route no encontrada
     throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
   }
 
@@ -118,7 +107,6 @@ export default function NetworkAnalyzerNodeView({
 }) {
   const pos = getPos(n.id) ?? { x: n.x, y: n.y };
 
-  // ✅ Compacto y legible
   const W = 190;
   const H = 92;
 
@@ -127,7 +115,6 @@ export default function NetworkAnalyzerNodeView({
 
   const analyzerId = useMemo(() => extractAnalyzerId(n as any), [n]);
 
-  // --------- ✅ Traer latest del backend (polling) ----------
   const [latest, setLatest] = useState<LatestReading | null>(null);
   const [latestErr, setLatestErr] = useState<string | null>(null);
 
@@ -153,10 +140,9 @@ export default function NetworkAnalyzerNodeView({
       } catch (e: any) {
         if (!alive) return;
         setLatestErr(e?.message ?? String(e));
-        // mantenemos latest anterior si falla
       } finally {
         if (!alive) return;
-        t = setTimeout(tick, 2000); // ✅ polling 2s
+        t = setTimeout(tick, 2000);
       }
     }
 
@@ -168,7 +154,6 @@ export default function NetworkAnalyzerNodeView({
     };
   }, [analyzerId]);
 
-  // --------- ✅ Online / Offline por ts ----------
   const ageSec = useMemo(() => {
     const ts = latest?.ts;
     if (!ts) return null;
@@ -180,12 +165,11 @@ export default function NetworkAnalyzerNodeView({
 
   const online = useMemo(() => {
     if (ageSec === null) return false;
-    return ageSec <= 180; // 3 minutos
+    return ageSec <= 180;
   }, [ageSec]);
 
   const signals = (n as any).signals ?? null;
 
-  // ✅ Valores: primero latest del backend, si no hay -> señales locales fallback
   const powerKW = useMemo(() => {
     const v = toNum(latest?.p_kw);
     if (v !== null) return v;
@@ -197,6 +181,9 @@ export default function NetworkAnalyzerNodeView({
     if (v !== null) return v;
     return pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]);
   }, [latest?.pf, signals]);
+
+  const pfNum = toNum(pf);
+  const lowPf = pfNum !== null && pfNum < 0.96;
 
   function onMouseDown(e: React.MouseEvent<SVGGElement>) {
     if (!enabled) return;
@@ -236,7 +223,6 @@ export default function NetworkAnalyzerNodeView({
   const vKW = fmt(powerKW, 1);
   const vPF = fmt(pf, 2);
 
-  // ✅ Layout fijo
   const labelX = x0 + 20;
   const unitRight = x0 + W - 18;
   const valueX = unitRight - 28;
@@ -244,11 +230,17 @@ export default function NetworkAnalyzerNodeView({
   const row1Y = y0 + 34;
   const row2Y = y0 + 66;
 
-  const border = !analyzerId ? "#ef4444" : online ? "#1e293b" : "#f59e0b"; // rojo si no hay id, amarillo offline
+  const border = !analyzerId
+    ? "#ef4444"
+    : lowPf
+    ? "#f59e0b"
+    : online
+    ? "#1e293b"
+    : "#f59e0b";
 
   const tipLines = [
     `kW: ${vKW}`,
-    `cosφ: ${vPF}`,
+    `cosφ: ${vPF}${lowPf ? "  (bajo)" : ""}`,
     analyzerId ? `analyzer_id: ${analyzerId}` : `analyzer_id: --`,
     ageSec !== null ? `age: ${ageSec}s` : `age: --`,
     latestErr ? `err: ${latestErr}` : "",
@@ -271,6 +263,10 @@ export default function NetworkAnalyzerNodeView({
           <feDropShadow dx="0" dy="2" stdDeviation="2" floodColor="#000" floodOpacity="0.35" />
         </filter>
 
+        <filter id={`warningGlow-${n.id}`} x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#f59e0b" floodOpacity="0.55" />
+        </filter>
+
         <linearGradient id={`bg-${n.id}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#020617" stopOpacity="0.78" />
           <stop offset="100%" stopColor="#020617" stopOpacity="0.58" />
@@ -286,7 +282,6 @@ export default function NetworkAnalyzerNodeView({
         </g>
       </defs>
 
-      {/* Card */}
       <rect
         x={x0}
         y={y0}
@@ -296,16 +291,14 @@ export default function NetworkAnalyzerNodeView({
         ry={16}
         fill={`url(#bg-${n.id})`}
         stroke={border}
-        strokeWidth={1.4}
-        filter={`url(#shadow-${n.id})`}
+        strokeWidth={lowPf ? 2.2 : 1.4}
+        filter={lowPf ? `url(#warningGlow-${n.id})` : `url(#shadow-${n.id})`}
       />
 
-      {/* ⚡ rayo de fondo */}
       <g transform={`translate(${x0 + 52}, ${y0 - 4}) scale(0.72)`}>
         <use href={`#boltBg-${n.id}`} />
       </g>
 
-      {/* Row 1: kW */}
       <text x={labelX} y={row1Y} style={{ fontSize: 16, fill: "#e2e8f0", fontWeight: 800 }}>
         kW
       </text>
@@ -316,16 +309,56 @@ export default function NetworkAnalyzerNodeView({
         kW
       </text>
 
-      {/* Row 2: cosφ */}
-      <text x={labelX} y={row2Y} style={{ fontSize: 16, fill: "#e2e8f0", fontWeight: 800 }}>
+      {lowPf ? (
+        <rect
+          x={x0 + 10}
+          y={y0 + 48}
+          width={W - 20}
+          height={24}
+          rx={8}
+          ry={8}
+          fill="#f59e0b"
+          fillOpacity={0.12}
+          stroke="#f59e0b"
+          strokeOpacity={0.45}
+        />
+      ) : null}
+
+      <text
+        x={labelX}
+        y={row2Y}
+        style={{
+          fontSize: 16,
+          fill: lowPf ? "#fbbf24" : "#e2e8f0",
+          fontWeight: 800,
+        }}
+      >
         cosφ
       </text>
-      <text x={unitRight} y={row2Y} textAnchor="end" style={{ fontSize: 18, fill: "#f8fafc", fontWeight: 950 }}>
+
+      <text
+        x={unitRight}
+        y={row2Y}
+        textAnchor="end"
+        style={{
+          fontSize: 18,
+          fill: lowPf ? "#fbbf24" : "#f8fafc",
+          fontWeight: 950,
+        }}
+      >
         {vPF}
       </text>
 
-      {/* indicador sutil offline */}
-      {!online && analyzerId ? (
+      {lowPf ? (
+        <text
+          x={x0 + W - 14}
+          y={y0 + 18}
+          textAnchor="end"
+          style={{ fontSize: 10, fill: "#fbbf24", fontWeight: 900, letterSpacing: 0.6 }}
+        >
+          FP BAJO
+        </text>
+      ) : !online && analyzerId ? (
         <text
           x={x0 + W - 14}
           y={y0 + 18}
