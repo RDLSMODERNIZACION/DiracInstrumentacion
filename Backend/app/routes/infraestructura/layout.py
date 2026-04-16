@@ -163,6 +163,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     ✅ Incluye `signals` para manifolds (manifold_signals + latest readings).
     ✅ NUEVO: incluye `network_analyzer` (ABB) desde layout_network_analyzers + network_analyzers.
     ✅ NUEVO: incluye `name` para que el front pueda mostrar nombre de tanque/equipo.
+    ✅ NUEVO: incluye `in_maintenance` para bombas.
 
     OPTIMIZADO (LATERAL + LIMIT 1):
     - Tanques: último tank_ingest por tanque via índice (N lookups, no scan global).
@@ -177,7 +178,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     """
                     SELECT
                       c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
-                      c.name,
+                      c.name, c.in_maintenance,
                       CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
                       c.signals
                     FROM public.v_layout_combined c
@@ -218,6 +219,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     END::text AS alarma,
 
                     t.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -255,6 +257,12 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::text AS alarma,
 
                     p.name::text AS name,
+                    EXISTS (
+                      SELECT 1
+                      FROM public.pump_maintenance_orders pmo
+                      WHERE pmo.pump_id = p.id
+                        AND pmo.status = 'en_proceso'
+                    ) AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -284,6 +292,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     v.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lv.meta AS meta,
@@ -334,6 +343,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     m.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -358,6 +368,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     na.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lna.meta AS meta,
@@ -368,18 +379,18 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   JOIN locs lx ON lx.id = l.id
                 )
 
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM m
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM na
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
-                (company_id,),
+                (companyId,),
             )
             return cur.fetchall()
 
@@ -541,6 +552,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
     ✅ nodes incluye meta para valves y signals para manifolds.
     ✅ NUEVO: incluye network_analyzer (ABB) en scoped.
     ✅ NUEVO: incluye `name`.
+    ✅ NUEVO: incluye `in_maintenance`.
 
     Nota: para máxima performance en el front, podés pedir:
       - /get_layout_combined (nodes)
@@ -553,7 +565,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     """
                     SELECT
                       c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
-                      c.name,
+                      c.name, c.in_maintenance,
                       CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
                       c.signals
                     FROM public.v_layout_combined c
@@ -606,6 +618,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       ELSE NULL
                     END::text AS alarma,
                     t.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -635,6 +648,12 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     p.name::text AS name,
+                    EXISTS (
+                      SELECT 1
+                      FROM public.pump_maintenance_orders pmo
+                      WHERE pmo.pump_id = p.id
+                        AND pmo.status = 'en_proceso'
+                    ) AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -663,6 +682,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     v.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lv.meta AS meta,
@@ -708,6 +728,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     m.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -731,6 +752,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     na.name::text AS name,
+                    FALSE AS in_maintenance,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lna.meta AS meta,
@@ -741,15 +763,15 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   JOIN locs lx ON lx.id = l.id
                 )
 
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM m
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,location_id,location_name,meta,signals FROM na
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
                 (company_id,),
