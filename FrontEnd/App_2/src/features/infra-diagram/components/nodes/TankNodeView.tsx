@@ -4,6 +4,33 @@ import { toNumber } from "../../layout";
 import type { TankNode, PortId } from "../../types";
 import { getNodePorts } from "../../types";
 
+function toNum(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmt(v: any, decimals = 2): string {
+  const n = toNum(v);
+  if (n === null) return "—";
+  return n.toFixed(decimals);
+}
+
+function pickSignal(signals: any, keys: string[]) {
+  if (!signals) return null;
+  for (const k of keys) {
+    const value = signals?.[k];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return null;
+}
+
+function hasAlarmValue(v: any) {
+  if (v === null || v === undefined) return false;
+  const s = String(v).trim().toLowerCase();
+  return s !== "" && s !== "sin alarma" && s !== "ok" && s !== "normal" && s !== "none";
+}
+
 export default function TankNodeView({
   n,
   getPos,
@@ -14,7 +41,7 @@ export default function TankNodeView({
   enabled = true,
   onClick,
 }: {
-  n: TankNode;
+  n: TankNode & { signals?: Record<string, any> | null };
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -35,8 +62,9 @@ export default function TankNodeView({
   const alarmaRaw = (n.alarma || "").toLowerCase();
   const isCritical = ["critico", "crítico", "critical"].includes(alarmaRaw);
   const isWarning = ["alerta", "warning", "warn"].includes(alarmaRaw);
+  const hasAlarm = hasAlarmValue(n.alarma);
 
-  // Borde: si NO está online, gris. Solo rojo/amarillo cuando online.
+  // Borde principal
   const stroke = !isOnline
     ? "#94a3b8"
     : isCritical
@@ -49,21 +77,34 @@ export default function TankNodeView({
   const level = Math.max(0, Math.min(100, levelRaw ?? 0));
   const levelY = P + innerH - (level / 100) * innerH;
 
-  // Si está offline, bajamos la opacidad general para “desactivar”
   const groupOpacity = isOnline ? 1 : 0.55;
-
   const clipId = `clip-${n.id}`;
 
-  // ===== Puertos (para que los caños “salgan” de puntos reales) =====
-  // Por ahora es solo visual (selección de puertos la hacemos después)
   const ports = n.ports ?? getNodePorts("tank");
 
+  // señales para tooltip
+  const signals = (n as any).signals ?? null;
+
+  const ph = pickSignal(signals, [
+    "ph",
+    "pH",
+    "ph_value",
+    "ph_val",
+    "ph_measure",
+    "ph_sensor",
+  ]);
+
+  const residualChlorine = pickSignal(signals, [
+    "cloro_residual",
+    "cloroResidual",
+    "residual_chlorine",
+    "chlorine_residual",
+    "cl_residual",
+    "cloro",
+    "cl2",
+  ]);
+
   const portPos = (pid: PortId) => {
-    // Coordenadas en el sistema del nodo (0..W, 0..H)
-    // Izquierda:
-    //  L1: medio
-    // Derecha:
-    //  R1: arriba, R2: medio, R3: abajo
     const midY = H / 2;
     const topY = P + 12;
     const botY = H - (P + 12);
@@ -90,9 +131,6 @@ export default function TankNodeView({
 
   const PortDot = ({ pid }: { pid: PortId }) => {
     const { x, y } = portPos(pid);
-
-    // “Acople” estilo SCADA: aro oscuro + centro claro
-    // (queda muy bien con la tubería que hicimos)
     const rOuter = 4.2;
     const rInner = 2.6;
 
@@ -101,7 +139,6 @@ export default function TankNodeView({
         <circle r={rOuter} fill="#0f172a" opacity={0.35} />
         <circle r={rInner} fill="#e2e8f0" opacity={0.98} />
 
-        {/* mini “corte” hacia afuera para que se vea como conector */}
         {pid.startsWith("L") && <rect x={-6} y={-1.2} width={6} height={2.4} fill="#0f172a" opacity={0.25} />}
         {pid.startsWith("R") && <rect x={0} y={-1.2} width={6} height={2.4} fill="#0f172a" opacity={0.25} />}
         {pid.startsWith("T") && <rect x={-1.2} y={-6} width={2.4} height={6} fill="#0f172a" opacity={0.25} />}
@@ -111,10 +148,11 @@ export default function TankNodeView({
   };
 
   const tipLines = [
+    `ID: ${n.id ?? "—"}`,
+    `Nombre: ${n.name ?? "—"}`,
     `Online: ${isOnline ? "Sí" : "No"}`,
-    `Nivel: ${levelRaw != null ? `${level}%` : "—"}`,
-    `Alarma: ${n.alarma ?? "—"}`,
-    `Puertos: IN(${(ports.in ?? []).join(", ") || "—"}) / OUT(${(ports.out ?? []).join(", ") || "—"})`,
+    `pH: ${fmt(ph, 2)}`,
+    `Cloro residual: ${fmt(residualChlorine, 2)}`,
   ];
 
   const Pulse = ({ color }: { color: string }) => (
@@ -151,7 +189,6 @@ export default function TankNodeView({
       style={{ cursor: enabled ? "move" : "default" }}
       opacity={groupOpacity}
     >
-      {/* Halo pulsante: solo si está online */}
       {isOnline && isCritical && <Pulse color="#ef4444" />}
       {isOnline && !isCritical && isWarning && <Pulse color="#f59e0b" />}
 
@@ -177,26 +214,56 @@ export default function TankNodeView({
         <rect x={P} y={P} width={innerW} height={innerH / 2.4} fill="url(#lgGlass)" opacity={0.18} />
       </g>
 
-      {/* ===== Puertos visibles (IN/OUT) ===== */}
-      {/* In ports (izquierda) */}
+      {/* Puertos */}
       {(ports.in ?? []).map((pid) => (
         <PortDot key={`in-${pid}`} pid={pid} />
       ))}
-
-      {/* Out ports (derecha / arriba / abajo según pid) */}
       {(ports.out ?? []).map((pid) => (
         <PortDot key={`out-${pid}`} pid={pid} />
       ))}
 
-      {/* etiquetas */}
-      <text x={W / 2} y={20} textAnchor="middle" fontSize={13} className="node-label">
+      {/* Nombre del tanque */}
+      <text
+        x={W / 2}
+        y={20}
+        textAnchor="middle"
+        fontSize={13}
+        className="node-label"
+        style={{ fontWeight: 700 }}
+      >
         {n.name}
       </text>
-      <text x={W / 2} y={H - 14} textAnchor="middle" className="node-subtle">
-        {n.alarma ?? "sin alarma"}
-      </text>
 
-      {/* badge crítico solo online */}
+      {/* Indicador visual de alarma dentro del tanque */}
+      {hasAlarm && (
+        <g transform={`translate(${W - 20}, ${H - 18})`}>
+          <circle
+            r={8}
+            fill={isCritical ? "#fee2e2" : "#fef3c7"}
+            stroke={isCritical ? "#ef4444" : "#f59e0b"}
+            strokeWidth={1.5}
+          />
+          <text
+            x={0}
+            y={3.5}
+            textAnchor="middle"
+            style={{
+              fontSize: 11,
+              fontWeight: 900,
+              fill: isCritical ? "#ef4444" : "#b45309",
+            }}
+          >
+            !
+          </text>
+        </g>
+      )}
+
+      {/* Estado online/offline dentro del tanque */}
+      <g transform={`translate(${14}, ${16})`}>
+        <circle r={4} fill={isOnline ? "#22c55e" : "#94a3b8"} />
+      </g>
+
+      {/* badge crítico */}
       {isOnline && isCritical && (
         <g transform={`translate(${W - 18}, ${18})`}>
           <rect x={-14} y={-8} width={28} height={16} rx={8} fill="#fee2e2" stroke="#ef4444" />
