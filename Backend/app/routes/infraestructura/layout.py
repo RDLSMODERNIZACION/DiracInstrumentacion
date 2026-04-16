@@ -166,6 +166,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     OPTIMIZADO (LATERAL + LIMIT 1):
     - Tanques: último tank_ingest por tanque via índice (N lookups, no scan global).
     - Bombas: último pump_heartbeat por bomba via índice (N lookups, no scan global).
+    - Manifolds: latest por señal desde public.v_manifold_signals_latest.
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -288,37 +289,28 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
                 ),
 
-                ms_last AS (
-                  SELECT DISTINCT ON (r.manifold_signal_id)
-                    r.manifold_signal_id,
-                    r.value,
-                    r.created_at
-                  FROM public.manifold_signal_readings r
-                  ORDER BY r.manifold_signal_id, r.created_at DESC
-                ),
                 m_signals AS (
                   SELECT
-                    s.manifold_id,
-                    MAX(ml.created_at) AS last_ts,
+                    v.manifold_id,
+                    MAX(v.ts) AS last_ts,
                     jsonb_object_agg(
-                      s.signal_type,
+                      v.signal_type,
                       jsonb_build_object(
-                        'id', s.id,
-                        'signal_type', s.signal_type,
-                        'node_id', s.node_id,
-                        'tag', s.tag,
-                        'unit', s.unit,
-                        'scale_mult', s.scale_mult,
-                        'scale_add', s.scale_add,
-                        'min_value', s.min_value,
-                        'max_value', s.max_value,
-                        'value', ml.value,
-                        'ts', ml.created_at
+                        'id', v.manifold_signal_id,
+                        'signal_type', v.signal_type,
+                        'node_id', v.node_id,
+                        'tag', v.tag,
+                        'unit', v.unit,
+                        'scale_mult', v.scale_mult,
+                        'scale_add', v.scale_add,
+                        'min_value', v.min_value,
+                        'max_value', v.max_value,
+                        'value', v.value,
+                        'ts', v.ts
                       )
                     ) AS signals
-                  FROM public.manifold_signals s
-                  LEFT JOIN ms_last ml ON ml.manifold_signal_id = s.id
-                  GROUP BY s.manifold_id
+                  FROM public.v_manifold_signals_latest v
+                  GROUP BY v.manifold_id
                 ),
 
                 m AS (
@@ -533,7 +525,6 @@ async def update_layout(request: Request):
         )
 
 
-
 # -------------------------------------------------------------------
 # GET /infraestructura/bootstrap_layout
 # -------------------------------------------------------------------
@@ -671,35 +662,28 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_valves lv ON lv.valve_id = v.id
                 ),
 
-                ms_last AS (
-                  SELECT DISTINCT ON (r.manifold_signal_id)
-                    r.manifold_signal_id, r.value, r.created_at
-                  FROM public.manifold_signal_readings r
-                  ORDER BY r.manifold_signal_id, r.created_at DESC
-                ),
                 m_signals AS (
                   SELECT
-                    s.manifold_id,
-                    MAX(ml.created_at) AS last_ts,
+                    v.manifold_id,
+                    MAX(v.ts) AS last_ts,
                     jsonb_object_agg(
-                      s.signal_type,
+                      v.signal_type,
                       jsonb_build_object(
-                        'id', s.id,
-                        'signal_type', s.signal_type,
-                        'node_id', s.node_id,
-                        'tag', s.tag,
-                        'unit', s.unit,
-                        'scale_mult', s.scale_mult,
-                        'scale_add', s.scale_add,
-                        'min_value', s.min_value,
-                        'max_value', s.max_value,
-                        'value', ml.value,
-                        'ts', ml.created_at
+                        'id', v.manifold_signal_id,
+                        'signal_type', v.signal_type,
+                        'node_id', v.node_id,
+                        'tag', v.tag,
+                        'unit', v.unit,
+                        'scale_mult', v.scale_mult,
+                        'scale_add', v.scale_add,
+                        'min_value', v.min_value,
+                        'max_value', v.max_value,
+                        'value', v.value,
+                        'ts', v.ts
                       )
                     ) AS signals
-                  FROM public.manifold_signals s
-                  LEFT JOIN ms_last ml ON ml.manifold_signal_id = s.id
-                  GROUP BY s.manifold_id
+                  FROM public.v_manifold_signals_latest v
+                  GROUP BY v.manifold_id
                 ),
 
                 m AS (
