@@ -356,7 +356,10 @@ export default function InfraDiagram() {
 let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   id: n.node_id,
   type: n.type,
-  name: `${n.type} ${n.id}`,
+  name:
+    typeof (n as any).name === "string" && (n as any).name.trim()
+      ? (n as any).name.trim()
+      : `${n.type} ${n.id}`,
   x: numberOr(n.x, 0),
   y: numberOr(n.y, 0),
   online: n.online ?? null,
@@ -366,26 +369,20 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
   location_id: n.location_id ?? null,
   location_name: n.location_name ?? null,
 
-  // ✅ no perder signals en manifolds (P/Q)
   ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
 
-  // ✅ no perder signals en ABB (kW/cosφ/kWh)
-// ✅ ABB: no perder signals + guardar analyzer_id (clave para /latest)
-...(n.type === "network_analyzer"
-  ? (() => {
-      const aid = Number((n as any).analyzer_id ?? n.id);
-      return {
-        signals: (n as any).signals ?? null,
-        analyzer_id: Number.isFinite(aid) ? aid : null,
-      };
-    })()
-  : {}),
+  ...(n.type === "network_analyzer"
+    ? (() => {
+        const aid = Number((n as any).analyzer_id ?? n.id);
+        return {
+          signals: (n as any).signals ?? null,
+          analyzer_id: Number.isFinite(aid) ? aid : null,
+        };
+      })()
+    : {}),
 
-
-  // ✅ CLAVE: no perder meta (rot/flip/model/ports) en valves
   ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
 })) as UINode[];
-
 
 
 

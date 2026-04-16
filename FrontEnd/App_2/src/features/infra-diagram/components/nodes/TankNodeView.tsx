@@ -22,9 +22,7 @@ function pickSignal(signals: any, keys: string[]) {
   for (const k of keys) {
     const raw = signals?.[k];
 
-    // si viene directo
     if (raw !== undefined && raw !== null && raw !== "") {
-      // si viene envuelto como objeto { value: ... }
       if (typeof raw === "object" && raw !== null && "value" in raw) {
         const val = (raw as any).value;
         if (val !== undefined && val !== null && val !== "") return val;
@@ -113,6 +111,7 @@ export default function TankNodeView({
   ]);
 
   const tankName = n.name?.trim() || `Tanque ${n.id}`;
+  const levelText = Number.isFinite(level) ? `${level.toFixed(0)}%` : "—";
 
   const portPos = (pid: PortId) => {
     const midY = H / 2;
@@ -228,19 +227,31 @@ export default function TankNodeView({
         <PortDot key={`out-${pid}`} pid={pid} />
       ))}
 
-      {/* nombre visible */}
       <text
         x={W / 2}
         y={20}
         textAnchor="middle"
         fontSize={13}
         className="node-label"
-        style={{ fontWeight: 700 }}
+        style={{ fontWeight: 700, pointerEvents: "none" }}
       >
         {tankName}
       </text>
 
-      {/* alarma dentro del tanque */}
+      <text
+        x={W / 2}
+        y={H / 2 + 6}
+        textAnchor="middle"
+        style={{
+          fontSize: 18,
+          fontWeight: 900,
+          fill: "#000000",
+          pointerEvents: "none",
+        }}
+      >
+        {levelText}
+      </text>
+
       {hasAlarm && (
         <g transform={`translate(${W - 20}, ${H - 18})`}>
           <circle
@@ -264,7 +275,6 @@ export default function TankNodeView({
         </g>
       )}
 
-      {/* online/offline */}
       <g transform={`translate(${14}, ${16})`}>
         <circle r={4} fill={isOnline ? "#22c55e" : "#94a3b8"} />
       </g>
