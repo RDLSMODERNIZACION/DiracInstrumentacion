@@ -16,7 +16,7 @@ import {
   getNodePorts as getPortsByType,
 } from "./types";
 
-import { loadLayoutFromStorage, saveLayoutToStorage, importLayout as importLayoutLS } from "@/layout/layoutIO";
+import { saveLayoutToStorage } from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 
@@ -421,17 +421,13 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
 }));
 
 
-    const saved = loadLayoutFromStorage();
-    const cleaned = (saved ?? []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-    const nodesWithSaved = cleaned.length ? (importLayoutLS(uiNodes, cleaned) as UINode[]) : uiNodes;
-
-    setNodes(nodesWithSaved);
+    setNodes(uiNodes);
     setEdges(uiEdges);
 
     log("UI NODES", {
-      total: nodesWithSaved.length,
-      byType: summarizeTypes(nodesWithSaved.map((n) => ({ type: n.type }) as any)),
-    });
+  total: uiNodes.length,
+  byType: summarizeTypes(uiNodes.map((n) => ({ type: n.type }) as any)),
+});
     log("UI EDGES", { total: uiEdges.length });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
