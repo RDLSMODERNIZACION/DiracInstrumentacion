@@ -1,4 +1,3 @@
-// src/features/infra-diagram/components/nodes/ManifoldNodeView.tsx
 import React, { useMemo } from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ManifoldNode } from "../../types";
@@ -36,13 +35,9 @@ function Flange({
 
   return (
     <g>
-      {/* cuello */}
       <rect x={neckX} y={y - 5} width={neck} height={10} rx={3} ry={3} fill="#94a3b8" opacity={0.9} />
-      {/* brida */}
       <circle cx={x} cy={y} r={r} fill="#e5e7eb" stroke={stroke} strokeWidth={2.5} />
-      {/* aro interior */}
       <circle cx={x} cy={y} r={r - 3.5} fill="none" stroke="#94a3b8" strokeWidth={1.5} opacity={0.9} />
-      {/* tornillos */}
       {[0, 60, 120, 180, 240, 300].map((a) => {
         const rad = (a * Math.PI) / 180;
         return (
@@ -81,42 +76,30 @@ export default function ManifoldNodeView({
 }) {
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
 
-  // ✅ MÁS GRANDE (legible)
   const w = 230;
   const h = 86;
 
-  // --- Datos (desde backend: signals.pressure / signals.flow) ---
   const pSig = (n as any).signals?.pressure ?? null;
   const qSig = (n as any).signals?.flow ?? null;
 
   const pUnit = String(pSig?.unit ?? "bar").trim() || "bar";
   const qUnit = String(qSig?.unit ?? "mts3/h").trim() || "mts3/h";
 
-  // values
   const pValRaw = pSig?.value ?? pSig?.v ?? null;
   const qValRaw = qSig?.value ?? qSig?.v ?? null;
 
   const pVal = formatValue(pValRaw, 1);
   const qVal = formatValue(qValRaw, 1);
 
-  // timestamps (para tooltip)
-  const pTs = pSig?.ts ?? pSig?.updated_at ?? null;
-  const qTs = qSig?.ts ?? qSig?.updated_at ?? null;
-
-  // ✅ Estado conectado: preferimos online (viene del backend con regla 10 min).
-  // Fallback: si no viene online, inferimos por "tiene algún valor numérico".
   const hasValue = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
   const connected = (n as any).online === true ? true : (n as any).online === false ? false : hasValue;
 
-  // ✅ Texto base (solo valida número)
   const pTextVal = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
   const qTextVal = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
 
-  // ✅ Texto a mostrar: si está OFFLINE => siempre "--" (aunque haya último valor guardado)
   const pTextShow = connected ? pTextVal : `-- ${pUnit}`;
   const qTextShow = connected ? qTextVal : `-- ${qUnit}`;
 
-  // Alarma por min/max si existen (opcional)
   const pMin = pSig?.min_value;
   const pMax = pSig?.max_value;
   const qMin = qSig?.min_value;
@@ -137,28 +120,19 @@ export default function ManifoldNodeView({
 
   const alarm = !!(pAlarm || qAlarm);
 
-  // Tags para tooltip
-  const pTag = String(pSig?.tag ?? "").trim();
-  const qTag = String(qSig?.tag ?? "").trim();
-
   const tipLines = useMemo(() => {
-    const lines: string[] = [];
-    lines.push(`P: ${pTextShow}${pTag ? ` (${pTag})` : ""}`);
-    lines.push(`Q: ${qTextShow}${qTag ? ` (${qTag})` : ""}`);
-    if (pTs) lines.push(`P ts: ${String(pTs)}`);
-    if (qTs) lines.push(`Q ts: ${String(qTs)}`);
-    lines.push(connected ? "Estado: Online (≤10 min)" : "Estado: Offline / sin datos");
-    if (alarm) lines.push("⚠️ Alarma: fuera de rango");
-    return lines;
-  }, [pTextShow, qTextShow, pTag, qTag, pTs, qTs, connected, alarm]);
+    return [
+      `ID: ${n.id ?? "—"}`,
+      `Presión: ${pTextShow}`,
+      `Caudal: ${qTextShow}`,
+    ];
+  }, [n.id, pTextShow, qTextShow]);
 
-  // --- Estilos por estado ---
   const stroke = alarm ? "#ef4444" : connected ? "#22c55e" : "#475569";
   const strokeW = alarm ? 3 : connected ? 3 : 2;
   const fill = connected ? "url(#lgSteel)" : "url(#lgSteelDim)";
   const filterId = alarm ? "glowRed" : connected ? "glowGreen" : undefined;
 
-  // Layout filas
   const rowH = 28;
   const gapY = 10;
   const startY = (h - (rowH * 2 + gapY)) / 2;
@@ -184,14 +158,11 @@ export default function ManifoldNodeView({
       className="node-shadow"
       style={{ cursor: enabled ? "move" : "default" }}
     >
-      {/* defs: dim + glow */}
       <defs>
         <linearGradient id="lgSteelDim" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#cbd5e1" stopOpacity="0.55" />
           <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.55" />
         </linearGradient>
-
-        {/* OJO: lgSteel ya existe en tu SVG global (si no, definilo ahí). */}
 
         <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
           <feGaussianBlur stdDeviation="2.2" result="blur" />
@@ -230,11 +201,9 @@ export default function ManifoldNodeView({
         </filter>
       </defs>
 
-      {/* Bridas (conexión al caño) */}
       <Flange x={0} y={h / 2} side="left" active={connected} alarm={alarm} />
       <Flange x={w} y={h / 2} side="right" active={connected} alarm={alarm} />
 
-      {/* Base */}
       <rect
         width={w}
         height={h}
@@ -246,7 +215,6 @@ export default function ManifoldNodeView({
         filter={filterId ? `url(#${filterId})` : undefined}
       />
 
-      {/* indicador mini */}
       <circle
         cx={w - 18}
         cy={18}
@@ -256,7 +224,6 @@ export default function ManifoldNodeView({
         strokeOpacity={0.22}
       />
 
-      {/* Fila P */}
       <g transform={`translate(0, ${startY})`}>
         <rect
           x={leftPad}
@@ -291,7 +258,6 @@ export default function ManifoldNodeView({
         </text>
       </g>
 
-      {/* Fila Q */}
       <g transform={`translate(0, ${startY + rowH + gapY})`}>
         <rect
           x={leftPad}
