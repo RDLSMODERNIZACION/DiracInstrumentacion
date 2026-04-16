@@ -118,9 +118,9 @@ export default function NetworkAnalyzerNodeView({
 }) {
   const pos = getPos(n.id) ?? { x: n.x, y: n.y };
 
-  // ✅ Compacto y legible (no largo)
+  // ✅ Compacto y legible
   const W = 190;
-  const H = 120;
+  const H = 92;
 
   const x0 = pos.x - W / 2;
   const y0 = pos.y - H / 2;
@@ -198,13 +198,6 @@ export default function NetworkAnalyzerNodeView({
     return pickSignal(signals, ["pf", "cosphi", "cos_phi", "power_factor"]);
   }, [latest?.pf, signals]);
 
-  // ✅ Row 3: por ahora mostramos kWh import (total import)
-  const kwh = useMemo(() => {
-    const v = toNum(latest?.e_kwh_import);
-    if (v !== null) return v;
-    return pickSignal(signals, ["kwh", "kwh_import", "energy_kwh", "e_kwh_import"]);
-  }, [latest?.e_kwh_import, signals]);
-
   function onMouseDown(e: React.MouseEvent<SVGGElement>) {
     if (!enabled) return;
     e.stopPropagation();
@@ -242,23 +235,20 @@ export default function NetworkAnalyzerNodeView({
 
   const vKW = fmt(powerKW, 1);
   const vPF = fmt(pf, 2);
-  const vKWh = fmt(kwh, 0);
 
-  // ✅ Layout fijo (no se corre)
+  // ✅ Layout fijo
   const labelX = x0 + 20;
   const unitRight = x0 + W - 18;
   const valueX = unitRight - 28;
 
   const row1Y = y0 + 34;
   const row2Y = y0 + 66;
-  const row3Y = y0 + 96;
 
   const border = !analyzerId ? "#ef4444" : online ? "#1e293b" : "#f59e0b"; // rojo si no hay id, amarillo offline
 
   const tipLines = [
     `kW: ${vKW}`,
     `cosφ: ${vPF}`,
-    `kWh: ${vKWh}`,
     analyzerId ? `analyzer_id: ${analyzerId}` : `analyzer_id: --`,
     ageSec !== null ? `age: ${ageSec}s` : `age: --`,
     latestErr ? `err: ${latestErr}` : "",
@@ -311,7 +301,7 @@ export default function NetworkAnalyzerNodeView({
       />
 
       {/* ⚡ rayo de fondo */}
-      <g transform={`translate(${x0 + 52}, ${y0 + 10}) scale(0.85)`}>
+      <g transform={`translate(${x0 + 52}, ${y0 - 4}) scale(0.72)`}>
         <use href={`#boltBg-${n.id}`} />
       </g>
 
@@ -332,17 +322,6 @@ export default function NetworkAnalyzerNodeView({
       </text>
       <text x={unitRight} y={row2Y} textAnchor="end" style={{ fontSize: 18, fill: "#f8fafc", fontWeight: 950 }}>
         {vPF}
-      </text>
-
-      {/* Row 3: kWh */}
-      <text x={labelX} y={row3Y} style={{ fontSize: 16, fill: "#e2e8f0", fontWeight: 800 }}>
-        kWh
-      </text>
-      <text x={valueX} y={row3Y} textAnchor="end" style={{ fontSize: 18, fill: "#f8fafc", fontWeight: 950 }}>
-        {vKWh}
-      </text>
-      <text x={unitRight} y={row3Y} textAnchor="end" style={{ fontSize: 13, fill: "#94a3b8", fontWeight: 800 }}>
-        kWh
       </text>
 
       {/* indicador sutil offline */}
