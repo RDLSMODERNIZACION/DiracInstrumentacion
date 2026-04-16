@@ -18,10 +18,21 @@ function fmt(v: any, decimals = 2): string {
 
 function pickSignal(signals: any, keys: string[]) {
   if (!signals) return null;
+
   for (const k of keys) {
-    const value = signals?.[k];
-    if (value !== undefined && value !== null && value !== "") return value;
+    const raw = signals?.[k];
+
+    // si viene directo
+    if (raw !== undefined && raw !== null && raw !== "") {
+      // si viene envuelto como objeto { value: ... }
+      if (typeof raw === "object" && raw !== null && "value" in raw) {
+        const val = (raw as any).value;
+        if (val !== undefined && val !== null && val !== "") return val;
+      }
+      return raw;
+    }
   }
+
   return null;
 }
 
@@ -41,7 +52,7 @@ export default function TankNodeView({
   enabled = true,
   onClick,
 }: {
-  n: TankNode & { signals?: Record<string, any> | null };
+  n: TankNode & { signals?: Record<string, any> | null; name?: string | null };
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -59,12 +70,11 @@ export default function TankNodeView({
   const innerH = H - 2 * P;
 
   const isOnline = n.online === true;
-  const alarmaRaw = (n.alarma || "").toLowerCase();
+  const alarmaRaw = String(n.alarma || "").toLowerCase();
   const isCritical = ["critico", "crítico", "critical"].includes(alarmaRaw);
   const isWarning = ["alerta", "warning", "warn"].includes(alarmaRaw);
   const hasAlarm = hasAlarmValue(n.alarma);
 
-  // Borde principal
   const stroke = !isOnline
     ? "#94a3b8"
     : isCritical
@@ -81,8 +91,6 @@ export default function TankNodeView({
   const clipId = `clip-${n.id}`;
 
   const ports = n.ports ?? getNodePorts("tank");
-
-  // señales para tooltip
   const signals = (n as any).signals ?? null;
 
   const ph = pickSignal(signals, [
@@ -103,6 +111,8 @@ export default function TankNodeView({
     "cloro",
     "cl2",
   ]);
+
+  const tankName = n.name?.trim() || `Tanque ${n.id}`;
 
   const portPos = (pid: PortId) => {
     const midY = H / 2;
@@ -149,7 +159,7 @@ export default function TankNodeView({
 
   const tipLines = [
     `ID: ${n.id ?? "—"}`,
-    `Nombre: ${n.name ?? "—"}`,
+    `Nombre: ${tankName}`,
     `Online: ${isOnline ? "Sí" : "No"}`,
     `pH: ${fmt(ph, 2)}`,
     `Cloro residual: ${fmt(residualChlorine, 2)}`,
@@ -181,8 +191,8 @@ export default function TankNodeView({
       onPointerDown={drag.onPointerDown}
       onPointerMove={drag.onPointerMove}
       onPointerUp={drag.onPointerUp}
-      onMouseEnter={(e) => showTip(e, { title: n.name, lines: tipLines })}
-      onMouseMove={(e) => showTip(e, { title: n.name, lines: tipLines })}
+      onMouseEnter={(e) => showTip(e, { title: tankName, lines: tipLines })}
+      onMouseMove={(e) => showTip(e, { title: tankName, lines: tipLines })}
       onMouseLeave={hideTip}
       onClick={onClick}
       className="node-shadow"
@@ -198,23 +208,19 @@ export default function TankNodeView({
         </clipPath>
       </defs>
 
-      {/* cuerpo del tanque */}
       <rect width={W} height={H} rx={16} ry={16} fill="url(#lgTank)" stroke={stroke} strokeWidth={2.2} />
 
-      {/* marcas laterales */}
       {Array.from({ length: 5 }).map((_, i) => {
         const yy = P + (i * innerH) / 4;
         return <line key={i} x1={W - P + 2} y1={yy} x2={W - P + 8} y2={yy} stroke="#cbd5e1" strokeWidth={1} />;
       })}
 
-      {/* “agua” */}
       <g clipPath={`url(#${clipId})`}>
         <rect x={P} y={levelY} width={innerW} height={P + innerH - levelY} fill="url(#lgWaterDeep)" />
         <line x1={P} y1={levelY} x2={P + innerW} y2={levelY} stroke="#60a5fa" strokeWidth={1.5} />
         <rect x={P} y={P} width={innerW} height={innerH / 2.4} fill="url(#lgGlass)" opacity={0.18} />
       </g>
 
-      {/* Puertos */}
       {(ports.in ?? []).map((pid) => (
         <PortDot key={`in-${pid}`} pid={pid} />
       ))}
@@ -222,7 +228,7 @@ export default function TankNodeView({
         <PortDot key={`out-${pid}`} pid={pid} />
       ))}
 
-      {/* Nombre del tanque */}
+      {/* nombre visible */}
       <text
         x={W / 2}
         y={20}
@@ -231,10 +237,10 @@ export default function TankNodeView({
         className="node-label"
         style={{ fontWeight: 700 }}
       >
-        {n.name}
+        {tankName}
       </text>
 
-      {/* Indicador visual de alarma dentro del tanque */}
+      {/* alarma dentro del tanque */}
       {hasAlarm && (
         <g transform={`translate(${W - 20}, ${H - 18})`}>
           <circle
@@ -258,12 +264,11 @@ export default function TankNodeView({
         </g>
       )}
 
-      {/* Estado online/offline dentro del tanque */}
+      {/* online/offline */}
       <g transform={`translate(${14}, ${16})`}>
         <circle r={4} fill={isOnline ? "#22c55e" : "#94a3b8"} />
       </g>
 
-      {/* badge crítico */}
       {isOnline && isCritical && (
         <g transform={`translate(${W - 18}, ${18})`}>
           <rect x={-14} y={-8} width={28} height={16} rx={8} fill="#fee2e2" stroke="#ef4444" />
