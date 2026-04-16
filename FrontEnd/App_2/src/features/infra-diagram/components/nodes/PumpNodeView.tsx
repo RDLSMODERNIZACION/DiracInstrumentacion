@@ -12,7 +12,7 @@ export default function PumpNodeView({
   enabled = true,
   onClick,
 }: {
-  n: PumpNode;
+  n: PumpNode & { name?: string | null };
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -32,9 +32,14 @@ export default function PumpNodeView({
   const stroke = isOnline ? "#16a34a" : "#94a3b8";
   const casingFill = "url(#lgSteel)";
   const impellerFill = isRunning && isOnline ? "#0ea5e9" : "#94a3b8";
-  const labelState = (n.state || "bomba").toLowerCase();
 
-  const tipLines = [`Online: ${isOnline ? "Sí" : "No"}`, `Estado: ${labelState}`];
+  const pumpName =
+    typeof n.name === "string" && n.name.trim() ? n.name.trim() : `pump ${n.id}`;
+
+  const tipLines = [
+    `Online: ${isOnline ? "Sí" : "No"}`,
+    `Estado: ${(n.state || "—").toLowerCase()}`,
+  ];
 
   return (
     <g
@@ -42,8 +47,8 @@ export default function PumpNodeView({
       onPointerDown={drag.onPointerDown}
       onPointerMove={drag.onPointerMove}
       onPointerUp={drag.onPointerUp}
-      onMouseEnter={(e) => showTip(e, { title: n.name, lines: tipLines })}
-      onMouseMove={(e) => showTip(e, { title: n.name, lines: tipLines })}
+      onMouseEnter={(e) => showTip(e, { title: pumpName, lines: tipLines })}
+      onMouseMove={(e) => showTip(e, { title: pumpName, lines: tipLines })}
       onMouseLeave={hideTip}
       onClick={onClick}
       className="node-shadow"
@@ -60,7 +65,14 @@ export default function PumpNodeView({
         opacity={0.8}
       >
         {isRunning && isOnline && (
-          <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="2.4s" repeatCount="indefinite" />
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            from="0 0 0"
+            to="360 0 0"
+            dur="2.4s"
+            repeatCount="indefinite"
+          />
         )}
       </circle>
 
@@ -79,17 +91,21 @@ export default function PumpNodeView({
           />
         ))}
         {isRunning && isOnline && (
-          <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="1.1s" repeatCount="indefinite" />
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            from="0 0 0"
+            to="360 0 0"
+            dur="1.1s"
+            repeatCount="indefinite"
+          />
         )}
       </g>
 
       <circle cx={rOuter - 6} cy={-rOuter + 6} r={3.2} fill={isOnline ? "#22c55e" : "#a3a3a3"} />
 
       <text y={-rOuter - 12} textAnchor="middle" fontSize={12} className="node-label">
-        {n.name}
-      </text>
-      <text y={rOuter + 16} textAnchor="middle" className="node-subtle">
-        {labelState}
+        {pumpName}
       </text>
     </g>
   );
