@@ -390,7 +390,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
-                (companyId,),
+                (company_id,),
             )
             return cur.fetchall()
 
@@ -400,7 +400,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
         raise HTTPException(status_code=500, detail=f"DB error (combined): {e}")
 
 
-## -------------------------------------------------------------------
+# -------------------------------------------------------------------
 # POST /infraestructura/update_layout
 # -------------------------------------------------------------------
 @router.post("/update_layout")
@@ -425,7 +425,6 @@ async def update_layout(request: Request):
             detail="Parámetros inválidos: node_id, x, y son requeridos"
         )
 
-    # 1) Si viene con prefijo "tipo:id"
     tipo, _, sufijo = node_id.partition(":")
 
     table_map = {
@@ -433,7 +432,6 @@ async def update_layout(request: Request):
         "manifold": ("layout_manifolds", "manifold_id"),
         "valve": ("layout_valves", "valve_id"),
         "tank": ("layout_tanks", "tank_id"),
-        # ABB / Analizador de red
         "network_analyzer": ("layout_network_analyzers", "analyzer_id"),
     }
 
@@ -451,14 +449,10 @@ async def update_layout(request: Request):
 
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # ------------------------------------------------------------------
-            # A) Caso normal: node_id con prefijo (pump:12, manifold:3, etc.)
-            # ------------------------------------------------------------------
             meta = table_map.get(tipo)
             if meta:
                 table, id_col = meta
                 try:
-                    # si el sufijo es numérico, actualizamos por id
                     id_numeric = int(sufijo)
                     row = _exec_update(
                         cur,
@@ -468,7 +462,6 @@ async def update_layout(request: Request):
                         (x, y, id_numeric),
                     )
                 except ValueError:
-                    # si no es numérico, actualizamos por node_id
                     row = _exec_update(
                         cur,
                         table,
@@ -486,10 +479,6 @@ async def update_layout(request: Request):
                 conn.commit()
                 return {"ok": True, "table": table, "updated": row}
 
-            # ------------------------------------------------------------------
-            # B) NUEVO: node_id sin prefijo (ej: ABB-PLANTA-ESTE-01)
-            #     → primero intentamos layout_network_analyzers
-            # ------------------------------------------------------------------
             row = _exec_update(
                 cur,
                 "layout_network_analyzers",
@@ -505,10 +494,6 @@ async def update_layout(request: Request):
                     "updated": row,
                 }
 
-            # ------------------------------------------------------------------
-            # C) Fallback defensivo: buscar node_id en otros layout_*
-            #    (no debería pasar, pero evita 500 raros)
-            # ------------------------------------------------------------------
             candidates = [
                 ("layout_pumps", "pump_id"),
                 ("layout_manifolds", "manifold_id"),
@@ -590,7 +575,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
                 return {"nodes": nodes, "edges": edges}
 
-            # Scoped: nodes
             cur.execute(
                 """
                 WITH
@@ -740,7 +724,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   LEFT JOIN m_signals ms ON ms.manifold_id = m.id
                 ),
 
-                -- ✅ NUEVO: ABB / Network Analyzers
                 na AS (
                   SELECT
                     lna.node_id AS node_id,
@@ -778,7 +761,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
             )
             nodes = cur.fetchall()
 
-            # Scoped: edges + knots (incluye ABB)
             cur.execute(
                 """
                 WITH nodes AS (
@@ -806,7 +788,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_manifolds lm ON lm.manifold_id=m.id
                   WHERE l.company_id = %s
                   UNION ALL
-                  -- ✅ NUEVO: ABB
                   SELECT lna.node_id
                   FROM public.layout_network_analyzers lna
                   JOIN public.network_analyzers na ON na.id = lna.analyzer_id
