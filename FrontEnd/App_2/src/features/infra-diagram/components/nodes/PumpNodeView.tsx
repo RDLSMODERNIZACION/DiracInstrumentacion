@@ -12,7 +12,7 @@ export default function PumpNodeView({
   enabled = true,
   onClick,
 }: {
-  n: PumpNode & { name?: string | null };
+  n: PumpNode & { name?: string | null; in_maintenance?: boolean | null };
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -27,10 +27,12 @@ export default function PumpNodeView({
   const rInner = 15.5;
   const isRunning = (n.state || "").toLowerCase() === "run";
   const isOnline = n.online === true;
+  const inMaintenance = (n as any).in_maintenance === true;
 
   const groupOpacity = isOnline ? 1 : 0.55;
-  const stroke = isOnline ? "#16a34a" : "#94a3b8";
-  const casingFill = "url(#lgSteel)";
+
+  const stroke = inMaintenance ? "#eab308" : isOnline ? "#16a34a" : "#94a3b8";
+  const casingFill = inMaintenance ? "#fef3c7" : "url(#lgSteel)";
   const impellerFill = isRunning && isOnline ? "#0ea5e9" : "#94a3b8";
 
   const pumpName =
@@ -56,6 +58,7 @@ export default function PumpNodeView({
       opacity={groupOpacity}
     >
       <circle r={rOuter} fill={casingFill} stroke={stroke} strokeWidth={2.8} />
+
       <circle
         r={rOuter - 2}
         fill="none"
@@ -102,7 +105,12 @@ export default function PumpNodeView({
         )}
       </g>
 
-      <circle cx={rOuter - 6} cy={-rOuter + 6} r={3.2} fill={isOnline ? "#22c55e" : "#a3a3a3"} />
+      <circle
+        cx={rOuter - 6}
+        cy={-rOuter + 6}
+        r={3.2}
+        fill={inMaintenance ? "#eab308" : isOnline ? "#22c55e" : "#a3a3a3"}
+      />
 
       <text y={-rOuter - 12} textAnchor="middle" fontSize={12} className="node-label">
         {pumpName}

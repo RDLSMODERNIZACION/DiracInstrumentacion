@@ -30,7 +30,6 @@ import OpsDrawer from "./components/OpsDrawer";
 import LocationDrawer from "./components/LocationDrawer";
 import NetworkAnalyzerNodeView from "./components/nodes/NetworkAnalyzerNodeView";
 
-
 /** =========================
  *  Types
  *  ========================= */
@@ -52,7 +51,6 @@ type UIEdgeWithPorts = UIEdge & {
     strength?: number;
   };
 };
-
 
 type PortSide = "in" | "out";
 type PortHit = { nodeId: string; side: PortSide; portId: string; x: number; y: number };
@@ -123,7 +121,6 @@ function heightByType(t?: string) {
   return 40;
 }
 
-// ✅ Unificado: puertos por tipo desde ./types (para modo conectar)
 function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
   const p = getPortsByType(n.type);
   return {
@@ -173,22 +170,12 @@ function isValveOpen(n: UINode) {
   return s === "open" || s === "on" || s === "1" || s === "true";
 }
 
-
 function isNodePassable(n: UINode) {
-  // ✅ OPCIÓN B:
-  // El manifold NO corta el flujo aunque esté offline
-  // (solo mide, no actúa)
   if (n.type === "manifold") return true;
-
-  // Otros nodos: si están offline, cortan
   if (n.online === false) return false;
-
   return true;
 }
 
-
-
-// ✅ Flujo: dirigido por a->b (src->dst) usando edges del backend
 function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode>) {
   const adj: Record<string, UIEdgeWithPorts[]> = {};
   for (const e of edges) (adj[e.a] ||= []).push(e);
@@ -217,7 +204,6 @@ function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode
       const nextNode = nodesById[nextId];
       if (!nextNode) continue;
 
-      // ✅ si una válvula está cerrada, no pasa
       if (!isNodePassable(nextNode)) continue;
 
       flowOnEdge.add(e.id);
@@ -244,7 +230,6 @@ function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode
  *  ========================= */
 
 export default function InfraDiagram() {
-  // === Debug ===
   const DEBUG = useMemo(() => isDebugEnabled(), []);
   const log = useCallback(
     (...args: any[]) => {
@@ -258,38 +243,30 @@ export default function InfraDiagram() {
   useEffect(() => {
     log("href:", window.location.href);
     log("companyId from query:", companyId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [companyId, log]);
 
-  // State principal
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdgeWithPorts[]>([]);
 
-  // viewBox dinámico
   const [viewBoxStr, setViewBoxStr] = useState(
     `${VIEWBOX_DEFAULT.minx} ${VIEWBOX_DEFAULT.miny} ${VIEWBOX_DEFAULT.w} ${VIEWBOX_DEFAULT.h}`
   );
   const [vb, setVb] = useState(VIEWBOX_DEFAULT);
 
-  // Modes
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
-  // Connect ports (modo conectar)
   const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Ops drawer (por nodo)
   const [opsOpen, setOpsOpen] = useState(false);
   const [opsNode, setOpsNode] = useState<UINode | null>(null);
 
-  // Drawer de localidad
   const [locationDrawerOpen, setLocationDrawerOpen] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ id: number | null; name: string } | null>(null);
 
-  // Tooltip
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
 
@@ -306,9 +283,6 @@ export default function InfraDiagram() {
 
   const hideTip = useCallback(() => setTip(null), []);
 
-  /** =========================
-   *  Navegar a mapa
-   *  ========================= */
   const goToMapa = useCallback(() => {
     try {
       const w: any = window;
@@ -319,9 +293,6 @@ export default function InfraDiagram() {
     }
   }, []);
 
-  /** =========================
-   *  Query live
-   *  ========================= */
   const { data, isFetching, error } = useLiveQuery(
     ["infra", "layout", companyId],
     async (signal) => {
@@ -347,45 +318,40 @@ export default function InfraDiagram() {
     (raw) => raw
   );
 
-  /** =========================
-   *  Transformar backend → UI
-   *  ========================= */
   useEffect(() => {
     if (!data) return;
 
-let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
-  id: n.node_id,
-  type: n.type,
-  name:
-    typeof (n as any).name === "string" && (n as any).name.trim()
-      ? (n as any).name.trim()
-      : `${n.type} ${n.id}`,
-  x: numberOr(n.x, 0),
-  y: numberOr(n.y, 0),
-  online: n.online ?? null,
-  state: n.state ?? null,
-  level_pct: toNumber(n.level_pct),
-  alarma: n.alarma ?? null,
-  location_id: n.location_id ?? null,
-  location_name: n.location_name ?? null,
+    let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
+      id: n.node_id,
+      type: n.type,
+      name:
+        typeof (n as any).name === "string" && (n as any).name.trim()
+          ? (n as any).name.trim()
+          : `${n.type} ${n.id}`,
+      x: numberOr(n.x, 0),
+      y: numberOr(n.y, 0),
+      online: n.online ?? null,
+      state: n.state ?? null,
+      level_pct: toNumber(n.level_pct),
+      alarma: n.alarma ?? null,
+      in_maintenance: (n as any).in_maintenance ?? false,
+      location_id: (n as any).location_id ?? null,
+      location_name: (n as any).location_name ?? null,
 
-  ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
+      ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
 
-  ...(n.type === "network_analyzer"
-    ? (() => {
-        const aid = Number((n as any).analyzer_id ?? n.id);
-        return {
-          signals: (n as any).signals ?? null,
-          analyzer_id: Number.isFinite(aid) ? aid : null,
-        };
-      })()
-    : {}),
+      ...(n.type === "network_analyzer"
+        ? (() => {
+            const aid = Number((n as any).analyzer_id ?? n.id);
+            return {
+              signals: (n as any).signals ?? null,
+              analyzer_id: Number.isFinite(aid) ? aid : null,
+            };
+          })()
+        : {}),
 
-  ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
-})) as UINode[];
-
-
-
+      ...(n.type === "valve" ? { meta: (n as any).meta ?? null } : {}),
+    })) as UINode[];
 
     const pumps = uiNodes.filter((n) => n.type === "pump") as PumpNode[];
     const tanks = uiNodes.filter((n) => n.type === "tank") as TankNode[];
@@ -409,32 +375,27 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
       return { ...n, x, y } as UINode;
     });
 
-  const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e: any) => ({
-  id: e.edge_id,
-  a: e.src_node_id,
-  b: e.dst_node_id,
-  relacion: e.relacion,
-  prioridad: e.prioridad,
-  a_port: e.src_port ?? "R1",
-  b_port: e.dst_port ?? "L1",
-  knots: Array.isArray(e.knots) ? e.knots : [], // ✅ NUEVO
-}));
-
+    const uiEdges: UIEdgeWithPorts[] = (data.edgesRaw ?? []).map((e: any) => ({
+      id: e.edge_id,
+      a: e.src_node_id,
+      b: e.dst_node_id,
+      relacion: e.relacion,
+      prioridad: e.prioridad,
+      a_port: e.src_port ?? "R1",
+      b_port: e.dst_port ?? "L1",
+      knots: Array.isArray(e.knots) ? e.knots : [],
+    }));
 
     setNodes(uiNodes);
     setEdges(uiEdges);
 
     log("UI NODES", {
-  total: uiNodes.length,
-  byType: summarizeTypes(uiNodes.map((n) => ({ type: n.type }) as any)),
-});
+      total: uiNodes.length,
+      byType: summarizeTypes(uiNodes.map((n) => ({ type: n.type }) as any)),
+    });
     log("UI EDGES", { total: uiEdges.length });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, log]);
 
-  /** =========================
-   *  nodesById
-   *  ========================= */
   const nodesById = useMemo(() => {
     const m: Record<string, UINode> = {};
     for (const n of nodes) {
@@ -443,9 +404,6 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
     return m;
   }, [nodes]);
 
-  /** =========================
-   *  viewBox clamp
-   *  ========================= */
   useEffect(() => {
     if (!nodes.length) return;
 
@@ -463,9 +421,6 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
     setViewBoxStr(`${safe.minx} ${safe.miny} ${safe.w} ${safe.h}`);
   }, [nodes]);
 
-  /** =========================
-   *  Fondos por ubicación
-   *  ========================= */
   const locationGroups: LocationGroup[] = useMemo(() => {
     if (!nodes.length) return [];
 
@@ -491,9 +446,6 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
       });
   }, [nodes]);
 
-  /** =========================
-   *  Get/Set pos
-   *  ========================= */
   const getPos = useCallback(
     (id: string) => {
       const n = nodesById[id];
@@ -506,52 +458,41 @@ let uiNodes: UINode[] = (data.nodesRaw ?? []).map((n) => ({
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
   }, []);
 
-
-
   const saveNodePosition = useCallback(
-  async (id: string) => {
-    try {
-      const pos = getPos(id);
-      if (!pos) return;
+    async (id: string) => {
+      try {
+        const pos = getPos(id);
+        if (!pos) return;
 
-      // 1) Guardar local
-      saveLayoutToStorage(nodesByIdAsArray(nodesById));
+        saveLayoutToStorage(nodesByIdAsArray(nodesById));
+        await updateLayout(id, pos.x, pos.y);
 
-      // 2) Guardar DB
-      await updateLayout(id, pos.x, pos.y);
+        log("POSITION SAVED", { id, x: pos.x, y: pos.y });
+      } catch (e) {
+        console.error("Error al actualizar layout:", e);
+      }
+    },
+    [getPos, nodesById, log]
+  );
 
-      log("POSITION SAVED", { id, x: pos.x, y: pos.y });
-    } catch (e) {
-      console.error("Error al actualizar layout:", e);
-    }
-  },
-  [getPos, nodesById, log]
-);
+  const saveNodePositionXY = useCallback(
+    async (id: string, x: number, y: number) => {
+      try {
+        const next = nodesByIdAsArray({
+          ...nodesById,
+          [id]: { ...(nodesById[id] as any), x, y },
+        } as any);
+        saveLayoutToStorage(next);
 
+        await updateLayout(id, x, y);
+        log("POSITION SAVED (XY)", { id, x, y });
+      } catch (e) {
+        console.error("Error al actualizar layout (XY):", e);
+      }
+    },
+    [nodesById, log]
+  );
 
-const saveNodePositionXY = useCallback(
-  async (id: string, x: number, y: number) => {
-    try {
-      // guardo local (para que importLayoutLS no lo pise)
-      const next = nodesByIdAsArray({
-        ...nodesById,
-        [id]: { ...(nodesById[id] as any), x, y },
-      } as any);
-      saveLayoutToStorage(next);
-
-      await updateLayout(id, x, y);
-      log("POSITION SAVED (XY)", { id, x, y });
-    } catch (e) {
-      console.error("Error al actualizar layout (XY):", e);
-    }
-  },
-  [nodesById, log]
-);
-
-
-  /** =========================
-   *  UI actions
-   *  ========================= */
   const toggleEdit = useCallback(() => {
     setEditMode((prev) => {
       const next = !prev;
@@ -589,7 +530,6 @@ const saveNodePositionXY = useCallback(
             b: created.dst_node_id,
             relacion: created.relacion,
             prioridad: created.prioridad,
-            // ✅ modo simple: si el backend todavía no devuelve puertos en create, default
             a_port: (created as any).src_port ?? a_port ?? "R1",
             b_port: (created as any).dst_port ?? b_port ?? "L1",
           },
@@ -619,7 +559,6 @@ const saveNodePositionXY = useCallback(
     [log]
   );
 
-  // Keyboard: Delete para borrar, Esc cancelar
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -683,19 +622,12 @@ const saveNodePositionXY = useCallback(
     setLocationDrawerOpen(true);
   }, []);
 
-  /** =========================
-   *  edgesForRender: SIN auto-asignación (ya viene de backend)
-   *  ========================= */
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
     return simulateFlow(edges, nodesById);
   }, [edges, nodesById]);
 
-  /** =========================
-   *  Render
-   *  ========================= */
   return (
     <div style={{ width: "100%", padding: 0 }}>
-      {/* Barra superior */}
       <div
         style={{
           height: TOPBAR_H,
@@ -773,7 +705,6 @@ const saveNodePositionXY = useCallback(
         </div>
       </div>
 
-      {/* Contenedor principal */}
       {!error && (
         <div
           ref={wrapRef}
@@ -788,10 +719,7 @@ const saveNodePositionXY = useCallback(
             boxSizing: "border-box",
           }}
         >
-         <TransformWrapper initialScale={4.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
-
-
-
+          <TransformWrapper initialScale={4.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -799,7 +727,6 @@ const saveNodePositionXY = useCallback(
                 height="100%"
                 viewBox={viewBoxStr}
                 preserveAspectRatio="xMidYMid meet"
-
                 style={{ display: "block" }}
                 onMouseMove={(e) => {
                   if (!connectFrom) return;
@@ -849,7 +776,6 @@ const saveNodePositionXY = useCallback(
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
 
-                {/* Fondos por localidad */}
                 {locationGroups.map((g) => (
                   <g
                     key={`loc-bg-${g.key}`}
@@ -880,93 +806,87 @@ const saveNodePositionXY = useCallback(
                   </g>
                 ))}
 
-                {/* Edges */}
                 {edgesForRender.map((e) => (
-              <EditableEdge
-  key={`edge-${e.id}`}
-  id={e.id}
-  a={e.a}
-  b={e.b}
-  nodesById={nodesById}
-  editable={editMode}
-  selected={selectedEdgeId === e.id}
-  onSelect={(id) => setSelectedEdgeId(id)}
-  a_port={e.a_port as any}
-  b_port={e.b_port as any}
-  flow={e.flow}
-  knots={e.knots ?? []}   // ✅ NUEVO
-/>
-
+                  <EditableEdge
+                    key={`edge-${e.id}`}
+                    id={e.id}
+                    a={e.a}
+                    b={e.b}
+                    nodesById={nodesById}
+                    editable={editMode}
+                    selected={selectedEdgeId === e.id}
+                    onSelect={(id) => setSelectedEdgeId(id)}
+                    a_port={e.a_port as any}
+                    b_port={e.b_port as any}
+                    flow={e.flow}
+                    knots={e.knots ?? []}
+                  />
                 ))}
 
-               {/* Nodes */}
-{nodes.map((n) =>
-  n.type === "tank" ? (
-    <TankNodeView
-      key={n.id}
-      n={n as TankNode}
-      getPos={getPos}
-      setPos={setPos}
-      onDragEnd={() => saveNodePosition(n.id)}
-      showTip={showTip}
-      hideTip={hideTip}
-      enabled={editMode}
-      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-    />
-  ) : n.type === "pump" ? (
-    <PumpNodeView
-      key={n.id}
-      n={n as PumpNode}
-      getPos={getPos}
-      setPos={setPos}
-      onDragEnd={() => saveNodePosition(n.id)}
-      showTip={showTip}
-      hideTip={hideTip}
-      enabled={editMode}
-      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-    />
-  ) : n.type === "manifold" ? (
-    <ManifoldNodeView
-      key={n.id}
-      n={n as ManifoldNode}
-      getPos={getPos}
-      setPos={setPos}
-      onDragEnd={() => saveNodePosition(n.id)}
-      showTip={showTip}
-      hideTip={hideTip}
-      enabled={editMode}
-      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-    />
-  ) : n.type === "network_analyzer" ? (
-    <NetworkAnalyzerNodeView
-      key={n.id}
-      n={n as any}
-      getPos={getPos}
-      setPos={setPos}
-      onDragEnd={(x, y) => saveNodePositionXY(n.id, x, y)}
+                {nodes.map((n) =>
+                  n.type === "tank" ? (
+                    <TankNodeView
+                      key={n.id}
+                      n={n as TankNode}
+                      getPos={getPos}
+                      setPos={setPos}
+                      onDragEnd={() => saveNodePosition(n.id)}
+                      showTip={showTip}
+                      hideTip={hideTip}
+                      enabled={editMode}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                    />
+                  ) : n.type === "pump" ? (
+                    <PumpNodeView
+                      key={n.id}
+                      n={n as PumpNode}
+                      getPos={getPos}
+                      setPos={setPos}
+                      onDragEnd={() => saveNodePosition(n.id)}
+                      showTip={showTip}
+                      hideTip={hideTip}
+                      enabled={editMode}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                    />
+                  ) : n.type === "manifold" ? (
+                    <ManifoldNodeView
+                      key={n.id}
+                      n={n as ManifoldNode}
+                      getPos={getPos}
+                      setPos={setPos}
+                      onDragEnd={() => saveNodePosition(n.id)}
+                      showTip={showTip}
+                      hideTip={hideTip}
+                      enabled={editMode}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                    />
+                  ) : n.type === "network_analyzer" ? (
+                    <NetworkAnalyzerNodeView
+                      key={n.id}
+                      n={n as any}
+                      getPos={getPos}
+                      setPos={setPos}
+                      onDragEnd={(x, y) => saveNodePositionXY(n.id, x, y)}
+                      showTip={showTip}
+                      hideTip={hideTip}
+                      enabled={editMode}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                    />
+                  ) : n.type === "valve" ? (
+                    <ValveNodeView
+                      key={n.id}
+                      n={n as ValveNode}
+                      getPos={getPos}
+                      setPos={setPos}
+                      onDragEnd={() => saveNodePosition(n.id)}
+                      showTip={showTip}
+                      hideTip={hideTip}
+                      enabled={editMode}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                    />
+                  ) : null
+                )}
 
-      showTip={showTip}
-      hideTip={hideTip}
-      enabled={editMode}
-      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-    />
-  ) : n.type === "valve" ? (
-    <ValveNodeView
-      key={n.id}
-      n={n as ValveNode}
-      getPos={getPos}
-      setPos={setPos}
-      onDragEnd={() => saveNodePosition(n.id)}
-      showTip={showTip}
-      hideTip={hideTip}
-      enabled={editMode}
-      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
-    />
-  ) : null
-)}
-
-
-                {/* Puertos para modo conectar */}
                 {editMode &&
                   connectMode &&
                   nodes.map((n) => {
@@ -1016,7 +936,6 @@ const saveNodePositionXY = useCallback(
                     );
                   })}
 
-                {/* Cable fantasma */}
                 {editMode && connectMode && connectFrom && mouseSvg && (
                   <path
                     d={previewPath(connectFrom.x, connectFrom.y, mouseSvg.x, mouseSvg.y)}
