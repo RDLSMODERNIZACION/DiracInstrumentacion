@@ -39,6 +39,7 @@ export default function PumpNodeView({
     typeof n.name === "string" && n.name.trim() ? n.name.trim() : `pump ${n.id}`;
 
   const tipLines = [
+    `ID: ${n.id}`,
     `Online: ${isOnline ? "Sí" : "No"}`,
     `Estado: ${(n.state || "—").toLowerCase()}`,
   ];
