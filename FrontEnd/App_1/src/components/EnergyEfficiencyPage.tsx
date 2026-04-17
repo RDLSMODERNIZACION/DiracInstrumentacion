@@ -31,7 +31,6 @@ type AnalyzerOption = {
   unit_id?: number | null;
   active?: boolean;
   created_at?: string | null;
-
   contracted_power_kw?: number | null;
   contracted_kw?: number | null;
   max_contracted_kw?: number | null;
@@ -45,7 +44,8 @@ type KpiDayRow = {
   kw_max: number | null;
   pf_avg: number | null;
   pf_min: number | null;
-  kvarh_est?: number | null;
+  q_kvar_avg?: number | null;
+  q_kvar_max?: number | null;
   samples: number | null;
 };
 
@@ -318,7 +318,8 @@ export default function EnergyEfficiencyPage({
             kw_max: toNum(r.kw_max),
             pf_avg: normalizePf(r.pf_avg),
             pf_min: normalizePf(r.pf_min),
-            kvarh_est: toNum(r.kvarh_est ?? r.q_kvarh ?? r.kvarh ?? r.reactive_kvarh),
+            q_kvar_avg: toNum(r.q_kvar_avg ?? r.reactive_kvar_avg ?? r.q_kvar),
+            q_kvar_max: toNum(r.q_kvar_max ?? r.reactive_kvar_max),
             samples: toNum(r.samples) as any,
           }))
           .filter((r) => !!r.ts);
@@ -360,12 +361,18 @@ export default function EnergyEfficiencyPage({
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }, [monthRowsSorted]);
 
-  const reactiveEnergyKvarh = useMemo(() => {
+  const reactiveKvarAvgMonth = useMemo(() => {
     const vals = monthRowsSorted
-      .map((r) => toNum(r.kvarh_est))
+      .map((r) => toNum(r.q_kvar_avg))
       .filter((x): x is number => typeof x === "number");
-    if (!vals.length) return null;
-    return vals.reduce((a, b) => a + b, 0);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [monthRowsSorted]);
+
+  const reactiveKvarMaxMonth = useMemo(() => {
+    const vals = monthRowsSorted
+      .map((r) => toNum(r.q_kvar_max))
+      .filter((x): x is number => typeof x === "number");
+    return vals.length ? Math.max(...vals) : null;
   }, [monthRowsSorted]);
 
   const pfAvgMonth = useMemo(() => {
@@ -406,6 +413,8 @@ export default function EnergyEfficiencyPage({
         kwh: toNum(r.kwh_est) ?? undefined,
         kwhLabel: fmtBarValue(r.kwh_est),
         kw_max: toNum(r.kw_max) ?? undefined,
+        q_kvar_avg: toNum(r.q_kvar_avg) ?? undefined,
+        q_kvar_max: toNum(r.q_kvar_max) ?? undefined,
         pf_avg: pfAvg ?? undefined,
         pf_min: pfMin ?? undefined,
         lowPf,
@@ -421,8 +430,9 @@ export default function EnergyEfficiencyPage({
         <div className="font-medium">{d?.date}</div>
         <div>Consumo: {fmt(d?.kwh, 2, " kWh")}</div>
         <div>Pico: {fmt(d?.kw_max, 2, " kW")}</div>
+        <div>Reactiva prom: {fmt(d?.q_kvar_avg, 2, " kVAr")}</div>
+        <div>Reactiva máx: {fmt(d?.q_kvar_max, 2, " kVAr")}</div>
         <div>PF prom: {fmtPf(d?.pf_avg, 3)}</div>
-        <div>PF min: {fmtPf(d?.pf_min, 3)}</div>
         {d?.lowPf ? <div className="mt-1 text-red-700">PF bajo detectado</div> : null}
       </div>
     );
@@ -563,11 +573,15 @@ export default function EnergyEfficiencyPage({
         </div>
 
         <div className="border-b border-gray-300 p-3">
-          <div className="mb-2 text-sm font-semibold text-gray-900">Energía reactiva y factor de potencia</div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="mb-2 text-sm font-semibold text-gray-900">Potencia reactiva y factor de potencia</div>
+          <div className="grid gap-2 sm:grid-cols-3">
             <ValueBox
-              label="Energía reactiva registrada"
-              value={fmtInt(reactiveEnergyKvarh, " kVArh")}
+              label="Reactiva promedio"
+              value={fmt(reactiveKvarAvgMonth, 2, " kVAr")}
+            />
+            <ValueBox
+              label="Reactiva máxima"
+              value={fmt(reactiveKvarMaxMonth, 2, " kVAr")}
             />
             <ValueBox
               label="Factor de potencia promedio"
