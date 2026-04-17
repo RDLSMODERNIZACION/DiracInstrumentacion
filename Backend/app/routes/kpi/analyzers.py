@@ -1,5 +1,3 @@
-# app/routes/kpi/analyzers.py
-
 from fastapi import APIRouter, Query, HTTPException
 from datetime import datetime, timezone
 from psycopg.rows import dict_row
@@ -11,10 +9,6 @@ router = APIRouter(
     tags=["kpi", "energy", "analyzers"],
 )
 
-
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
 
 def month_bounds_utc(month: str):
     """
@@ -34,26 +28,44 @@ def month_bounds_utc(month: str):
         raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
 
 
-# ------------------------------------------------------------
-# GET /kpi/analyzers/{analyzer_id}/month_kpis
-# KPIs mensuales desde tablas agregadas (kpi.analyzers_1d / 1h)
-# ------------------------------------------------------------
 @router.get("/{analyzer_id}/month_kpis")
 def get_analyzer_month_kpis(
     analyzer_id: int,
     month: str = Query(..., description="YYYY-MM"),
 ):
     """
-    Devuelve KPIs de energía para un analizador en un mes:
-    - summary: max_kw, avg_kw, kwh_est, avg_pf, min_pf, samples
-    - daily:   max_kw / avg_kw / kwh_est por día
-    - hourly:  perfil horario promedio (avg_kw, max_kw)
+    Devuelve KPIs mensuales de energía para un analizador en un mes:
+    - analyzer: metadata del analizador (incluye potencia contratada)
+    - summary:  max_kw, avg_kw, kwh_est, avg_pf, min_pf, reactive_kvar_avg, reactive_kvar_max, samples
+    - daily:    max_kw / avg_kw / kwh_est / pf / reactiva por día
+    - hourly:   perfil horario promedio (avg_kw, max_kw, pf, reactiva)
     """
 
     start_ts, end_ts = month_bounds_utc(month)
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+
+            # ---------------------------
+            # ANALYZER INFO
+            # ---------------------------
+            cur.execute(
+                """
+                select
+                  id,
+                  name,
+                  location_id,
+                  model,
+                  active,
+                  contracted_power_kw
+                from public.network_analyzers
+                where id = %(analyzer_id)s
+                """,
+                {"analyzer_id": analyzer_id},
+            )
+            analyzer = cur.fetchone()
+            if not analyzer:
+                raise HTTPException(status_code=404, detail="Analyzer not found")
 
             # ---------------------------
             # SUMMARY (desde 1d)
@@ -66,6 +78,8 @@ def get_analyzer_month_kpis(
                   sum(kwh_est)         as kwh_est,
                   avg(pf_avg)          as avg_pf,
                   min(pf_min)          as min_pf,
+                  avg(q_kvar_avg)      as reactive_kvar_avg,
+                  max(q_kvar_max)      as reactive_kvar_max,
                   sum(samples)::int    as samples
                 from kpi.analyzers_1d
                 where analyzer_id = %(analyzer_id)s
@@ -81,7 +95,7 @@ def get_analyzer_month_kpis(
             summary = cur.fetchone() or {}
 
             # ---------------------------
-            # DAILY (gráfico max diaria)
+            # DAILY
             # ---------------------------
             cur.execute(
                 """
@@ -92,6 +106,8 @@ def get_analyzer_month_kpis(
                   kwh_est               as kwh_est,
                   pf_avg                as avg_pf,
                   pf_min                as min_pf,
+                  q_kvar_avg            as reactive_kvar_avg,
+                  q_kvar_max            as reactive_kvar_max,
                   samples
                 from kpi.analyzers_1d
                 where analyzer_id = %(analyzer_id)s
@@ -108,7 +124,7 @@ def get_analyzer_month_kpis(
             daily = cur.fetchall() or []
 
             # ---------------------------
-            # HOURLY PROFILE (perfil horario)
+            # HOURLY PROFILE
             # ---------------------------
             cur.execute(
                 """
@@ -118,6 +134,8 @@ def get_analyzer_month_kpis(
                   max(kw_max)                    as max_kw,
                   avg(pf_avg)                    as avg_pf,
                   min(pf_min)                    as min_pf,
+                  avg(q_kvar_avg)                as reactive_kvar_avg,
+                  max(q_kvar_max)                as reactive_kvar_max,
                   sum(samples)::int              as samples
                 from kpi.analyzers_1h
                 where analyzer_id = %(analyzer_id)s
@@ -137,6 +155,7 @@ def get_analyzer_month_kpis(
     return {
         "analyzer_id": analyzer_id,
         "month": month,
+        "analyzer": analyzer,
         "summary": summary,
         "daily": daily,
         "hourly": hourly,
