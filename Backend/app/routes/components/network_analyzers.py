@@ -33,7 +33,6 @@ def parse_ts(v: Any) -> datetime:
 
     if isinstance(v, str):
         s = v.strip()
-        # soporta "Z"
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
         try:
@@ -137,7 +136,8 @@ def list_network_analyzers(
             na.port,
             na.unit_id,
             na.active,
-            na.created_at
+            na.created_at,
+            na.contracted_power_kw
         from public.network_analyzers na
         left join public.locations l on l.id = na.location_id
         where 1=1
@@ -243,7 +243,6 @@ def insert_snapshot(
                 {
                     "analyzer_id": analyzer_id,
                     "ts": ts,
-
                     **n,
                 },
             )
@@ -263,14 +262,21 @@ def get_latest_snapshot(
     fields: Literal["lite", "full"] = Query("lite"),
 ):
     """
-    fields=lite -> solo lo necesario para la pantalla live (más rápido)
+    fields=lite -> solo lo necesario para la pantalla
     fields=full -> devuelve la fila completa
     """
     if analyzer_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid analyzer_id")
 
     select_sql = """
-        select id, analyzer_id, ts, p_kw, pf, source
+        select
+            id,
+            analyzer_id,
+            ts,
+            p_kw,
+            q_kvar,
+            pf,
+            source
         from public.network_analyzer_readings
         where analyzer_id = %(analyzer_id)s
         order by ts desc
@@ -318,7 +324,6 @@ def get_history(
     if analyzer_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid analyzer_id")
 
-    # normaliza/asegura tz (si llega naive, asumimos UTC)
     if from_ts.tzinfo is None:
         from_ts = from_ts.replace(tzinfo=timezone.utc)
     if to_ts.tzinfo is None:
@@ -333,12 +338,16 @@ def get_history(
         select_cols = """
             analyzer_id,
             minute_ts as ts,
-            kw_avg, kw_max,
-            pf_avg, pf_min,
-            v_ll_avg, i_avg,
+            kw_avg,
+            kw_max,
+            pf_avg,
+            pf_min,
+            v_ll_avg,
+            i_avg,
             samples
         """
         order = "minute_ts"
+
     elif granularity == "hour":
         table = "kpi.analyzers_1h"
         ts_col = "hour_ts"
@@ -346,11 +355,16 @@ def get_history(
             analyzer_id,
             hour_ts as ts,
             kwh_est,
-            kw_avg, kw_max,
-            pf_avg, pf_min,
+            kw_avg,
+            kw_max,
+            pf_avg,
+            pf_min,
+            q_kvar_avg,
+            q_kvar_max,
             samples
         """
         order = "hour_ts"
+
     else:
         table = "kpi.analyzers_1d"
         ts_col = "day_ts"
@@ -358,8 +372,12 @@ def get_history(
             analyzer_id,
             day_ts as ts,
             kwh_est,
-            kw_avg, kw_max,
-            pf_avg, pf_min,
+            kw_avg,
+            kw_max,
+            pf_avg,
+            pf_min,
+            q_kvar_avg,
+            q_kvar_max,
             samples
         """
         order = "day_ts"
