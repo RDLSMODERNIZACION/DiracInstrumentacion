@@ -112,6 +112,7 @@ def list_energy_areas(
 # GET /energy_areas/{area_id}
 # Detalle del área con localidades y analizadores
 # ------------------------------------------------------------
+
 @router.get("/{area_id}")
 def get_energy_area(area_id: int):
     if area_id <= 0:
@@ -119,18 +120,17 @@ def get_energy_area(area_id: int):
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            # Área
             cur.execute(
                 """
                 select
-                    ea.id,
-                    ea.name,
-                    ea.company_id,
-                    ea.contracted_power_kw,
-                    ea.active,
-                    ea.created_at
-                from public.energy_areas ea
-                where ea.id = %(area_id)s
+                    id,
+                    name,
+                    company_id,
+                    contracted_power_kw,
+                    active,
+                    created_at
+                from public.energy_areas
+                where id = %(area_id)s
                 """,
                 {"area_id": area_id},
             )
@@ -139,55 +139,7 @@ def get_energy_area(area_id: int):
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
-            # Localidades del área
-            cur.execute(
-                """
-                select
-                    l.id,
-                    l.name,
-                    l.company_id,
-                    l.service_type,
-                    l.active,
-                    l.created_at,
-                    l.area_id
-                from public.locations l
-                where l.area_id = %(area_id)s
-                order by l.name
-                """,
-                {"area_id": area_id},
-            )
-            locations = cur.fetchall() or []
-
-            # Analizadores del área
-            cur.execute(
-                """
-                select
-                    na.id,
-                    na.name,
-                    na.location_id,
-                    l.name as location_name,
-                    na.model,
-                    na.ip,
-                    na.port,
-                    na.unit_id,
-                    na.active,
-                    na.created_at
-                from public.network_analyzers na
-                join public.locations l
-                  on l.id = na.location_id
-                where l.area_id = %(area_id)s
-                order by l.name, na.name
-                """,
-                {"area_id": area_id},
-            )
-            analyzers = cur.fetchall() or []
-
-    return {
-        "area": area,
-        "locations": locations,
-        "analyzers": analyzers,
-    }
-
+    return {"area": area}
 
 # ------------------------------------------------------------
 # GET /energy_areas/{area_id}/month_kpis
