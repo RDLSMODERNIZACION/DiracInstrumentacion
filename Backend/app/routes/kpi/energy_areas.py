@@ -119,6 +119,7 @@ def get_energy_area(area_id: int):
 
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            # Área
             cur.execute(
                 """
                 select
@@ -138,18 +139,16 @@ def get_energy_area(area_id: int):
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
+            # Localidades del área
             cur.execute(
                 """
                 select
                     l.id,
                     l.name,
-                    l.address,
-                    l.lat,
-                    l.lon,
-                    l.active,
-                    l.created_at,
                     l.company_id,
                     l.service_type,
+                    l.active,
+                    l.created_at,
                     l.area_id
                 from public.locations l
                 where l.area_id = %(area_id)s
@@ -159,6 +158,7 @@ def get_energy_area(area_id: int):
             )
             locations = cur.fetchall() or []
 
+            # Analizadores del área
             cur.execute(
                 """
                 select
@@ -243,10 +243,14 @@ def get_energy_area_month_kpis(
             # --------------------------------
             # SUMMARY - energía total del mes
             # --------------------------------
-            summary_q_day_sql = "avg(d.q_kvar_avg) as reactive_kvar_avg, max(d.q_kvar_max) as reactive_kvar_max," if (has_q_1d_avg and has_q_1d_max) else """
+            summary_q_day_sql = (
+                "avg(d.q_kvar_avg) as reactive_kvar_avg, max(d.q_kvar_max) as reactive_kvar_max,"
+                if (has_q_1d_avg and has_q_1d_max)
+                else """
                 null::numeric as reactive_kvar_avg,
                 null::numeric as reactive_kvar_max,
             """
+            )
 
             cur.execute(
                 f"""
@@ -363,7 +367,7 @@ def get_energy_area_month_kpis(
             else:
                 daily_select_q.append("null::numeric as reactive_kvar_max")
 
-            daily_q_sql = ",\n                        ".join(daily_select_q)
+            daily_q_sql = ",\n                    ".join(daily_select_q)
 
             cur.execute(
                 f"""
@@ -457,7 +461,6 @@ def get_energy_area_month_kpis(
             )
             hourly_rows = cur.fetchall() or []
 
-            # consolidamos por hora del día
             hourly_map: Dict[int, Dict[str, Any]] = {}
             for row in hourly_rows:
                 hour = int(row["hour"])
@@ -473,7 +476,6 @@ def get_energy_area_month_kpis(
                         "samples": row.get("samples"),
                     }
                 else:
-                    # por seguridad si hubiera múltiples filas por hora
                     prev["samples"] = (prev.get("samples") or 0) + (row.get("samples") or 0)
 
             hourly = [hourly_map[h] for h in sorted(hourly_map.keys())]
@@ -525,7 +527,6 @@ def get_energy_area_history(
             has_q_1d_max = has_column(cur, "kpi", "analyzers_1d", "q_kvar_max")
 
             if granularity == "minute":
-                table = "kpi.analyzers_1m"
                 ts_col = "minute_ts"
                 select_cols = """
                     m.minute_ts as ts,
@@ -550,10 +551,9 @@ def get_energy_area_history(
                 order_by = "m.minute_ts"
 
             elif granularity == "hour":
+                ts_col = "hour_ts"
                 q_avg_sql = "sum(h.q_kvar_avg) as q_kvar_avg," if has_q_1h_avg else "null::numeric as q_kvar_avg,"
                 q_max_sql = "sum(h.q_kvar_max) as q_kvar_max," if has_q_1h_max else "null::numeric as q_kvar_max,"
-                table = "kpi.analyzers_1h"
-                ts_col = "hour_ts"
                 select_cols = f"""
                     h.hour_ts as ts,
                     sum(h.kwh_est) as kwh_est,
@@ -578,10 +578,9 @@ def get_energy_area_history(
                 order_by = "h.hour_ts"
 
             else:
+                ts_col = "day_ts"
                 q_avg_sql = "sum(d.q_kvar_avg) as q_kvar_avg," if has_q_1d_avg else "null::numeric as q_kvar_avg,"
                 q_max_sql = "sum(d.q_kvar_max) as q_kvar_max," if has_q_1d_max else "null::numeric as q_kvar_max,"
-                table = "kpi.analyzers_1d"
-                ts_col = "day_ts"
                 select_cols = f"""
                     d.day_ts as ts,
                     sum(d.kwh_est) as kwh_est,
