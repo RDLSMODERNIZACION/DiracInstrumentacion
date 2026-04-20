@@ -13,15 +13,7 @@ router = APIRouter(
 )
 
 
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
-
 def month_bounds_utc(month: str):
-    """
-    month: 'YYYY-MM'
-    returns (start_ts, end_ts) as UTC timestamptz
-    """
     try:
         year = int(month[0:4])
         mon = int(month[5:7])
@@ -58,10 +50,6 @@ def ensure_utc(dt: datetime) -> datetime:
     return dt
 
 
-# ------------------------------------------------------------
-# GET /energy_areas
-# Lista áreas energéticas
-# ------------------------------------------------------------
 @router.get("")
 def list_energy_areas(
     company_id: Optional[int] = Query(None, description="Filtra por empresa"),
@@ -108,11 +96,6 @@ def list_energy_areas(
     return rows
 
 
-# ------------------------------------------------------------
-# GET /energy_areas/{area_id}
-# Detalle del área con localidades y analizadores
-# ------------------------------------------------------------
-
 @router.get("/{area_id}")
 def get_energy_area(area_id: int):
     if area_id <= 0:
@@ -123,14 +106,14 @@ def get_energy_area(area_id: int):
             cur.execute(
                 """
                 select
-                    id,
-                    name,
-                    company_id,
-                    contracted_power_kw,
-                    active,
-                    created_at
-                from public.energy_areas
-                where id = %(area_id)s
+                    ea.id,
+                    ea.name,
+                    ea.company_id,
+                    ea.contracted_power_kw,
+                    ea.active,
+                    ea.created_at
+                from public.energy_areas ea
+                where ea.id = %(area_id)s
                 """,
                 {"area_id": area_id},
             )
@@ -139,28 +122,48 @@ def get_energy_area(area_id: int):
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
-    return {"area": area}
+            cur.execute(
+                """
+                select
+                    l.id,
+                    l.name,
+                    l.area_id
+                from public.locations l
+                where l.area_id = %(area_id)s
+                order by l.name
+                """,
+                {"area_id": area_id},
+            )
+            locations = cur.fetchall() or []
 
-# ------------------------------------------------------------
-# GET /energy_areas/{area_id}/month_kpis
-# KPIs mensuales agregados por área
-# ------------------------------------------------------------
+            cur.execute(
+                """
+                select
+                    na.id,
+                    na.name,
+                    na.location_id
+                from public.network_analyzers na
+                join public.locations l
+                  on l.id = na.location_id
+                where l.area_id = %(area_id)s
+                order by na.name
+                """,
+                {"area_id": area_id},
+            )
+            analyzers = cur.fetchall() or []
+
+    return {
+        "area": area,
+        "locations": locations,
+        "analyzers": analyzers,
+    }
+
+
 @router.get("/{area_id}/month_kpis")
 def get_energy_area_month_kpis(
     area_id: int,
     month: str = Query(..., description="YYYY-MM"),
 ):
-    """
-    KPIs mensuales agregados por área.
-
-    Notas:
-    - kWh se suma entre analizadores.
-    - kW pico/medio del área se calcula desde kpi.analyzers_1h sumando kw_avg horario.
-    - PF promedio del área:
-        * si existe q_kvar_avg en 1h, se calcula desde P y Q agregados.
-        * si no existe, hace promedio ponderado por kW.
-    """
-
     if area_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid area_id")
 
@@ -192,9 +195,6 @@ def get_energy_area_month_kpis(
             has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
             has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
 
-            # --------------------------------
-            # SUMMARY - energía total del mes
-            # --------------------------------
             summary_q_day_sql = (
                 "avg(d.q_kvar_avg) as reactive_kvar_avg, max(d.q_kvar_max) as reactive_kvar_max,"
                 if (has_q_1d_avg and has_q_1d_max)
@@ -241,10 +241,6 @@ def get_energy_area_month_kpis(
             )
             summary_day = cur.fetchone() or {}
 
-            # --------------------------------
-            # SUMMARY - potencia del área desde 1h
-            # más representativa que sumar máximos diarios
-            # --------------------------------
             if has_q_1h_avg:
                 pf_area_hour_sql = """
                     case
@@ -305,9 +301,6 @@ def get_energy_area_month_kpis(
                 "contracted_power_kw": area.get("contracted_power_kw"),
             }
 
-            # --------------------------------
-            # DAILY - agregado por área
-            # --------------------------------
             daily_select_q = []
             if has_q_1d_avg:
                 daily_select_q.append("sum(d.q_kvar_avg) as reactive_kvar_avg")
@@ -355,9 +348,6 @@ def get_energy_area_month_kpis(
             )
             daily = cur.fetchall() or []
 
-            # --------------------------------
-            # HOURLY - agregado por área
-            # --------------------------------
             hourly_select_q = []
             if has_q_1h_avg:
                 hourly_select_q.append("sum(h.q_kvar_avg) as reactive_kvar_avg")
@@ -434,10 +424,6 @@ def get_energy_area_month_kpis(
     }
 
 
-# ------------------------------------------------------------
-# GET /energy_areas/{area_id}/history
-# Histórico agregado por área
-# ------------------------------------------------------------
 @router.get("/{area_id}/history")
 def get_energy_area_history(
     area_id: int,
