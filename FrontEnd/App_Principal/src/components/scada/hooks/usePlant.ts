@@ -16,7 +16,6 @@ const DEFAULT_THRESHOLDS: Thresholds = {
   highCritical: 90,
 };
 
-// ✅ tipo de servicio para pintar/filtrar Agua vs Cloacas
 export type ServiceType = "agua" | "cloacas";
 
 type Tank = {
@@ -45,7 +44,6 @@ type Tank = {
   latest?: any;
   thresholds?: Thresholds;
 
-  // ✅ NUEVOS CAMPOS DE FICHA TÉCNICA
   material?: string | null;
   fluid?: string | null;
   install_year?: number | null;
@@ -54,7 +52,6 @@ type Tank = {
   locationText?: string | null;
   capacity_m3?: number | null;
 
-  // opcionales derivados para UI existente
   capacityL?: number | null;
   volumeL?: number | null;
 };
@@ -81,11 +78,28 @@ type Pump = {
   age_sec?: number | null;
   ageSec?: number | null;
   online?: boolean | null;
+
   latest_event_id?: number | null;
   event_ts?: string | null;
   latest_hb_id?: number | null;
   hb_ts?: string | null;
   latest?: any;
+
+  // ficha técnica de bomba
+  brand?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+  install_year?: number | null;
+  installYear?: number | null;
+  pump_type?: string | null;
+  pumpType?: string | null;
+  flow_nominal_m3h?: number | null;
+  head_nominal_mca?: number | null;
+  power_kw?: number | null;
+  voltage_v?: number | null;
+  start_type?: string | null;
+  startType?: string | null;
+  criticality?: string | null;
 };
 
 export type Plant = { tanks: Tank[]; pumps: Pump[]; alarms?: any[] };
@@ -229,8 +243,10 @@ function mapTanks(rows: any[]): Tank[] {
     const name = String(r.name ?? `Tanque ${r.tank_id ?? r.id}`);
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
-    const levelPct = typeof r.level_pct === "number" ? r.level_pct : toNumNullable(r.level_pct);
-    const age_sec = typeof r.age_sec === "number" ? r.age_sec : toNumNullable(r.age_sec);
+    const levelPct =
+      typeof r.level_pct === "number" ? r.level_pct : toNumNullable(r.level_pct);
+    const age_sec =
+      typeof r.age_sec === "number" ? r.age_sec : toNumNullable(r.age_sec);
     const online = normOnline(r.online, age_sec);
 
     const alarm: Tank["alarm"] =
@@ -277,7 +293,6 @@ function mapTanks(rows: any[]): Tank[] {
       ageSec: age_sec,
       age_sec,
 
-      // ✅ FICHA TÉCNICA
       material: r.material ?? null,
       fluid: r.fluid ?? r.fluido ?? null,
       install_year,
@@ -305,10 +320,18 @@ function mapPumps(rows: any[]): Pump[] {
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
     const state: "run" | "stop" = r.state === "run" ? "run" : "stop";
-    const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
-    const online = typeof r.online === "boolean" ? r.online : undefined;
+
+    const age_sec =
+      typeof r.age_sec === "number" ? r.age_sec : toNumNullable(r.age_sec);
+    const online = normOnline(r.online, age_sec);
 
     const service_type = extractServiceType(r);
+
+    const install_year = toNumNullable(r.install_year);
+    const flow_nominal_m3h = toNumNullable(r.flow_nominal_m3h);
+    const head_nominal_mca = toNumNullable(r.head_nominal_mca);
+    const power_kw = toNumNullable(r.power_kw);
+    const voltage_v = toNumNullable(r.voltage_v);
 
     return {
       id,
@@ -328,9 +351,31 @@ function mapPumps(rows: any[]): Pump[] {
         service_type,
         serviceType: service_type,
       },
+
       latest: r.event_ts ? { ts: r.event_ts } : undefined,
-      ...(age_sec !== undefined ? { age_sec } : {}),
-      ...(online !== undefined ? { online } : {}),
+      ageSec: age_sec,
+      age_sec,
+      online,
+
+      latest_event_id: r.latest_event_id ?? null,
+      event_ts: r.event_ts ?? null,
+      latest_hb_id: r.latest_hb_id ?? null,
+      hb_ts: r.hb_ts ?? null,
+
+      brand: r.brand ?? null,
+      model: r.model ?? null,
+      serial_number: r.serial_number ?? null,
+      install_year,
+      installYear: install_year,
+      pump_type: r.pump_type ?? null,
+      pumpType: r.pump_type ?? null,
+      flow_nominal_m3h,
+      head_nominal_mca,
+      power_kw,
+      voltage_v,
+      start_type: r.start_type ?? null,
+      startType: r.start_type ?? null,
+      criticality: r.criticality ?? null,
     };
   });
 }
@@ -342,7 +387,9 @@ function isCritical(level: number | null | undefined, th?: Thresholds): boolean 
 }
 
 function computeKpis(tanks: Tank[]): Kpis {
-  const levels = tanks.map((t) => (typeof t.levelPct === "number" ? t.levelPct : 0));
+  const levels = tanks.map((t) =>
+    typeof t.levelPct === "number" ? t.levelPct : 0
+  );
   const avg = levels.length
     ? Math.round(levels.reduce((a, b) => a + b, 0) / levels.length)
     : 0;
@@ -391,21 +438,35 @@ export function usePlant(
         getFirstJSON(["/pumps/config"], { withAuth: withAuthForConfig }),
       ]);
 
-      const tanksOk = tanksRes.status === "fulfilled" && Array.isArray(tanksRes.value);
-      const pumpsOk = pumpsRes.status === "fulfilled" && Array.isArray(pumpsRes.value);
+      const tanksOk =
+        tanksRes.status === "fulfilled" && Array.isArray(tanksRes.value);
+      const pumpsOk =
+        pumpsRes.status === "fulfilled" && Array.isArray(pumpsRes.value);
 
-      const mappedTanks = tanksOk ? mapTanks(tanksRes.value as any[]) : plantRef.current.tanks;
-      const mappedPumps = pumpsOk ? mapPumps(pumpsRes.value as any[]) : plantRef.current.pumps;
+      const mappedTanks = tanksOk
+        ? mapTanks(tanksRes.value as any[])
+        : plantRef.current.tanks;
 
-      const filterSet = allowedLocationIds && allowedLocationIds.size ? allowedLocationIds : undefined;
-      const passLoc = (locId: any) => !filterSet || (locId != null && filterSet.has(Number(locId)));
+      const mappedPumps = pumpsOk
+        ? mapPumps(pumpsRes.value as any[])
+        : plantRef.current.pumps;
+
+      const filterSet =
+        allowedLocationIds && allowedLocationIds.size
+          ? allowedLocationIds
+          : undefined;
+
+      const passLoc = (locId: any) =>
+        !filterSet || (locId != null && filterSet.has(Number(locId)));
 
       const st = opts?.serviceType ?? "all";
-      const passSvc = (svc: any) => (st === "all" ? true : normServiceType(svc) === st);
+      const passSvc = (svc: any) =>
+        st === "all" ? true : normServiceType(svc) === st;
 
       const filtTanks = mappedTanks.filter(
         (t) => passLoc(getLocId(t)) && passSvc(t.service_type ?? t.location?.service_type)
       );
+
       const filtPumps = mappedPumps.filter(
         (p) => passLoc(getLocId(p)) && passSvc(p.service_type ?? p.location?.service_type)
       );
