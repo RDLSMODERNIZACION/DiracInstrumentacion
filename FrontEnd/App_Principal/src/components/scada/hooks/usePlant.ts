@@ -8,6 +8,7 @@ type Thresholds = {
   highWarning: number;
   highCritical: number;
 };
+
 const DEFAULT_THRESHOLDS: Thresholds = {
   lowCritical: 10,
   lowWarning: 25,
@@ -15,7 +16,7 @@ const DEFAULT_THRESHOLDS: Thresholds = {
   highCritical: 90,
 };
 
-// ✅ NUEVO: tipo de servicio para pintar/filtrar Agua vs Cloacas
+// ✅ tipo de servicio para pintar/filtrar Agua vs Cloacas
 export type ServiceType = "agua" | "cloacas";
 
 type Tank = {
@@ -23,7 +24,7 @@ type Tank = {
   name: string;
   location_id?: number | null;
   location_name?: string | null;
-  // ✅ NUEVO: service_type (puede venir en snake o camel, por compat)
+
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
 
@@ -32,7 +33,6 @@ type Tank = {
   location?: {
     id?: number | null;
     name?: string | null;
-    // ✅ NUEVO: service_type dentro de location (si te llega así)
     service_type?: ServiceType | null;
     serviceType?: ServiceType | null;
   };
@@ -44,6 +44,19 @@ type Tank = {
   alarm?: "normal" | "alerta" | "critico";
   latest?: any;
   thresholds?: Thresholds;
+
+  // ✅ NUEVOS CAMPOS DE FICHA TÉCNICA
+  material?: string | null;
+  fluid?: string | null;
+  install_year?: number | null;
+  installYear?: number | null;
+  location_text?: string | null;
+  locationText?: string | null;
+  capacity_m3?: number | null;
+
+  // opcionales derivados para UI existente
+  capacityL?: number | null;
+  volumeL?: number | null;
 };
 
 type Pump = {
@@ -53,7 +66,6 @@ type Pump = {
   location_id?: number | null;
   location_name?: string | null;
 
-  // ✅ NUEVO: service_type (mismo criterio que tanques)
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
 
@@ -94,23 +106,13 @@ const API_BASE =
   (import.meta as any).env?.VITE_API_BASE?.trim?.() ||
   "https://diracinstrumentacion.onrender.com";
 
-/**
- * ✅ Cambios clave:
- * - Eliminado __ts (cache-buster) + no-cache + no-store => ahora puede cachear (ETag/Cache-Control del backend)
- * - Dedupe global (si dos componentes llaman a la vez, se comparte la misma promesa)
- * - Posibilidad de NO mandar Authorization para endpoints públicos (evita preflight CORS)
- * - Cache en memoria (stale-while-revalidate simple) por path, para evitar refetch redundante
- */
-
 type JsonCacheEntry = {
   ts: number;
   data: any;
   inflight?: Promise<any> | null;
 };
-const JSON_CACHE: Record<string, JsonCacheEntry> = Object.create(null);
 
-// TTL local (frontend) para no pegarle al backend cada 1s si no hace falta.
-// Como el backend ya cachea 10s, acá ponemos igual o un poquito menos.
+const JSON_CACHE: Record<string, JsonCacheEntry> = Object.create(null);
 const FRONT_TTL_MS = 8_000;
 
 /** Si tus /tanks/config y /pumps/config ya no requieren auth, dejalo en false para evitar preflight */
@@ -144,11 +146,6 @@ async function fetchJSON(path: string, opts?: { withAuth?: boolean }) {
   return res.json();
 }
 
-/**
- * getJSON con:
- * - dedupe de requests en vuelo por path
- * - cache local con TTL (evita doble fetch dentro del mismo intervalo)
- */
 async function getJSON(
   path: string,
   opts?: { withAuth?: boolean; ttlMs?: number }
@@ -159,12 +156,10 @@ async function getJSON(
   const now = Date.now();
   const ent = JSON_CACHE[path];
 
-  // Cache local válido
   if (ent?.data !== undefined && now - ent.ts < ttlMs) {
     return ent.data;
   }
 
-  // Dedupe inflight
   if (ent?.inflight) return ent.inflight;
 
   const inflight = fetchJSON(path, { withAuth })
@@ -200,22 +195,25 @@ function toNumOr(def: number, x: any) {
   const n = Number(x);
   return Number.isFinite(n) ? n : def;
 }
+
+function toNumNullable(x: any): number | null {
+  if (x == null || x === "") return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
 function normOnline(online: any, ageSec: any) {
   if (typeof online === "boolean") return online;
   const age = Number(ageSec);
   return Number.isFinite(age) ? age <= ONLINE_DEAD_SEC : false;
 }
 
-// ✅ NUEVO: normalizar service_type desde cualquier forma posible
 function normServiceType(x: any): ServiceType {
-  const raw = String(x ?? "")
-    .trim()
-    .toLowerCase();
+  const raw = String(x ?? "").trim().toLowerCase();
   return raw === "cloacas" ? "cloacas" : "agua";
 }
 
 function extractServiceType(r: any): ServiceType {
-  // prioridad: campo directo -> dentro de location
   const st =
     r?.service_type ??
     r?.serviceType ??
@@ -231,8 +229,8 @@ function mapTanks(rows: any[]): Tank[] {
     const name = String(r.name ?? `Tanque ${r.tank_id ?? r.id}`);
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
-    const levelPct = typeof r.level_pct === "number" ? r.level_pct : undefined;
-    const age_sec = typeof r.age_sec === "number" ? r.age_sec : undefined;
+    const levelPct = typeof r.level_pct === "number" ? r.level_pct : toNumNullable(r.level_pct);
+    const age_sec = typeof r.age_sec === "number" ? r.age_sec : toNumNullable(r.age_sec);
     const online = normOnline(r.online, age_sec);
 
     const alarm: Tank["alarm"] =
@@ -245,19 +243,28 @@ function mapTanks(rows: any[]): Tank[] {
 
     const service_type = extractServiceType(r);
 
+    const capacity_m3 = toNumNullable(r.capacity_m3);
+    const capacityL = capacity_m3 != null ? capacity_m3 * 1000 : null;
+    const volumeL =
+      capacityL != null && typeof levelPct === "number"
+        ? (capacityL * levelPct) / 100
+        : null;
+
+    const install_year = toNumNullable(r.install_year ?? r.anio_instalacion);
+
     return {
       id,
       name,
       location_id,
       location_name,
 
-      // ✅ NUEVO
       service_type,
       serviceType: service_type,
 
       online,
       levelPct,
       alarm,
+
       locationId: location_id,
       locationName: location_name,
       location: {
@@ -266,8 +273,21 @@ function mapTanks(rows: any[]): Tank[] {
         service_type,
         serviceType: service_type,
       },
+
       ageSec: age_sec,
       age_sec,
+
+      // ✅ FICHA TÉCNICA
+      material: r.material ?? null,
+      fluid: r.fluid ?? r.fluido ?? null,
+      install_year,
+      installYear: install_year,
+      location_text: r.location_text ?? r.ubicacion ?? null,
+      locationText: r.location_text ?? r.ubicacion ?? null,
+      capacity_m3,
+      capacityL,
+      volumeL,
+
       thresholds: {
         lowCritical: toNumOr(DEFAULT_THRESHOLDS.lowCritical, r.low_low_pct),
         lowWarning: toNumOr(DEFAULT_THRESHOLDS.lowWarning, r.low_pct),
@@ -297,7 +317,6 @@ function mapPumps(rows: any[]): Pump[] {
       location_id,
       location_name,
 
-      // ✅ NUEVO
       service_type,
       serviceType: service_type,
 
@@ -341,8 +360,6 @@ function getLocId(x: { location_id?: any; locationId?: any; location?: any }) {
   return x.location_id ?? x.locationId ?? x.location?.id ?? null;
 }
 
-// === Hook principal (sin flicker) ===
-// ✅ NUEVO: podés filtrar por tipo de servicio desde la UI (pestañas)
 export function usePlant(
   pollMs = 1000,
   allowedLocationIds?: Set<number>,
@@ -380,27 +397,30 @@ export function usePlant(
       const mappedTanks = tanksOk ? mapTanks(tanksRes.value as any[]) : plantRef.current.tanks;
       const mappedPumps = pumpsOk ? mapPumps(pumpsRes.value as any[]) : plantRef.current.pumps;
 
-      // 🧠 filtro por location_ids
       const filterSet = allowedLocationIds && allowedLocationIds.size ? allowedLocationIds : undefined;
       const passLoc = (locId: any) => !filterSet || (locId != null && filterSet.has(Number(locId)));
 
-      // ✅ NUEVO: filtro por service_type (para pestañas Agua/Cloacas)
       const st = opts?.serviceType ?? "all";
-      const passSvc = (svc: any) =>
-        st === "all" ? true : normServiceType(svc) === st;
+      const passSvc = (svc: any) => (st === "all" ? true : normServiceType(svc) === st);
 
-      const filtTanks = mappedTanks.filter((t) => passLoc(getLocId(t)) && passSvc(t.service_type ?? t.location?.service_type));
-      const filtPumps = mappedPumps.filter((p) => passLoc(getLocId(p)) && passSvc(p.service_type ?? p.location?.service_type));
+      const filtTanks = mappedTanks.filter(
+        (t) => passLoc(getLocId(t)) && passSvc(t.service_type ?? t.location?.service_type)
+      );
+      const filtPumps = mappedPumps.filter(
+        (p) => passLoc(getLocId(p)) && passSvc(p.service_type ?? p.location?.service_type)
+      );
 
       setPlant((prev) => {
         const mergedTanks = filtTanks.map((t) => {
           const old = prev.tanks.find((x) => x.id === t.id);
           return old ? { ...old, ...t, latest: old.latest } : t;
         });
+
         const mergedPumps = filtPumps.map((p) => {
           const old = prev.pumps.find((x) => x.id === p.id);
           return old ? { ...old, ...p, latest: old.latest } : p;
         });
+
         return { ...prev, tanks: mergedTanks, pumps: mergedPumps };
       });
 
@@ -420,6 +440,7 @@ export function usePlant(
     const start = () => {
       if (pollMs > 0 && timer == null) timer = window.setInterval(fetchAll, pollMs);
     };
+
     const stop = () => {
       if (timer != null) {
         clearInterval(timer);
@@ -427,7 +448,7 @@ export function usePlant(
       }
     };
 
-    fetchAll(); // primera carga
+    fetchAll();
     start();
 
     const onVis = () => {
@@ -437,6 +458,7 @@ export function usePlant(
         start();
       }
     };
+
     document.addEventListener("visibilitychange", onVis);
     return () => {
       stop();
