@@ -188,7 +188,6 @@ def get_energy_area(area_id: int):
         "analyzers": analyzers,
     }
 
-
 # ------------------------------------------------------------
 # GET /energy_areas/{area_id}/month_kpis
 # KPIs mensuales agregados por área
