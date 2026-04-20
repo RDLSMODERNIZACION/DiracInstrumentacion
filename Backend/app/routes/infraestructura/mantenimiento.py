@@ -14,14 +14,9 @@ router = APIRouter(prefix="/infraestructura", tags=["infraestructura-mantenimien
 VALID_MAINTENANCE_TYPES = {
     "preventivo",
     "correctivo",
-    "inspeccion",
-    "lubricacion",
-    "limpieza",
-    "cambio_repuesto",
 }
 
 VALID_STATUS = {
-    "abierta",
     "planificada",
     "en_proceso",
     "resuelta",
@@ -94,7 +89,7 @@ def _validate_order_payload(data: dict, partial: bool = False):
         out["maintenance_type"] = maintenance_type
 
     if not partial or "status" in data:
-        status = _normalize_text(data.get("status")) or "abierta"
+        status = _normalize_text(data.get("status")) or "en_proceso"
         if status not in VALID_STATUS:
             raise HTTPException(status_code=400, detail=f"status inválido: {status}")
         out["status"] = status
@@ -387,8 +382,7 @@ async def update_pump_maintenance(order_id: int, request: Request):
                 SET {", ".join(fields)}
                 WHERE id = %s
                 RETURNING *
-                """
-            ,
+                """,
                 tuple(values),
             )
             row = cur.fetchone()
@@ -401,6 +395,38 @@ async def update_pump_maintenance(order_id: int, request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (update_pump_maintenance): {e}")
+
+
+# ============================================================
+# Eliminar orden
+# ============================================================
+
+@router.delete("/pumps/maintenance/{order_id}")
+async def delete_pump_maintenance(order_id: int):
+    """
+    Elimina una orden de mantenimiento existente.
+    """
+    try:
+        with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                DELETE FROM public.pump_maintenance_orders
+                WHERE id = %s
+                RETURNING id
+                """,
+                (order_id,),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Orden {order_id} no encontrada")
+
+            conn.commit()
+            return {"ok": True, "deleted_id": order_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error (delete_pump_maintenance): {e}")
 
 
 # ============================================================
