@@ -67,10 +67,6 @@ function prettyType(v?: string | null) {
   const s = String(v || "").toLowerCase();
   if (s === "preventivo") return "Preventivo";
   if (s === "correctivo") return "Correctivo";
-  if (s === "inspeccion") return "Inspección";
-  if (s === "lubricacion") return "Lubricación";
-  if (s === "limpieza") return "Limpieza";
-  if (s === "cambio_repuesto") return "Cambio repuesto";
   return v || "—";
 }
 
@@ -117,6 +113,14 @@ const sectionCard: React.CSSProperties = {
   background: "#fff",
 };
 
+const smallBtnBase: React.CSSProperties = {
+  padding: "7px 10px",
+  borderRadius: 8,
+  fontWeight: 700,
+  fontSize: 12,
+  cursor: "pointer",
+};
+
 export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props) {
   const [tab, setTab] = useState<"acciones" | "mantenimiento">("acciones");
 
@@ -136,6 +140,8 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
   const [maintenanceTitle, setMaintenanceTitle] = useState("");
   const [maintenanceDescription, setMaintenanceDescription] = useState("");
   const [maintenanceDiagnosis, setMaintenanceDiagnosis] = useState("");
+
+  const [itemActionBusyId, setItemActionBusyId] = useState<number | null>(null);
 
   const online = node?.online === true;
   const pumpId = useMemo(() => (node ? parseEntityId(node.id) : null), [node]);
@@ -171,6 +177,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
     setMaintenanceTitle("");
     setMaintenanceDescription("");
     setMaintenanceDiagnosis("");
+    setItemActionBusyId(null);
   }, [node?.id]);
 
   useEffect(() => {
@@ -255,37 +262,79 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
     }
   }
 
-  async function closeCurrentMaintenance() {
-    if (!currentOrder?.id) return;
-
-    setMaintBusy(true);
+  async function updateMaintenanceStatus(itemId: number, nextStatus: "resuelta" | "cancelada") {
+    setItemActionBusyId(itemId);
     setMaintMsg(null);
     setMaintErr(null);
 
     try {
-      const r = await fetch(`${API_BASE}/infraestructura/pumps/maintenance/${currentOrder.id}`, {
+      const r = await fetch(`${API_BASE}/infraestructura/pumps/maintenance/${itemId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
         body: JSON.stringify({
-          status: "resuelta",
-          completed_at: new Date().toISOString(),
+          status: nextStatus,
+          completed_at: nextStatus === "resuelta" ? new Date().toISOString() : null,
         }),
       });
 
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.detail || "No se pudo cerrar el mantenimiento");
+      if (!r.ok) throw new Error(j?.detail || `No se pudo marcar como ${nextStatus}`);
 
-      setMaintMsg("Mantenimiento cerrado como resuelto");
+      setMaintMsg(
+        nextStatus === "resuelta"
+          ? "Mantenimiento marcado como resuelto"
+          : "Mantenimiento marcado como cancelado"
+      );
       await loadMaintenance();
       onCommandSent?.();
     } catch (e: any) {
-      setMaintErr(e?.message || "No se pudo cerrar el mantenimiento");
+      setMaintErr(e?.message || "No se pudo actualizar el mantenimiento");
     } finally {
-      setMaintBusy(false);
+      setItemActionBusyId(null);
     }
+  }
+
+  async function deleteMaintenance(itemId: number) {
+    const ok = window.confirm("¿Querés eliminar este mantenimiento?");
+    if (!ok) return;
+
+    setItemActionBusyId(itemId);
+    setMaintMsg(null);
+    setMaintErr(null);
+
+    try {
+      const r = await fetch(`${API_BASE}/infraestructura/pumps/maintenance/${itemId}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      let j: any = null;
+      try {
+        j = await r.json();
+      } catch {
+        j = null;
+      }
+
+      if (!r.ok) throw new Error(j?.detail || "No se pudo eliminar el mantenimiento");
+
+      setMaintMsg("Mantenimiento eliminado");
+      await loadMaintenance();
+      onCommandSent?.();
+    } catch (e: any) {
+      setMaintErr(e?.message || "No se pudo eliminar el mantenimiento");
+    } finally {
+      setItemActionBusyId(null);
+    }
+  }
+
+  async function closeCurrentMaintenance() {
+    if (!currentOrder?.id) return;
+    await updateMaintenanceStatus(currentOrder.id, "resuelta");
   }
 
   return (
@@ -466,7 +515,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
                   <div style={{ marginTop: 10 }}>
                     <button
                       type="button"
-                      disabled={maintBusy}
+                      disabled={maintBusy || itemActionBusyId === currentOrder.id}
                       onClick={closeCurrentMaintenance}
                       style={{
                         padding: "8px 12px",
@@ -477,7 +526,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
                         fontWeight: 700,
                       }}
                     >
-                      {maintBusy ? "Guardando…" : "Cerrar mantenimiento"}
+                      {maintBusy || itemActionBusyId === currentOrder.id ? "Guardando…" : "Cerrar mantenimiento"}
                     </button>
                   </div>
                 )}
@@ -496,10 +545,6 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
                     >
                       <option value="preventivo">Preventivo</option>
                       <option value="correctivo">Correctivo</option>
-                      <option value="inspeccion">Inspección</option>
-                      <option value="lubricacion">Lubricación</option>
-                      <option value="limpieza">Limpieza</option>
-                      <option value="cambio_repuesto">Cambio repuesto</option>
                     </select>
                   </label>
 
@@ -510,11 +555,8 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
                       onChange={(e) => setMaintenanceStatus(e.target.value)}
                       style={inputStyle}
                     >
-                      <option value="abierta">Abierta</option>
                       <option value="planificada">Planificada</option>
                       <option value="en_proceso">En proceso</option>
-                      <option value="resuelta">Resuelta</option>
-                      <option value="cancelada">Cancelada</option>
                     </select>
                   </label>
 
@@ -603,57 +645,117 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
                 )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {(maintenance?.items ?? []).map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: 10,
-                        padding: 10,
-                        background: "#f8fafc",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <div style={{ fontWeight: 700, color: "#0f172a" }}>
-                          #{item.id} · {item.title}
+                  {(maintenance?.items ?? []).map((item) => {
+                    const itemBusy = itemActionBusyId === item.id;
+                    const isClosed = item.status === "resuelta" || item.status === "cancelada";
+
+                    return (
+                      <div
+                        key={item.id}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 10,
+                          padding: 10,
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                            #{item.id} · {item.title}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#475569" }}>{prettyStatus(item.status)}</div>
                         </div>
-                        <div style={{ fontSize: 12, color: "#475569" }}>{prettyStatus(item.status)}</div>
+
+                        <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
+                          <div>
+                            Tipo: <b>{prettyType(item.maintenance_type)}</b>
+                          </div>
+                          <div>
+                            Prioridad: <b>{prettyPriority(item.priority)}</b>
+                          </div>
+                          <div>
+                            Reportado: <b>{fmtDate(item.reported_at)}</b>
+                          </div>
+                          <div>
+                            Completado: <b>{fmtDate(item.completed_at)}</b>
+                          </div>
+                        </div>
+
+                        {item.description && (
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#334155" }}>
+                            <b>Descripción:</b> {item.description}
+                          </div>
+                        )}
+
+                        {item.diagnosis && (
+                          <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                            <b>Diagnóstico:</b> {item.diagnosis}
+                          </div>
+                        )}
+
+                        {item.resolution && (
+                          <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
+                            <b>Resolución:</b> {item.resolution}
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            marginTop: 10,
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {!isClosed && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={itemBusy}
+                                onClick={() => updateMaintenanceStatus(item.id, "resuelta")}
+                                style={{
+                                  ...smallBtnBase,
+                                  border: "1px solid #16a34a",
+                                  background: "#16a34a",
+                                  color: "#fff",
+                                }}
+                              >
+                                {itemBusy ? "Guardando…" : "Resuelta"}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={itemBusy}
+                                onClick={() => updateMaintenanceStatus(item.id, "cancelada")}
+                                style={{
+                                  ...smallBtnBase,
+                                  border: "1px solid #f59e0b",
+                                  background: "#f59e0b",
+                                  color: "#fff",
+                                }}
+                              >
+                                {itemBusy ? "Guardando…" : "Cancelada"}
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            disabled={itemBusy}
+                            onClick={() => deleteMaintenance(item.id)}
+                            style={{
+                              ...smallBtnBase,
+                              border: "1px solid #ef4444",
+                              background: "#fff",
+                              color: "#ef4444",
+                            }}
+                          >
+                            {itemBusy ? "Eliminando…" : "Eliminar"}
+                          </button>
+                        </div>
                       </div>
-
-                      <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
-                        <div>
-                          Tipo: <b>{prettyType(item.maintenance_type)}</b>
-                        </div>
-                        <div>
-                          Prioridad: <b>{prettyPriority(item.priority)}</b>
-                        </div>
-                        <div>
-                          Reportado: <b>{fmtDate(item.reported_at)}</b>
-                        </div>
-                        <div>
-                          Completado: <b>{fmtDate(item.completed_at)}</b>
-                        </div>
-                      </div>
-
-                      {item.description && (
-                        <div style={{ marginTop: 8, fontSize: 12, color: "#334155" }}>
-                          <b>Descripción:</b> {item.description}
-                        </div>
-                      )}
-
-                      {item.diagnosis && (
-                        <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
-                          <b>Diagnóstico:</b> {item.diagnosis}
-                        </div>
-                      )}
-
-                      {item.resolution && (
-                        <div style={{ marginTop: 6, fontSize: 12, color: "#334155" }}>
-                          <b>Resolución:</b> {item.resolution}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </>
