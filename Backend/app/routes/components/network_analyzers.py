@@ -12,6 +12,7 @@ router = APIRouter(
     tags=["network_analyzers"],
 )
 
+
 # -------------------------------
 # Helpers
 # -------------------------------
@@ -63,10 +64,6 @@ def to_float(v: Any) -> Optional[float]:
 
 
 def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normaliza las keys típicas que llegan del ABB / Node-RED y hace coerción numérica.
-    No exige todo: inserta null si falta.
-    """
     energy = payload.get("energy", {}) or {}
 
     def g(key: str) -> Any:
@@ -109,9 +106,25 @@ def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def has_column(cur, schema: str, table: str, column: str) -> bool:
+    cur.execute(
+        """
+        select exists (
+          select 1
+          from information_schema.columns
+          where table_schema = %(schema)s
+            and table_name = %(table)s
+            and column_name = %(column)s
+        ) as ok
+        """,
+        {"schema": schema, "table": table, "column": column},
+    )
+    row = cur.fetchone()
+    return bool(row["ok"]) if row else False
+
+
 # ------------------------------------------------------------
 # GET /components/network_analyzers
-# Lista analizadores (filtrable por ubicación)
 # ------------------------------------------------------------
 @router.get("")
 def list_network_analyzers(
@@ -119,11 +132,6 @@ def list_network_analyzers(
     company_id: Optional[int] = Query(None, description="Filtra por empresa"),
     active_only: bool = Query(True, description="Si true, devuelve solo analizadores activos"),
 ):
-    """
-    Lista analizadores de red.
-    Útil para que el front de eficiencia pueda resolver qué analizador/es
-    pertenecen a la ubicación seleccionada.
-    """
     sql = """
         select
             na.id,
@@ -167,20 +175,12 @@ def list_network_analyzers(
 
 # ------------------------------------------------------------
 # POST /components/network_analyzers/{analyzer_id}/snapshot
-# Inserta una lectura completa del analizador
 # ------------------------------------------------------------
 @router.post("/{analyzer_id}/snapshot")
 def insert_snapshot(
     analyzer_id: int,
     payload: Dict[str, Any] = Body(...),
 ):
-    """
-    Inserta un snapshot completo del analizador de red (ABB M4M, etc).
-    Espera valores instantáneos y opcionalmente energía.
-
-    - ts: ISO8601 (con Z o offset). Si no viene -> now UTC.
-    - Guarda null si falta algún campo.
-    """
     if analyzer_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid analyzer_id")
 
@@ -194,47 +194,37 @@ def insert_snapshot(
                 insert into public.network_analyzer_readings (
                     analyzer_id,
                     ts,
-
                     v_l1l2, v_l3l2, v_l1l3,
                     i_l1, i_l2, i_l3,
                     hz,
-
                     p_w, p_kw,
                     q_var, q_kvar,
                     s_va, s_kva,
-
                     pf,
                     quadrant,
-
                     e_kwh_import,
                     e_kwh_export,
                     e_kvarh_import,
                     e_kvarh_export,
                     e_kvah,
-
                     raw,
                     source
                 ) values (
                     %(analyzer_id)s,
                     %(ts)s,
-
                     %(v_l1l2)s, %(v_l3l2)s, %(v_l1l3)s,
                     %(i_l1)s, %(i_l2)s, %(i_l3)s,
                     %(hz)s,
-
                     %(p_w)s, %(p_kw)s,
                     %(q_var)s, %(q_kvar)s,
                     %(s_va)s, %(s_kva)s,
-
                     %(pf)s,
                     %(quadrant)s,
-
                     %(e_kwh_import)s,
                     %(e_kwh_export)s,
                     %(e_kvarh_import)s,
                     %(e_kvarh_export)s,
                     %(e_kvah)s,
-
                     %(raw)s,
                     %(source)s
                 )
@@ -254,17 +244,12 @@ def insert_snapshot(
 
 # ------------------------------------------------------------
 # GET /components/network_analyzers/{analyzer_id}/latest
-# Devuelve la última lectura del analizador
 # ------------------------------------------------------------
 @router.get("/{analyzer_id}/latest")
 def get_latest_snapshot(
     analyzer_id: int,
     fields: Literal["lite", "full"] = Query("lite"),
 ):
-    """
-    fields=lite -> solo lo necesario para la pantalla
-    fields=full -> devuelve la fila completa
-    """
     if analyzer_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid analyzer_id")
 
@@ -302,7 +287,6 @@ def get_latest_snapshot(
 
 # ------------------------------------------------------------
 # GET /components/network_analyzers/{analyzer_id}/history
-# Histórico agregado desde tablas KPI
 # ------------------------------------------------------------
 @router.get("/{analyzer_id}/history")
 def get_history(
@@ -312,15 +296,6 @@ def get_history(
     granularity: Literal["minute", "hour", "day"] = Query("minute"),
     limit: int = Query(20000, ge=1, le=200000),
 ):
-    """
-    Devuelve histórico desde:
-    - kpi.analyzers_1m (minute)
-    - kpi.analyzers_1h (hour)
-    - kpi.analyzers_1d (day)
-
-    Respuesta uniforme:
-    { analyzer_id, granularity, from, to, points: [...] }
-    """
     if analyzer_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid analyzer_id")
 
@@ -332,58 +307,67 @@ def get_history(
     if to_ts <= from_ts:
         raise HTTPException(status_code=400, detail="Invalid range: to must be > from")
 
-    if granularity == "minute":
-        table = "kpi.analyzers_1m"
-        ts_col = "minute_ts"
-        select_cols = """
-            analyzer_id,
-            minute_ts as ts,
-            kw_avg,
-            kw_max,
-            pf_avg,
-            pf_min,
-            v_ll_avg,
-            i_avg,
-            samples
-        """
-        order = "minute_ts"
-
-    elif granularity == "hour":
-        table = "kpi.analyzers_1h"
-        ts_col = "hour_ts"
-        select_cols = """
-            analyzer_id,
-            hour_ts as ts,
-            kwh_est,
-            kw_avg,
-            kw_max,
-            pf_avg,
-            pf_min,
-            q_kvar_avg,
-            q_kvar_max,
-            samples
-        """
-        order = "hour_ts"
-
-    else:
-        table = "kpi.analyzers_1d"
-        ts_col = "day_ts"
-        select_cols = """
-            analyzer_id,
-            day_ts as ts,
-            kwh_est,
-            kw_avg,
-            kw_max,
-            pf_avg,
-            pf_min,
-            q_kvar_avg,
-            q_kvar_max,
-            samples
-        """
-        order = "day_ts"
-
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
+            has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
+            has_q_1d_avg = has_column(cur, "kpi", "analyzers_1d", "q_kvar_avg")
+            has_q_1d_max = has_column(cur, "kpi", "analyzers_1d", "q_kvar_max")
+
+            if granularity == "minute":
+                table = "kpi.analyzers_1m"
+                ts_col = "minute_ts"
+                select_cols = """
+                    analyzer_id,
+                    minute_ts as ts,
+                    kw_avg,
+                    kw_max,
+                    pf_avg,
+                    pf_min,
+                    v_ll_avg,
+                    i_avg,
+                    samples
+                """
+                order = "minute_ts"
+
+            elif granularity == "hour":
+                table = "kpi.analyzers_1h"
+                ts_col = "hour_ts"
+                q_avg_sql = "q_kvar_avg" if has_q_1h_avg else "null::numeric as q_kvar_avg"
+                q_max_sql = "q_kvar_max" if has_q_1h_max else "null::numeric as q_kvar_max"
+                select_cols = f"""
+                    analyzer_id,
+                    hour_ts as ts,
+                    kwh_est,
+                    kw_avg,
+                    kw_max,
+                    pf_avg,
+                    pf_min,
+                    {q_avg_sql},
+                    {q_max_sql},
+                    samples
+                """
+                order = "hour_ts"
+
+            else:
+                table = "kpi.analyzers_1d"
+                ts_col = "day_ts"
+                q_avg_sql = "q_kvar_avg" if has_q_1d_avg else "null::numeric as q_kvar_avg"
+                q_max_sql = "q_kvar_max" if has_q_1d_max else "null::numeric as q_kvar_max"
+                select_cols = f"""
+                    analyzer_id,
+                    day_ts as ts,
+                    kwh_est,
+                    kw_avg,
+                    kw_max,
+                    pf_avg,
+                    pf_min,
+                    {q_avg_sql},
+                    {q_max_sql},
+                    samples
+                """
+                order = "day_ts"
+
             cur.execute(
                 f"""
                 select {select_cols}
