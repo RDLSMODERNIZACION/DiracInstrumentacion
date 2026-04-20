@@ -188,6 +188,7 @@ def get_energy_area(area_id: int):
         "analyzers": analyzers,
     }
 
+
 # ------------------------------------------------------------
 # GET /energy_areas/{area_id}/month_kpis
 # KPIs mensuales agregados por área
@@ -434,23 +435,34 @@ def get_energy_area_month_kpis(
 
             cur.execute(
                 f"""
+                with hourly_area as (
+                    select
+                        extract(hour from h.hour_ts)::int as hour,
+                        sum(h.kw_avg) as kw_sum,
+                        {pf_hour_sql},
+                        {hourly_q_sql},
+                        sum(h.samples)::int as samples
+                    from kpi.analyzers_1h h
+                    join public.network_analyzers na
+                      on na.id = h.analyzer_id
+                    join public.locations l
+                      on l.id = na.location_id
+                    where l.area_id = %(area_id)s
+                      and h.hour_ts >= %(start_ts)s
+                      and h.hour_ts < %(end_ts)s
+                    group by h.hour_ts
+                )
                 select
-                    extract(hour from h.hour_ts)::int as hour,
-                    avg(sum(h.kw_avg)) over (partition by extract(hour from h.hour_ts)) as avg_kw,
-                    max(sum(h.kw_avg)) over (partition by extract(hour from h.hour_ts)) as max_kw,
-                    {pf_hour_sql},
-                    {hourly_q_sql},
-                    sum(h.samples)::int as samples
-                from kpi.analyzers_1h h
-                join public.network_analyzers na
-                  on na.id = h.analyzer_id
-                join public.locations l
-                  on l.id = na.location_id
-                where l.area_id = %(area_id)s
-                  and h.hour_ts >= %(start_ts)s
-                  and h.hour_ts < %(end_ts)s
-                group by h.hour_ts
-                order by h.hour_ts
+                    hour,
+                    avg(kw_sum) as avg_kw,
+                    max(kw_sum) as max_kw,
+                    avg(avg_pf) as avg_pf,
+                    avg(reactive_kvar_avg) as reactive_kvar_avg,
+                    max(reactive_kvar_max) as reactive_kvar_max,
+                    sum(samples)::int as samples
+                from hourly_area
+                group by hour
+                order by hour
                 """,
                 {
                     "area_id": area_id,
@@ -458,26 +470,7 @@ def get_energy_area_month_kpis(
                     "end_ts": end_ts,
                 },
             )
-            hourly_rows = cur.fetchall() or []
-
-            hourly_map: Dict[int, Dict[str, Any]] = {}
-            for row in hourly_rows:
-                hour = int(row["hour"])
-                prev = hourly_map.get(hour)
-                if not prev:
-                    hourly_map[hour] = {
-                        "hour": hour,
-                        "avg_kw": row.get("avg_kw"),
-                        "max_kw": row.get("max_kw"),
-                        "avg_pf": row.get("avg_pf"),
-                        "reactive_kvar_avg": row.get("reactive_kvar_avg"),
-                        "reactive_kvar_max": row.get("reactive_kvar_max"),
-                        "samples": row.get("samples"),
-                    }
-                else:
-                    prev["samples"] = (prev.get("samples") or 0) + (row.get("samples") or 0)
-
-            hourly = [hourly_map[h] for h in sorted(hourly_map.keys())]
+            hourly = cur.fetchall() or []
 
     return {
         "area_id": area_id,
