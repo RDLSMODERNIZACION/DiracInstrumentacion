@@ -128,7 +128,7 @@ function endOfDayISO_AR(dateStr: string) {
   return `${dateStr}T23:59:59.999-03:00`;
 }
 
-const PF_REF = 0.95;
+const PF_REF = 0.96;
 
 function getContractedKw(a?: AnalyzerOption | null): number | null {
   if (!a) return null;
@@ -236,11 +236,12 @@ export default function EnergyEfficiencyPage({
   const [loadingHist, setLoadingHist] = useState(false);
 
   const hasLocationSelected = locationId !== undefined && locationId !== null;
+  const hasAnalyzers = analyzers.length > 0;
 
-  const currentAnalyzer = useMemo(
-    () => analyzers.find((a) => a.id === analyzerId) ?? null,
-    [analyzers, analyzerId]
-  );
+  const currentAnalyzer = useMemo(() => {
+    if (!hasAnalyzers) return null;
+    return analyzers.find((a) => a.id === analyzerId) ?? null;
+  }, [analyzers, analyzerId, hasAnalyzers]);
 
   const contractedKw = useMemo(() => getContractedKw(currentAnalyzer), [currentAnalyzer]);
 
@@ -261,19 +262,28 @@ export default function EnergyEfficiencyPage({
       try {
         setLoadingAnalyzers(true);
         setAnalyzersError(null);
+        setMonthRows([]);
+        setHistError(null);
 
         const rows = await fetchAnalyzersByLocation(locationId as number, ctrl.signal);
         if (!alive) return;
 
         setAnalyzers(rows);
 
+        if (rows.length === 0) {
+          setMonthRows([]);
+          setHistError(null);
+          return;
+        }
+
         const exists = rows.some((a) => a.id === analyzerId);
-        if (!exists && rows.length > 0) {
+        if (!exists) {
           setAnalyzerId(rows[0].id);
         }
       } catch (e: any) {
         if (!alive) return;
         setAnalyzers([]);
+        setMonthRows([]);
         setAnalyzersError(e?.message ?? String(e));
       } finally {
         if (!alive) return;
@@ -286,12 +296,13 @@ export default function EnergyEfficiencyPage({
       alive = false;
       ctrl.abort();
     };
-  }, [hasLocationSelected, locationId, analyzerId]);
+  }, [hasLocationSelected, locationId]);
 
   useEffect(() => {
-    if (!hasLocationSelected || !analyzerId) {
+    if (!hasLocationSelected || !hasAnalyzers || !currentAnalyzer?.id) {
       setMonthRows([]);
       setHistError(null);
+      setLoadingHist(false);
       return;
     }
 
@@ -302,12 +313,13 @@ export default function EnergyEfficiencyPage({
       try {
         setLoadingHist(true);
         setHistError(null);
+        setMonthRows([]);
 
         const { start, end } = monthRange(selectedMonth);
         const from = startOfDayISO_AR(start);
         const to = endOfDayISO_AR(end);
 
-        const json = await fetchHistory(analyzerId, { from, to, granularity: "day" }, ctrl.signal);
+        const json = await fetchHistory(currentAnalyzer.id, { from, to, granularity: "day" }, ctrl.signal);
         const arr = Array.isArray(json) ? json : json?.points ?? json?.days ?? [];
 
         const pts: KpiDayRow[] = (arr || [])
@@ -328,6 +340,7 @@ export default function EnergyEfficiencyPage({
         setMonthRows(pts);
       } catch (e: any) {
         if (!alive) return;
+        setMonthRows([]);
         if (String(e?.message).includes("SIN_HISTORIA")) setHistError("Sin histórico para ese período.");
         else setHistError(e?.message ?? String(e));
       } finally {
@@ -341,7 +354,7 @@ export default function EnergyEfficiencyPage({
       alive = false;
       ctrl.abort();
     };
-  }, [hasLocationSelected, analyzerId, selectedMonth]);
+  }, [hasLocationSelected, hasAnalyzers, currentAnalyzer?.id, selectedMonth]);
 
   const monthRowsSorted = useMemo(() => {
     return [...monthRows].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
@@ -402,10 +415,7 @@ export default function EnergyEfficiencyPage({
   const monthChartData = useMemo(() => {
     return monthRowsSorted.map((r) => {
       const pfAvg = normalizePf(r.pf_avg);
-      const pfMin = normalizePf(r.pf_min);
-      const lowPf =
-        (typeof pfAvg === "number" && pfAvg < PF_REF) ||
-        (typeof pfMin === "number" && pfMin < PF_REF);
+      const lowPf = typeof pfAvg === "number" && pfAvg < PF_REF;
 
       return {
         day: String(r.ts).slice(8, 10),
@@ -416,7 +426,7 @@ export default function EnergyEfficiencyPage({
         q_kvar_avg: toNum(r.q_kvar_avg) ?? undefined,
         q_kvar_max: toNum(r.q_kvar_max) ?? undefined,
         pf_avg: pfAvg ?? undefined,
-        pf_min: pfMin ?? undefined,
+        pf_min: normalizePf(r.pf_min) ?? undefined,
         lowPf,
       };
     });
@@ -433,7 +443,7 @@ export default function EnergyEfficiencyPage({
         <div>Reactiva prom: {fmt(d?.q_kvar_avg, 2, " kVAr")}</div>
         <div>Reactiva máx: {fmt(d?.q_kvar_max, 2, " kVAr")}</div>
         <div>PF prom: {fmtPf(d?.pf_avg, 3)}</div>
-        {d?.lowPf ? <div className="mt-1 text-red-700">PF bajo detectado</div> : null}
+        {d?.lowPf ? <div className="mt-1 text-red-700">PF promedio bajo detectado</div> : null}
       </div>
     );
   };
@@ -442,6 +452,14 @@ export default function EnergyEfficiencyPage({
     return (
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-800">
         Seleccione una ubicación para ver la eficiencia energética.
+      </div>
+    );
+  }
+
+  if (!loadingAnalyzers && !analyzersError && !hasAnalyzers) {
+    return (
+      <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+        No hay analizadores para la ubicación seleccionada.
       </div>
     );
   }
@@ -458,14 +476,14 @@ export default function EnergyEfficiencyPage({
             <label className="flex items-center gap-1">
               <span className="text-gray-600">Analizador:</span>
               <select
-                value={analyzerId}
+                value={hasAnalyzers && currentAnalyzer ? currentAnalyzer.id : ""}
                 onChange={(e) => setAnalyzerId(Number(e.target.value))}
                 className="rounded-md border border-gray-300 bg-white px-2 py-1"
-                disabled={loadingAnalyzers || analyzers.length === 0}
+                disabled={loadingAnalyzers || !hasAnalyzers}
               >
                 {loadingAnalyzers ? (
                   <option value="">Cargando...</option>
-                ) : analyzers.length === 0 ? (
+                ) : !hasAnalyzers ? (
                   <option value="">Sin analizadores</option>
                 ) : (
                   analyzers.map((a) => (
@@ -484,24 +502,28 @@ export default function EnergyEfficiencyPage({
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
                 className="rounded-md border border-gray-300 bg-white px-2 py-1"
+                disabled={!hasAnalyzers}
               />
             </label>
 
             <button
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50 disabled:opacity-50"
               onClick={() => setSelectedMonth(prevMonth(selectedMonth))}
+              disabled={!hasAnalyzers}
             >
               ←
             </button>
             <button
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50 disabled:opacity-50"
               onClick={() => setSelectedMonth(thisMonth)}
+              disabled={!hasAnalyzers}
             >
               Actual
             </button>
             <button
-              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50 disabled:opacity-50"
               onClick={() => setSelectedMonth(nextMonth(selectedMonth))}
+              disabled={!hasAnalyzers}
             >
               →
             </button>
@@ -644,7 +666,7 @@ export default function EnergyEfficiencyPage({
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-block h-3 w-3 rounded-sm bg-[#ef4444]" />
-              Día con factor de potencia bajo
+              Día con PF promedio bajo
             </div>
           </div>
         </div>
