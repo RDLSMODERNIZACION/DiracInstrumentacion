@@ -29,6 +29,7 @@ def _jsonable(v):
 
 
 def _compute_etag(data) -> str:
+    # Aseguramos json 100% serializable
     body = json.dumps(
         data,
         separators=(",", ":"),
@@ -42,6 +43,7 @@ def _compute_etag(data) -> str:
 def list_pumps_config(request: Request, response: Response):
     now = time.time()
 
+    # 1) cache HIT
     cached = _PUMPS_CONFIG_CACHE["data"]
     if cached is not None and (now - _PUMPS_CONFIG_CACHE["ts"]) < _PUMPS_CONFIG_TTL_SECONDS:
         etag = _PUMPS_CONFIG_CACHE["etag"]
@@ -54,13 +56,14 @@ def list_pumps_config(request: Request, response: Response):
 
         return cached
 
+    # 2) cache MISS => DB
     sql = """
-    select
-      p.id as pump_id,
-      p.name,
-      p.location_id,
-      l.name as location_name,
-      l.service_type as service_type,
+    SELECT
+      v.pump_id,
+      v.name,
+      v.location_id,
+      v.location_name,
+      l.service_type AS service_type,
 
       p.marca,
       p.modelo,
@@ -74,17 +77,19 @@ def list_pumps_config(request: Request, response: Response):
       p.tipo_arranque,
       p.criticidad,
 
-      pc.state,
-      pc.latest_event_id,
-      pc.event_ts,
-      pc.latest_hb_id,
-      pc.hb_ts,
-      pc.age_sec,
-      pc.online
-    from public.pumps p
-    left join public.locations l on l.id = p.location_id
-    left join public.v_pumps_config pc on pc.pump_id = p.id
-    order by p.id
+      v.state,
+      v.latest_event_id,
+      v.event_ts,
+      v.latest_hb_id,
+      v.hb_ts,
+      v.age_sec,
+      v.online
+    FROM public.v_pumps_with_status v
+    LEFT JOIN public.locations l
+      ON l.id = v.location_id
+    LEFT JOIN public.pumps p
+      ON p.id = v.pump_id
+    ORDER BY v.pump_id
     """
 
     t0 = time.perf_counter()
@@ -101,16 +106,15 @@ def list_pumps_config(request: Request, response: Response):
         out.append(
             {
                 "pump_id": r["pump_id"],
-                "name": r.get("name"),
-                "location_id": r.get("location_id"),
-                "location_name": r.get("location_name"),
+                "name": r["name"],
+                "location_id": r["location_id"],
+                "location_name": r["location_name"],
                 "service_type": st,
 
-                # estado operativo
-                "state": r.get("state"),
-                "latest_event_id": r.get("latest_event_id"),
+                "state": r.get("state") or "stop",
+                "latest_event_id": _jsonable(r.get("latest_event_id")),
                 "event_ts": _jsonable(r.get("event_ts")),
-                "latest_hb_id": r.get("latest_hb_id"),
+                "latest_hb_id": _jsonable(r.get("latest_hb_id")),
                 "hb_ts": _jsonable(r.get("hb_ts")),
                 "age_sec": int(r["age_sec"]) if r.get("age_sec") is not None else None,
                 "online": bool(r["online"]) if r.get("online") is not None else False,
