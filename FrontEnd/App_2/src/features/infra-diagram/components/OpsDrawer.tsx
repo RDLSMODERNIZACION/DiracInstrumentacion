@@ -55,7 +55,6 @@ function fmtDate(v?: string | null) {
 
 function prettyStatus(v?: string | null) {
   const s = String(v || "").toLowerCase();
-  if (s === "abierta") return "Abierta";
   if (s === "planificada") return "Planificada";
   if (s === "en_proceso") return "En proceso";
   if (s === "resuelta") return "Resuelta";
@@ -281,7 +280,7 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
       });
 
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.detail || `No se pudo marcar como ${nextStatus}`);
+      if (!r.ok) throw new Error(j?.detail || "No se pudo actualizar el mantenimiento");
 
       setMaintMsg(
         nextStatus === "resuelta"
