@@ -74,14 +74,20 @@ def list_tanks_config(request: Request, response: Response):
         return cached
 
     # 2) Cache MISS => DB
-    # ✅ Sumamos JOIN a locations para traer service_type
     sql = """
     select
       v.tank_id,
       v.name,
       v.location_id,
       v.location_name,
-      l.service_type as service_type,   -- ✅ NUEVO
+      l.service_type as service_type,
+
+      t.material,
+      t.fluido,
+      t.anio_instalacion,
+      t.ubicacion,
+      t.capacidad_m3,
+
       v.low_pct,
       v.low_low_pct,
       v.high_pct,
@@ -94,6 +100,7 @@ def list_tanks_config(request: Request, response: Response):
       v.alarma            -- (puede venir NULL si la vista aún no la tiene)
     from public.v_tanks_with_config v
     left join public.locations l on l.id = v.location_id
+    left join public.tanks t on t.id = v.tank_id
     order by v.tank_id
     """
 
@@ -126,8 +133,14 @@ def list_tanks_config(request: Request, response: Response):
                 "location_id": r.get("location_id"),
                 "location_name": r.get("location_name"),
 
-                # ✅ NUEVO
                 "service_type": st,
+
+                # NUEVOS CAMPOS DE FICHA TÉCNICA
+                "material": r.get("material"),
+                "fluid": r.get("fluido"),
+                "install_year": int(r["anio_instalacion"]) if r.get("anio_instalacion") is not None else None,
+                "location_text": r.get("ubicacion"),
+                "capacity_m3": float(r["capacidad_m3"]) if r.get("capacidad_m3") is not None else None,
 
                 "low_pct": float(r["low_pct"]) if r.get("low_pct") is not None else None,
                 "low_low_pct": float(r["low_low_pct"]) if r.get("low_low_pct") is not None else None,
@@ -135,7 +148,7 @@ def list_tanks_config(request: Request, response: Response):
                 "high_high_pct": float(r["high_high_pct"]) if r.get("high_high_pct") is not None else None,
 
                 "updated_by": _jsonable(r.get("updated_by")),
-                "updated_at": _jsonable(r.get("updated_at")),  # ✅ datetime -> iso
+                "updated_at": _jsonable(r.get("updated_at")),
 
                 "level_pct": float(r["level_pct"]) if r.get("level_pct") is not None else None,
                 "age_sec": int(r["age_sec"]) if r.get("age_sec") is not None else None,
