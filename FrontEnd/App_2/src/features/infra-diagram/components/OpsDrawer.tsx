@@ -297,9 +297,6 @@ export default function OpsDrawer({ open, onClose, node, onCommandSent }: Props)
   }
 
   async function deleteMaintenance(itemId: number) {
-    const ok = window.confirm("¿Querés eliminar este mantenimiento?");
-    if (!ok) return;
-
     setItemActionBusyId(itemId);
     setMaintMsg(null);
     setMaintErr(null);
