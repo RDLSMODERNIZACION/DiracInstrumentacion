@@ -10,7 +10,6 @@ import {
   Cell,
   ReferenceLine,
   LabelList,
-  LineChart,
   Line,
   Legend,
 } from "recharts";
@@ -61,6 +60,8 @@ type AreaDailyRow = {
   min_pf?: number | null;
   reactive_kvar_avg?: number | null;
   reactive_kvar_max?: number | null;
+  apparent_kva_avg?: number | null;
+  apparent_kva_max?: number | null;
   samples?: number | null;
 };
 
@@ -83,6 +84,8 @@ type AreaMonthKpisResponse = {
     avg_pf?: number | null;
     reactive_kvar_avg?: number | null;
     reactive_kvar_max?: number | null;
+    apparent_kva_avg?: number | null;
+    apparent_kva_max?: number | null;
     samples?: number | null;
     contracted_power_kw?: number | null;
   };
@@ -261,6 +264,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         setAreasError(null);
         const rows = await fetchEnergyAreas(companyId, ctrl.signal);
         if (!alive) return;
+
         setAreas(rows);
 
         if (!rows.length) {
@@ -289,7 +293,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       alive = false;
       ctrl.abort();
     };
-  }, [companyId, selectedAreaId]);
+  }, [companyId]);
 
   useEffect(() => {
     if (!selectedAreaId) {
@@ -340,14 +344,18 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         setLoadingMonth(true);
         setMonthError(null);
         setMonthData(null);
+
         const json = await fetchAreaMonthKpis(selectedAreaId, selectedMonth, ctrl.signal);
         if (!alive) return;
         setMonthData(json);
       } catch (e: any) {
         if (!alive) return;
         setMonthData(null);
-        if (String(e?.message).includes("SIN_HISTORIA")) setMonthError("Sin histórico para ese período.");
-        else setMonthError(e?.message ?? String(e));
+        if (String(e?.message).includes("SIN_HISTORIA")) {
+          setMonthError("Sin histórico para ese período.");
+        } else {
+          setMonthError(e?.message ?? String(e));
+        }
       } finally {
         if (!alive) return;
         setLoadingMonth(false);
@@ -361,7 +369,10 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     };
   }, [selectedAreaId, selectedMonth]);
 
-  const currentArea = useMemo(() => areas.find((a) => a.id === selectedAreaId) ?? null, [areas, selectedAreaId]);
+  const currentArea = useMemo(
+    () => areas.find((a) => a.id === selectedAreaId) ?? null,
+    [areas, selectedAreaId]
+  );
 
   const locationsInArea = areaDetail?.locations ?? [];
   const analyzersInArea = areaDetail?.analyzers ?? [];
@@ -376,8 +387,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   }, [monthData, areaDetail, currentArea]);
 
   const activeEnergyKwh = useMemo(() => toNum(monthData?.summary?.kwh_est), [monthData]);
-  const reactiveEnergyKvarh = useMemo(() => toNum((monthData?.summary as any)?.kvarh_est), [monthData]);
-  const apparentEnergyKvah = useMemo(() => toNum((monthData?.summary as any)?.kvah_est), [monthData]);
+  const reactiveEnergyKvarh = useMemo(() => toNum(monthData?.summary?.kvarh_est), [monthData]);
+  const apparentEnergyKvah = useMemo(() => toNum(monthData?.summary?.kvah_est), [monthData]);
 
   const avgDailyKwh = useMemo(() => {
     const vals = dailyRows.map((r) => toNum(r.kwh_est)).filter((x): x is number => x != null);
@@ -386,6 +397,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const reactiveKvarAvgMonth = useMemo(() => toNum(monthData?.summary?.reactive_kvar_avg), [monthData]);
   const reactiveKvarMaxMonth = useMemo(() => toNum(monthData?.summary?.reactive_kvar_max), [monthData]);
+  const apparentKvaAvgMonth = useMemo(() => toNum(monthData?.summary?.apparent_kva_avg), [monthData]);
+  const apparentKvaMaxMonth = useMemo(() => toNum(monthData?.summary?.apparent_kva_max), [monthData]);
 
   const avgKwMonth = useMemo(() => toNum(monthData?.summary?.avg_kw), [monthData]);
   const pfAvgMonth = useMemo(() => normalizePf(monthData?.summary?.avg_pf), [monthData]);
@@ -583,8 +596,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
           <div className="text-sm font-semibold text-red-800">Alerta de potencia</div>
           <div className="text-sm text-red-700">
             La potencia pico registrada fue de <b>{fmt(peakKw.kw, 2, " kW")}</b>
-            {peakKw.date ? <> el día <b>{peakKw.date}</b></> : null}
-            {" "}y supera la potencia contratada de <b>{fmt(contractedKw, 2, " kW")}</b>.
+            {peakKw.date ? <> el día <b>{peakKw.date}</b></> : null}{" "}
+            y supera la potencia contratada de <b>{fmt(contractedKw, 2, " kW")}</b>.
           </div>
         </div>
       ) : null}
