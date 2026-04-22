@@ -190,18 +190,49 @@ def get_energy_area_month_kpis(
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
+            # 1d columns
             has_q_1d_avg = has_column(cur, "kpi", "analyzers_1d", "q_kvar_avg")
             has_q_1d_max = has_column(cur, "kpi", "analyzers_1d", "q_kvar_max")
+            has_s_1d_avg = has_column(cur, "kpi", "analyzers_1d", "s_kva_avg")
+            has_s_1d_max = has_column(cur, "kpi", "analyzers_1d", "s_kva_max")
+            has_kvarh_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvarh_est")
+            has_kvah_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvah_est")
+
+            # 1h columns
             has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
             has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
+            has_s_1h_avg = has_column(cur, "kpi", "analyzers_1h", "s_kva_avg")
+            has_s_1h_max = has_column(cur, "kpi", "analyzers_1h", "s_kva_max")
 
-            summary_q_day_sql = (
-                "avg(d.q_kvar_avg) as reactive_kvar_avg, max(d.q_kvar_max) as reactive_kvar_max,"
-                if (has_q_1d_avg and has_q_1d_max)
-                else """
-                null::numeric as reactive_kvar_avg,
-                null::numeric as reactive_kvar_max,
-            """
+            summary_reactive_avg_sql = (
+                "avg(d.q_kvar_avg) as reactive_kvar_avg,"
+                if has_q_1d_avg
+                else "null::numeric as reactive_kvar_avg,"
+            )
+            summary_reactive_max_sql = (
+                "max(d.q_kvar_max) as reactive_kvar_max,"
+                if has_q_1d_max
+                else "null::numeric as reactive_kvar_max,"
+            )
+            summary_apparent_avg_sql = (
+                "avg(d.s_kva_avg) as apparent_kva_avg,"
+                if has_s_1d_avg
+                else "null::numeric as apparent_kva_avg,"
+            )
+            summary_apparent_max_sql = (
+                "max(d.s_kva_max) as apparent_kva_max,"
+                if has_s_1d_max
+                else "null::numeric as apparent_kva_max,"
+            )
+            summary_kvarh_sql = (
+                "sum(d.kvarh_est) as kvarh_est,"
+                if has_kvarh_est_1d
+                else "null::numeric as kvarh_est,"
+            )
+            summary_kvah_sql = (
+                "sum(d.kvah_est) as kvah_est,"
+                if has_kvah_est_1d
+                else "null::numeric as kvah_est,"
             )
 
             cur.execute(
@@ -210,11 +241,18 @@ def get_energy_area_month_kpis(
                     select
                         d.day_ts,
                         sum(d.kwh_est) as kwh_est,
-                        sum(d.kw_avg)  as kw_avg,
-                        sum(d.kw_max)  as kw_max,
-                        sum(d.samples)::int as samples
-                        {", sum(d.q_kvar_avg) as q_kvar_avg" if has_q_1d_avg else ""}
-                        {", sum(d.q_kvar_max) as q_kvar_max" if has_q_1d_max else ""}
+                        avg(d.kw_avg) as kw_avg,
+                        max(d.kw_max) as kw_max,
+                        avg(d.pf_avg) as pf_avg,
+                        min(d.pf_min) as pf_min,
+                        sum(d.samples)::int as samples,
+                        {summary_reactive_avg_sql}
+                        {summary_reactive_max_sql}
+                        {summary_apparent_avg_sql}
+                        {summary_apparent_max_sql}
+                        {summary_kvarh_sql}
+                        {summary_kvah_sql}
+                        1 as keep_row
                     from kpi.analyzers_1d d
                     join public.network_analyzers na
                       on na.id = d.analyzer_id
@@ -226,12 +264,19 @@ def get_energy_area_month_kpis(
                     group by d.day_ts
                 )
                 select
-                    max(d.kw_max)       as max_kw_daily_sum,
-                    avg(d.kw_avg)       as avg_kw_daily_sum,
-                    sum(d.kwh_est)      as kwh_est,
-                    {summary_q_day_sql}
-                    sum(d.samples)::int as samples
-                from daily_area d
+                    max(kw_max) as max_kw,
+                    avg(kw_avg) as avg_kw,
+                    sum(kwh_est) as kwh_est,
+                    avg(pf_avg) as avg_pf,
+                    min(pf_min) as min_pf,
+                    avg(reactive_kvar_avg) as reactive_kvar_avg,
+                    max(reactive_kvar_max) as reactive_kvar_max,
+                    avg(apparent_kva_avg) as apparent_kva_avg,
+                    max(apparent_kva_max) as apparent_kva_max,
+                    sum(kvarh_est) as kvarh_est,
+                    sum(kvah_est) as kvah_est,
+                    sum(samples)::int as samples
+                from daily_area
                 """,
                 {
                     "area_id": area_id,
@@ -239,95 +284,54 @@ def get_energy_area_month_kpis(
                     "end_date": end_ts.date(),
                 },
             )
-            summary_day = cur.fetchone() or {}
+            summary = cur.fetchone() or {}
 
-            if has_q_1h_avg:
-                pf_area_hour_sql = """
-                    case
-                        when sqrt(power(sum(h.kw_avg), 2) + power(sum(h.q_kvar_avg), 2)) > 0
-                        then abs(sum(h.kw_avg)) / sqrt(power(sum(h.kw_avg), 2) + power(sum(h.q_kvar_avg), 2))
-                        else null
-                    end as pf_area
-                """
-            else:
-                pf_area_hour_sql = """
-                    case
-                        when sum(abs(h.kw_avg)) > 0
-                        then sum(h.pf_avg * abs(h.kw_avg)) / sum(abs(h.kw_avg))
-                        else null
-                    end as pf_area
-                """
-
-            cur.execute(
-                f"""
-                with hourly_area as (
-                    select
-                        h.hour_ts,
-                        sum(h.kw_avg) as kw_area
-                        {", sum(h.q_kvar_avg) as q_kvar_area" if has_q_1h_avg else ""}
-                        {", " + pf_area_hour_sql}
-                    from kpi.analyzers_1h h
-                    join public.network_analyzers na
-                      on na.id = h.analyzer_id
-                    join public.locations l
-                      on l.id = na.location_id
-                    where l.area_id = %(area_id)s
-                      and h.hour_ts >= %(start_ts)s
-                      and h.hour_ts < %(end_ts)s
-                    group by h.hour_ts
-                )
-                select
-                    max(kw_area) as max_kw,
-                    avg(kw_area) as avg_kw,
-                    avg(pf_area) as avg_pf
-                from hourly_area
-                """,
-                {
-                    "area_id": area_id,
-                    "start_ts": start_ts,
-                    "end_ts": end_ts,
-                },
+            daily_reactive_avg_sql = (
+                "avg(d.q_kvar_avg) as reactive_kvar_avg,"
+                if has_q_1d_avg
+                else "null::numeric as reactive_kvar_avg,"
             )
-            summary_hour = cur.fetchone() or {}
-
-            summary = {
-                "max_kw": summary_hour.get("max_kw"),
-                "avg_kw": summary_hour.get("avg_kw"),
-                "kwh_est": summary_day.get("kwh_est"),
-                "avg_pf": summary_hour.get("avg_pf"),
-                "reactive_kvar_avg": summary_day.get("reactive_kvar_avg"),
-                "reactive_kvar_max": summary_day.get("reactive_kvar_max"),
-                "samples": summary_day.get("samples"),
-                "contracted_power_kw": area.get("contracted_power_kw"),
-            }
-
-            daily_select_q = []
-            if has_q_1d_avg:
-                daily_select_q.append("sum(d.q_kvar_avg) as reactive_kvar_avg")
-            else:
-                daily_select_q.append("null::numeric as reactive_kvar_avg")
-
-            if has_q_1d_max:
-                daily_select_q.append("sum(d.q_kvar_max) as reactive_kvar_max")
-            else:
-                daily_select_q.append("null::numeric as reactive_kvar_max")
-
-            daily_q_sql = ",\n                    ".join(daily_select_q)
+            daily_reactive_max_sql = (
+                "max(d.q_kvar_max) as reactive_kvar_max,"
+                if has_q_1d_max
+                else "null::numeric as reactive_kvar_max,"
+            )
+            daily_apparent_avg_sql = (
+                "avg(d.s_kva_avg) as apparent_kva_avg,"
+                if has_s_1d_avg
+                else "null::numeric as apparent_kva_avg,"
+            )
+            daily_apparent_max_sql = (
+                "max(d.s_kva_max) as apparent_kva_max,"
+                if has_s_1d_max
+                else "null::numeric as apparent_kva_max,"
+            )
+            daily_kvarh_sql = (
+                "sum(d.kvarh_est) as kvarh_est,"
+                if has_kvarh_est_1d
+                else "null::numeric as kvarh_est,"
+            )
+            daily_kvah_sql = (
+                "sum(d.kvah_est) as kvah_est,"
+                if has_kvah_est_1d
+                else "null::numeric as kvah_est,"
+            )
 
             cur.execute(
                 f"""
                 select
                     d.day_ts as day,
-                    sum(d.kw_max) as max_kw,
-                    sum(d.kw_avg) as avg_kw,
+                    max(d.kw_max) as max_kw,
+                    avg(d.kw_avg) as avg_kw,
                     sum(d.kwh_est) as kwh_est,
-                    case
-                        when sum(abs(d.kw_avg)) > 0
-                        then sum(d.pf_avg * abs(d.kw_avg)) / sum(abs(d.kw_avg))
-                        else null
-                    end as avg_pf,
+                    avg(d.pf_avg) as avg_pf,
                     min(d.pf_min) as min_pf,
-                    {daily_q_sql},
+                    {daily_reactive_avg_sql}
+                    {daily_reactive_max_sql}
+                    {daily_apparent_avg_sql}
+                    {daily_apparent_max_sql}
+                    {daily_kvarh_sql}
+                    {daily_kvah_sql}
                     sum(d.samples)::int as samples
                 from kpi.analyzers_1d d
                 join public.network_analyzers na
@@ -348,41 +352,40 @@ def get_energy_area_month_kpis(
             )
             daily = cur.fetchall() or []
 
-            hourly_select_q = []
-            if has_q_1h_avg:
-                hourly_select_q.append("sum(h.q_kvar_avg) as reactive_kvar_avg")
-                pf_hour_sql = """
-                    case
-                        when sqrt(power(sum(h.kw_avg), 2) + power(sum(h.q_kvar_avg), 2)) > 0
-                        then abs(sum(h.kw_avg)) / sqrt(power(sum(h.kw_avg), 2) + power(sum(h.q_kvar_avg), 2))
-                        else null
-                    end as avg_pf
-                """
-            else:
-                hourly_select_q.append("null::numeric as reactive_kvar_avg")
-                pf_hour_sql = """
-                    case
-                        when sum(abs(h.kw_avg)) > 0
-                        then sum(h.pf_avg * abs(h.kw_avg)) / sum(abs(h.kw_avg))
-                        else null
-                    end as avg_pf
-                """
-
-            if has_q_1h_max:
-                hourly_select_q.append("sum(h.q_kvar_max) as reactive_kvar_max")
-            else:
-                hourly_select_q.append("null::numeric as reactive_kvar_max")
-
-            hourly_q_sql = ",\n                    ".join(hourly_select_q)
+            hourly_reactive_avg_sql = (
+                "avg(hourly_area.q_kvar_avg) as reactive_kvar_avg,"
+                if has_q_1h_avg
+                else "null::numeric as reactive_kvar_avg,"
+            )
+            hourly_reactive_max_sql = (
+                "max(hourly_area.q_kvar_max) as reactive_kvar_max,"
+                if has_q_1h_max
+                else "null::numeric as reactive_kvar_max,"
+            )
+            hourly_apparent_avg_sql = (
+                "avg(hourly_area.s_kva_avg) as apparent_kva_avg,"
+                if has_s_1h_avg
+                else "null::numeric as apparent_kva_avg,"
+            )
+            hourly_apparent_max_sql = (
+                "max(hourly_area.s_kva_max) as apparent_kva_max,"
+                if has_s_1h_max
+                else "null::numeric as apparent_kva_max,"
+            )
 
             cur.execute(
                 f"""
                 with hourly_area as (
                     select
                         extract(hour from h.hour_ts)::int as hour,
-                        sum(h.kw_avg) as kw_sum,
-                        {pf_hour_sql},
-                        {hourly_q_sql},
+                        avg(h.kw_avg) as kw_avg,
+                        max(h.kw_max) as kw_max,
+                        avg(h.pf_avg) as pf_avg,
+                        min(h.pf_min) as pf_min,
+                        {"avg(h.q_kvar_avg) as q_kvar_avg," if has_q_1h_avg else "null::numeric as q_kvar_avg,"}
+                        {"max(h.q_kvar_max) as q_kvar_max," if has_q_1h_max else "null::numeric as q_kvar_max,"}
+                        {"avg(h.s_kva_avg) as s_kva_avg," if has_s_1h_avg else "null::numeric as s_kva_avg,"}
+                        {"max(h.s_kva_max) as s_kva_max," if has_s_1h_max else "null::numeric as s_kva_max,"}
                         sum(h.samples)::int as samples
                     from kpi.analyzers_1h h
                     join public.network_analyzers na
@@ -392,15 +395,18 @@ def get_energy_area_month_kpis(
                     where l.area_id = %(area_id)s
                       and h.hour_ts >= %(start_ts)s
                       and h.hour_ts < %(end_ts)s
-                    group by h.hour_ts
+                    group by extract(hour from h.hour_ts)
                 )
                 select
                     hour,
-                    avg(kw_sum) as avg_kw,
-                    max(kw_sum) as max_kw,
-                    avg(avg_pf) as avg_pf,
-                    avg(reactive_kvar_avg) as reactive_kvar_avg,
-                    max(reactive_kvar_max) as reactive_kvar_max,
+                    avg(kw_avg) as avg_kw,
+                    max(kw_max) as max_kw,
+                    avg(pf_avg) as avg_pf,
+                    min(pf_min) as min_pf,
+                    {hourly_reactive_avg_sql}
+                    {hourly_reactive_max_sql}
+                    {hourly_apparent_avg_sql}
+                    {hourly_apparent_max_sql}
                     sum(samples)::int as samples
                 from hourly_area
                 group by hour
@@ -418,7 +424,10 @@ def get_energy_area_month_kpis(
         "area_id": area_id,
         "month": month,
         "area": area,
-        "summary": summary,
+        "summary": {
+            **summary,
+            "contracted_power_kw": area.get("contracted_power_kw"),
+        },
         "daily": daily,
         "hourly": hourly,
     }
@@ -451,25 +460,45 @@ def get_energy_area_history(
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
+            has_q_1m_avg = has_column(cur, "kpi", "analyzers_1m", "q_kvar_avg")
+            has_q_1m_max = has_column(cur, "kpi", "analyzers_1m", "q_kvar_max")
+            has_s_1m_avg = has_column(cur, "kpi", "analyzers_1m", "s_kva_avg")
+            has_s_1m_max = has_column(cur, "kpi", "analyzers_1m", "s_kva_max")
+            has_kwh_delta_1m = has_column(cur, "kpi", "analyzers_1m", "kwh_delta")
+            has_kvarh_delta_1m = has_column(cur, "kpi", "analyzers_1m", "kvarh_delta")
+            has_kvah_delta_1m = has_column(cur, "kpi", "analyzers_1m", "kvah_delta")
+
             has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
             has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
+            has_s_1h_avg = has_column(cur, "kpi", "analyzers_1h", "s_kva_avg")
+            has_s_1h_max = has_column(cur, "kpi", "analyzers_1h", "s_kva_max")
+            has_kvarh_est_1h = has_column(cur, "kpi", "analyzers_1h", "kvarh_est")
+            has_kvah_est_1h = has_column(cur, "kpi", "analyzers_1h", "kvah_est")
+
             has_q_1d_avg = has_column(cur, "kpi", "analyzers_1d", "q_kvar_avg")
             has_q_1d_max = has_column(cur, "kpi", "analyzers_1d", "q_kvar_max")
+            has_s_1d_avg = has_column(cur, "kpi", "analyzers_1d", "s_kva_avg")
+            has_s_1d_max = has_column(cur, "kpi", "analyzers_1d", "s_kva_max")
+            has_kvarh_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvarh_est")
+            has_kvah_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvah_est")
 
             if granularity == "minute":
-                ts_col = "minute_ts"
-                select_cols = """
+                ts_col = "m.minute_ts"
+                select_cols = f"""
                     m.minute_ts as ts,
-                    sum(m.kw_avg) as kw_avg,
-                    sum(m.kw_max) as kw_max,
-                    case
-                        when sum(abs(m.kw_avg)) > 0
-                        then sum(m.pf_avg * abs(m.kw_avg)) / sum(abs(m.kw_avg))
-                        else null
-                    end as pf_avg,
+                    avg(m.kw_avg) as kw_avg,
+                    max(m.kw_max) as kw_max,
+                    avg(m.pf_avg) as pf_avg,
                     min(m.pf_min) as pf_min,
-                    sum(m.v_ll_avg) as v_ll_avg,
-                    sum(m.i_avg) as i_avg,
+                    avg(m.v_ll_avg) as v_ll_avg,
+                    avg(m.i_avg) as i_avg,
+                    {"avg(m.q_kvar_avg) as q_kvar_avg," if has_q_1m_avg else "null::numeric as q_kvar_avg,"}
+                    {"max(m.q_kvar_max) as q_kvar_max," if has_q_1m_max else "null::numeric as q_kvar_max,"}
+                    {"avg(m.s_kva_avg) as s_kva_avg," if has_s_1m_avg else "null::numeric as s_kva_avg,"}
+                    {"max(m.s_kva_max) as s_kva_max," if has_s_1m_max else "null::numeric as s_kva_max,"}
+                    {"sum(m.kwh_delta) as kwh_delta," if has_kwh_delta_1m else "null::numeric as kwh_delta,"}
+                    {"sum(m.kvarh_delta) as kvarh_delta," if has_kvarh_delta_1m else "null::numeric as kvarh_delta,"}
+                    {"sum(m.kvah_delta) as kvah_delta," if has_kvah_delta_1m else "null::numeric as kvah_delta,"}
                     sum(m.samples)::int as samples
                 """
                 from_sql = """
@@ -481,22 +510,20 @@ def get_energy_area_history(
                 order_by = "m.minute_ts"
 
             elif granularity == "hour":
-                ts_col = "hour_ts"
-                q_avg_sql = "sum(h.q_kvar_avg) as q_kvar_avg," if has_q_1h_avg else "null::numeric as q_kvar_avg,"
-                q_max_sql = "sum(h.q_kvar_max) as q_kvar_max," if has_q_1h_max else "null::numeric as q_kvar_max,"
+                ts_col = "h.hour_ts"
                 select_cols = f"""
                     h.hour_ts as ts,
                     sum(h.kwh_est) as kwh_est,
-                    sum(h.kw_avg) as kw_avg,
-                    sum(h.kw_max) as kw_max,
-                    case
-                        when sum(abs(h.kw_avg)) > 0
-                        then sum(h.pf_avg * abs(h.kw_avg)) / sum(abs(h.kw_avg))
-                        else null
-                    end as pf_avg,
+                    avg(h.kw_avg) as kw_avg,
+                    max(h.kw_max) as kw_max,
+                    avg(h.pf_avg) as pf_avg,
                     min(h.pf_min) as pf_min,
-                    {q_avg_sql}
-                    {q_max_sql}
+                    {"avg(h.q_kvar_avg) as q_kvar_avg," if has_q_1h_avg else "null::numeric as q_kvar_avg,"}
+                    {"max(h.q_kvar_max) as q_kvar_max," if has_q_1h_max else "null::numeric as q_kvar_max,"}
+                    {"avg(h.s_kva_avg) as s_kva_avg," if has_s_1h_avg else "null::numeric as s_kva_avg,"}
+                    {"max(h.s_kva_max) as s_kva_max," if has_s_1h_max else "null::numeric as s_kva_max,"}
+                    {"sum(h.kvarh_est) as kvarh_est," if has_kvarh_est_1h else "null::numeric as kvarh_est,"}
+                    {"sum(h.kvah_est) as kvah_est," if has_kvah_est_1h else "null::numeric as kvah_est,"}
                     sum(h.samples)::int as samples
                 """
                 from_sql = """
@@ -508,22 +535,20 @@ def get_energy_area_history(
                 order_by = "h.hour_ts"
 
             else:
-                ts_col = "day_ts"
-                q_avg_sql = "sum(d.q_kvar_avg) as q_kvar_avg," if has_q_1d_avg else "null::numeric as q_kvar_avg,"
-                q_max_sql = "sum(d.q_kvar_max) as q_kvar_max," if has_q_1d_max else "null::numeric as q_kvar_max,"
+                ts_col = "d.day_ts"
                 select_cols = f"""
                     d.day_ts as ts,
                     sum(d.kwh_est) as kwh_est,
-                    sum(d.kw_avg) as kw_avg,
-                    sum(d.kw_max) as kw_max,
-                    case
-                        when sum(abs(d.kw_avg)) > 0
-                        then sum(d.pf_avg * abs(d.kw_avg)) / sum(abs(d.kw_avg))
-                        else null
-                    end as pf_avg,
+                    avg(d.kw_avg) as kw_avg,
+                    max(d.kw_max) as kw_max,
+                    avg(d.pf_avg) as pf_avg,
                     min(d.pf_min) as pf_min,
-                    {q_avg_sql}
-                    {q_max_sql}
+                    {"avg(d.q_kvar_avg) as q_kvar_avg," if has_q_1d_avg else "null::numeric as q_kvar_avg,"}
+                    {"max(d.q_kvar_max) as q_kvar_max," if has_q_1d_max else "null::numeric as q_kvar_max,"}
+                    {"avg(d.s_kva_avg) as s_kva_avg," if has_s_1d_avg else "null::numeric as s_kva_avg,"}
+                    {"max(d.s_kva_max) as s_kva_max," if has_s_1d_max else "null::numeric as s_kva_max,"}
+                    {"sum(d.kvarh_est) as kvarh_est," if has_kvarh_est_1d else "null::numeric as kvarh_est,"}
+                    {"sum(d.kvah_est) as kvah_est," if has_kvah_est_1d else "null::numeric as kvah_est,"}
                     sum(d.samples)::int as samples
                 """
                 from_sql = """
