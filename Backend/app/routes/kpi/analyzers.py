@@ -50,11 +50,6 @@ def get_analyzer_month_kpis(
     analyzer_id: int,
     month: str = Query(..., description="YYYY-MM"),
 ):
-    """
-    Devuelve KPIs mensuales de energía para un analizador en un mes.
-    Si las columnas de reactiva no existen todavía en KPI, devuelve null y no rompe.
-    """
-
     start_ts, end_ts = month_bounds_utc(month)
 
     with get_conn() as conn:
@@ -80,19 +75,38 @@ def get_analyzer_month_kpis(
             if not analyzer:
                 raise HTTPException(status_code=404, detail="Analyzer not found")
 
+            # columnas dinámicas en 1d
             has_q_1d_avg = has_column(cur, "kpi", "analyzers_1d", "q_kvar_avg")
             has_q_1d_max = has_column(cur, "kpi", "analyzers_1d", "q_kvar_max")
+            has_s_1d_avg = has_column(cur, "kpi", "analyzers_1d", "s_kva_avg")
+            has_s_1d_max = has_column(cur, "kpi", "analyzers_1d", "s_kva_max")
+            has_kvarh_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvarh_est")
+            has_kvah_est_1d = has_column(cur, "kpi", "analyzers_1d", "kvah_est")
+
+            # columnas dinámicas en 1h
             has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
             has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
+            has_s_1h_avg = has_column(cur, "kpi", "analyzers_1h", "s_kva_avg")
+            has_s_1h_max = has_column(cur, "kpi", "analyzers_1h", "s_kva_max")
 
             summary_reactive_avg_sql = "avg(q_kvar_avg) as reactive_kvar_avg," if has_q_1d_avg else "null::numeric as reactive_kvar_avg,"
             summary_reactive_max_sql = "max(q_kvar_max) as reactive_kvar_max," if has_q_1d_max else "null::numeric as reactive_kvar_max,"
+            summary_apparent_avg_sql = "avg(s_kva_avg) as apparent_kva_avg," if has_s_1d_avg else "null::numeric as apparent_kva_avg,"
+            summary_apparent_max_sql = "max(s_kva_max) as apparent_kva_max," if has_s_1d_max else "null::numeric as apparent_kva_max,"
+            summary_kvarh_sql = "sum(kvarh_est) as kvarh_est," if has_kvarh_est_1d else "null::numeric as kvarh_est,"
+            summary_kvah_sql = "sum(kvah_est) as kvah_est," if has_kvah_est_1d else "null::numeric as kvah_est,"
 
             daily_reactive_avg_sql = "q_kvar_avg as reactive_kvar_avg," if has_q_1d_avg else "null::numeric as reactive_kvar_avg,"
             daily_reactive_max_sql = "q_kvar_max as reactive_kvar_max," if has_q_1d_max else "null::numeric as reactive_kvar_max,"
+            daily_apparent_avg_sql = "s_kva_avg as apparent_kva_avg," if has_s_1d_avg else "null::numeric as apparent_kva_avg,"
+            daily_apparent_max_sql = "s_kva_max as apparent_kva_max," if has_s_1d_max else "null::numeric as apparent_kva_max,"
+            daily_kvarh_sql = "kvarh_est," if has_kvarh_est_1d else "null::numeric as kvarh_est,"
+            daily_kvah_sql = "kvah_est," if has_kvah_est_1d else "null::numeric as kvah_est,"
 
             hourly_reactive_avg_sql = "avg(q_kvar_avg) as reactive_kvar_avg," if has_q_1h_avg else "null::numeric as reactive_kvar_avg,"
             hourly_reactive_max_sql = "max(q_kvar_max) as reactive_kvar_max," if has_q_1h_max else "null::numeric as reactive_kvar_max,"
+            hourly_apparent_avg_sql = "avg(s_kva_avg) as apparent_kva_avg," if has_s_1h_avg else "null::numeric as apparent_kva_avg,"
+            hourly_apparent_max_sql = "max(s_kva_max) as apparent_kva_max," if has_s_1h_max else "null::numeric as apparent_kva_max,"
 
             # ---------------------------
             # SUMMARY
@@ -107,6 +121,10 @@ def get_analyzer_month_kpis(
                   min(pf_min)       as min_pf,
                   {summary_reactive_avg_sql}
                   {summary_reactive_max_sql}
+                  {summary_apparent_avg_sql}
+                  {summary_apparent_max_sql}
+                  {summary_kvarh_sql}
+                  {summary_kvah_sql}
                   sum(samples)::int as samples
                 from kpi.analyzers_1d
                 where analyzer_id = %(analyzer_id)s
@@ -135,6 +153,10 @@ def get_analyzer_month_kpis(
                   pf_min  as min_pf,
                   {daily_reactive_avg_sql}
                   {daily_reactive_max_sql}
+                  {daily_apparent_avg_sql}
+                  {daily_apparent_max_sql}
+                  {daily_kvarh_sql}
+                  {daily_kvah_sql}
                   samples
                 from kpi.analyzers_1d
                 where analyzer_id = %(analyzer_id)s
@@ -163,6 +185,8 @@ def get_analyzer_month_kpis(
                   min(pf_min)                    as min_pf,
                   {hourly_reactive_avg_sql}
                   {hourly_reactive_max_sql}
+                  {hourly_apparent_avg_sql}
+                  {hourly_apparent_max_sql}
                   sum(samples)::int              as samples
                 from kpi.analyzers_1h
                 where analyzer_id = %(analyzer_id)s
