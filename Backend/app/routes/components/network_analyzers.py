@@ -63,8 +63,31 @@ def to_float(v: Any) -> Optional[float]:
     return None
 
 
+def to_int(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s == "":
+            return None
+        try:
+            return int(float(s))
+        except Exception:
+            return None
+    return None
+
+
 def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     energy = payload.get("energy", {}) or {}
+    stats = payload.get("stats", {}) or {}
+    avg = stats.get("avg", {}) or {}
+    max_ = stats.get("max", {}) or {}
 
     def g(key: str) -> Any:
         return payload.get(key)
@@ -72,7 +95,14 @@ def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     def eg(key: str) -> Any:
         return energy.get(key)
 
+    def ag(key: str) -> Any:
+        return avg.get(key)
+
+    def mg(key: str) -> Any:
+        return max_.get(key)
+
     return {
+        # instantáneos
         "v_l1l2": to_float(g("V_L1L2")),
         "v_l3l2": to_float(g("V_L3L2")),
         "v_l1l3": to_float(g("V_L1L3")),
@@ -93,13 +123,39 @@ def norm_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "s_kva": to_float(g("S_kVA")),
 
         "pf": to_float(g("PF")),
-        "quadrant": payload.get("quadrant"),
+        "quadrant": to_int(g("quadrant")),
 
-        "e_kwh_import": to_float(eg("kWh_import")),
-        "e_kwh_export": to_float(eg("kWh_export")),
-        "e_kvarh_import": to_float(eg("kVArh_import")),
-        "e_kvarh_export": to_float(eg("kVArh_export")),
-        "e_kvah": to_float(eg("kVAh")),
+        # energías
+        "e_kwh_import": to_float(eg("active_import_kWh")),
+        "e_kwh_export": to_float(eg("active_export_kWh")),
+        "e_kwh_net": to_float(eg("active_net_kWh")),
+
+        "e_kvarh_import": to_float(eg("reactive_import_kVArh")),
+        "e_kvarh_export": to_float(eg("reactive_export_kVArh")),
+        "e_kvarh_net": to_float(eg("reactive_net_kVArh")),
+
+        "e_kvah_import": to_float(eg("apparent_import_kVAh")),
+        "e_kvah_export": to_float(eg("apparent_export_kVAh")),
+        "e_kvah_net": to_float(eg("apparent_net_kVAh")),
+
+        # compatibilidad con esquema viejo
+        "e_kvah": to_float(eg("apparent_import_kVAh")),
+
+        # promedios
+        "avg_p_w": to_float(ag("avg_P_W")),
+        "avg_p_kw": to_float(ag("avg_P_kW")),
+        "avg_q_var": to_float(ag("avg_Q_var")),
+        "avg_q_kvar": to_float(ag("avg_Q_kVAr")),
+        "avg_s_va": to_float(ag("avg_S_VA")),
+        "avg_s_kva": to_float(ag("avg_S_kVA")),
+
+        # máximos
+        "max_p_w": to_float(mg("max_P_W")),
+        "max_p_kw": to_float(mg("max_P_kW")),
+        "max_q_var": to_float(mg("max_Q_var")),
+        "max_q_kvar": to_float(mg("max_Q_kVAr")),
+        "max_s_va": to_float(mg("max_S_VA")),
+        "max_s_kva": to_float(mg("max_S_kVA")),
 
         "raw": payload.get("raw"),
         "source": payload.get("source", "network_analyzer"),
@@ -194,6 +250,7 @@ def insert_snapshot(
                 insert into public.network_analyzer_readings (
                     analyzer_id,
                     ts,
+
                     v_l1l2, v_l3l2, v_l1l3,
                     i_l1, i_l2, i_l3,
                     hz,
@@ -202,16 +259,41 @@ def insert_snapshot(
                     s_va, s_kva,
                     pf,
                     quadrant,
+
                     e_kwh_import,
                     e_kwh_export,
+                    e_kwh_net,
+
                     e_kvarh_import,
                     e_kvarh_export,
+                    e_kvarh_net,
+
+                    e_kvah_import,
+                    e_kvah_export,
+                    e_kvah_net,
+
                     e_kvah,
+
+                    avg_p_w,
+                    avg_p_kw,
+                    avg_q_var,
+                    avg_q_kvar,
+                    avg_s_va,
+                    avg_s_kva,
+
+                    max_p_w,
+                    max_p_kw,
+                    max_q_var,
+                    max_q_kvar,
+                    max_s_va,
+                    max_s_kva,
+
                     raw,
                     source
                 ) values (
                     %(analyzer_id)s,
                     %(ts)s,
+
                     %(v_l1l2)s, %(v_l3l2)s, %(v_l1l3)s,
                     %(i_l1)s, %(i_l2)s, %(i_l3)s,
                     %(hz)s,
@@ -220,11 +302,35 @@ def insert_snapshot(
                     %(s_va)s, %(s_kva)s,
                     %(pf)s,
                     %(quadrant)s,
+
                     %(e_kwh_import)s,
                     %(e_kwh_export)s,
+                    %(e_kwh_net)s,
+
                     %(e_kvarh_import)s,
                     %(e_kvarh_export)s,
+                    %(e_kvarh_net)s,
+
+                    %(e_kvah_import)s,
+                    %(e_kvah_export)s,
+                    %(e_kvah_net)s,
+
                     %(e_kvah)s,
+
+                    %(avg_p_w)s,
+                    %(avg_p_kw)s,
+                    %(avg_q_var)s,
+                    %(avg_q_kvar)s,
+                    %(avg_s_va)s,
+                    %(avg_s_kva)s,
+
+                    %(max_p_w)s,
+                    %(max_p_kw)s,
+                    %(max_q_var)s,
+                    %(max_q_kvar)s,
+                    %(max_s_va)s,
+                    %(max_s_kva)s,
+
                     %(raw)s,
                     %(source)s
                 )
@@ -261,6 +367,11 @@ def get_latest_snapshot(
             p_kw,
             q_kvar,
             pf,
+            e_kwh_import,
+            e_kvarh_import,
+            e_kvah_import,
+            avg_p_kw,
+            max_p_kw,
             source
         from public.network_analyzer_readings
         where analyzer_id = %(analyzer_id)s
