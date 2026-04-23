@@ -1,211 +1,254 @@
-// src/components/ReliabilityPage.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import { fetchLocationTimeline, ReliabilityTimelineResponse } from "@/api/reliability";
+export default function OperacionConfiabilidadMockup() {
+  const plantas = [
+    {
+      id: 1,
+      nombre: "Planta Oeste 1",
+      estadoGeneral: "Operativa",
+      modo: "Automático",
+      nivel: 72,
+      presion: 4.8,
+      caudal: 185,
+      potenciaKw: 109.7,
+      energiaKwh: 2630,
+      eficiencia: 0.59,
+      bombas: [
+        { nombre: "Bomba 1", estado: "Marcha", horas: 12.4, arranques: 8, disponibilidad: 98.2, fallas: 0, mtbf: 420, mttr: 1.2 },
+        { nombre: "Bomba 2", estado: "Reserva", horas: 6.1, arranques: 4, disponibilidad: 96.4, fallas: 1, mtbf: 280, mttr: 2.7 },
+      ],
+      alarmas: [
+        { tipo: "info", texto: "Alternancia correcta entre bombas" },
+        { tipo: "warn", texto: "Bomba 2 estuvo 35 min en manual" },
+      ],
+    },
+    {
+      id: 2,
+      nombre: "Planta Oeste 2",
+      estadoGeneral: "Operativa con observaciones",
+      modo: "Automático",
+      nivel: 81,
+      presion: 5.2,
+      caudal: 240,
+      potenciaKw: 226.2,
+      energiaKwh: 5110,
+      eficiencia: 0.74,
+      bombas: [
+        { nombre: "Bomba 3", estado: "Marcha", horas: 15.1, arranques: 11, disponibilidad: 94.8, fallas: 1, mtbf: 210, mttr: 3.1 },
+        { nombre: "Bomba 4", estado: "Parada", horas: 7.2, arranques: 6, disponibilidad: 91.3, fallas: 2, mtbf: 140, mttr: 4.5 },
+      ],
+      alarmas: [
+        { tipo: "danger", texto: "Bomba 4 con reincidencia de falla térmica" },
+        { tipo: "warn", texto: "Consumo específico alto respecto al caudal" },
+      ],
+    },
+  ];
 
-type Props = {
-  // En el Widget lo estás llamando como: locationId={loc === "all" ? "all" : Number(loc)}
-  locationId: number | "all";
-  thresholdLow?: number; // % mínimo para considerarlo "en verde" (default 90)
-  days?: number; // por si después querés cambiar la ventana
-  bucketMinutes?: number; // default 60
-};
+  const resumen = {
+    disponibilidad: 95.2,
+    arranquesHoy: 29,
+    horasMarcha: 40.8,
+    energiaDia: 7740,
+    eficiencia: 0.68,
+    fallasMes: 4,
+    mtbf: 262,
+    mttr: 2.9,
+  };
 
-type DayBuckets = {
-  dateKey: string;
-  label: string;
-  buckets: {
-    has_data: boolean;
-  }[];
-};
+  const colorEstado = (estado: string) => {
+    const e = estado.toLowerCase();
+    if (e.includes("marcha") || e.includes("operativa")) return "bg-emerald-100 text-emerald-700 border-emerald-200";
+    if (e.includes("manual") || e.includes("observaciones") || e.includes("reserva")) return "bg-amber-100 text-amber-700 border-amber-200";
+    if (e.includes("falla") || e.includes("parada")) return "bg-red-100 text-red-700 border-red-200";
+    return "bg-slate-100 text-slate-700 border-slate-200";
+  };
 
-function formatDateLabel(d: Date) {
-  return d.toLocaleDateString("es-AR", {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-  });
-}
+  const colorAlarma = (tipo: string) => {
+    if (tipo === "danger") return "border-red-200 bg-red-50 text-red-700";
+    if (tipo === "warn") return "border-amber-200 bg-amber-50 text-amber-700";
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  };
 
-export default function ReliabilityPage({
-  locationId,
-  thresholdLow = 90,
-  days = 7,
-  bucketMinutes = 60,
-}: Props) {
-  const [data, setData] = useState<ReliabilityTimelineResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const locNumber = locationId === "all" ? undefined : locationId;
-        const res = await fetchLocationTimeline({
-          locationId: locNumber,
-          days,
-          bucketMinutes,
-        });
-        if (cancelled) return;
-        setData(res);
-        if (!res) {
-          setError("No se pudieron cargar los datos de confiabilidad.");
-        }
-      } catch (e) {
-        console.error("[ReliabilityPage] load error:", e);
-        if (!cancelled) setError("Error al cargar datos de confiabilidad.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [locationId, days, bucketMinutes]);
-
-  const uptimePct = useMemo(() => {
-    if (!data || data.uptime_ratio == null) return null;
-    return data.uptime_ratio * 100;
-  }, [data]);
-
-  const healthColor = useMemo(() => {
-    if (uptimePct == null) return "text-gray-500";
-    if (uptimePct >= thresholdLow) return "text-emerald-600";
-    if (uptimePct >= thresholdLow - 10) return "text-amber-500";
-    return "text-red-500";
-  }, [uptimePct, thresholdLow]);
-
-  const grouped: DayBuckets[] = useMemo(() => {
-    if (!data || !data.timeline?.length) return [];
-
-    const byDay = new Map<string, DayBuckets>();
-
-    for (const b of data.timeline) {
-      const d = new Date(b.bucket_start);
-      const dateKey = d.toISOString().slice(0, 10); // yyyy-mm-dd (aprox, suficiente para agrupar)
-      const existing = byDay.get(dateKey);
-      const entry: DayBuckets =
-        existing ??
-        {
-          dateKey,
-          label: formatDateLabel(d),
-          buckets: [],
-        };
-
-      entry.buckets.push({ has_data: b.has_data });
-      if (!existing) byDay.set(dateKey, entry);
-    }
-
-    // Ordenamos por fecha ascendente
-    const rows = Array.from(byDay.values()).sort((a, b) =>
-      a.dateKey.localeCompare(b.dateKey)
-    );
-
-    return rows;
-  }, [data]);
-
-  const bucketLabel =
-    bucketMinutes >= 60
-      ? `${bucketMinutes / 60} h`
-      : `${bucketMinutes} min`;
+  const Kpi = ({ titulo, valor, subtitulo }: { titulo: string; valor: string; subtitulo?: string }) => (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-xs uppercase tracking-wide text-slate-500">{titulo}</div>
+      <div className="mt-2 text-3xl font-semibold text-slate-900">{valor}</div>
+      {subtitulo ? <div className="mt-1 text-sm text-slate-500">{subtitulo}</div> : null}
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      {/* Encabezado y KPI */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Operación y confiabilidad</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                Vista mockup harcodeada para validar diseño antes de conectar base y backend.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm lg:grid-cols-4">
+              <div className="rounded-2xl bg-slate-100 px-4 py-3">Área: <b>Oeste</b></div>
+              <div className="rounded-2xl bg-slate-100 px-4 py-3">Turno: <b>Mañana</b></div>
+              <div className="rounded-2xl bg-slate-100 px-4 py-3">Modo global: <b>Automático</b></div>
+              <div className="rounded-2xl bg-slate-100 px-4 py-3">Última actualización: <b>10:42</b></div>
+            </div>
+          </div>
+        </div>
+
         <div>
-          <div className="text-sm font-medium text-gray-700">
-            Operación y confiabilidad
+          <h2 className="mb-3 text-xl font-semibold">Resumen general</h2>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Kpi titulo="Disponibilidad" valor={`${resumen.disponibilidad}%`} subtitulo="Bombas del área" />
+            <Kpi titulo="Arranques hoy" valor={`${resumen.arranquesHoy}`} subtitulo="Total del día" />
+            <Kpi titulo="Horas de marcha" valor={`${resumen.horasMarcha} h`} subtitulo="Acumulado del día" />
+            <Kpi titulo="Energía" valor={`${resumen.energiaDia} kWh`} subtitulo="Consumo diario" />
+            <Kpi titulo="Eficiencia" valor={`${resumen.eficiencia} kWh/m³`} subtitulo="Consumo específico" />
+            <Kpi titulo="Fallas del mes" valor={`${resumen.fallasMes}`} subtitulo="Correctivos abiertos/cerrados" />
+            <Kpi titulo="MTBF" valor={`${resumen.mtbf} h`} subtitulo="Tiempo medio entre fallas" />
+            <Kpi titulo="MTTR" valor={`${resumen.mttr} h`} subtitulo="Tiempo medio de reparación" />
           </div>
-          <div className="text-xs text-gray-500">
-            Continuidad de datos (bombas y tanques) en los últimos {days} días.
-          </div>
         </div>
 
-        <div className="text-right text-sm">
-          {uptimePct != null ? (
-            <>
-              <div className={`font-semibold ${healthColor}`}>
-                Confiabilidad {days} días: {uptimePct.toFixed(1)}%
-              </div>
-              <div className="text-[11px] text-gray-500">
-                Resolución: {bucketLabel} por bloque
-              </div>
-            </>
-          ) : loading ? (
-            <div className="text-xs text-gray-400">Calculando…</div>
-          ) : (
-            <div className="text-xs text-gray-400">Sin datos suficientes.</div>
-          )}
-        </div>
-      </div>
-
-      {/* Estado de carga / error */}
-      {loading && !data && (
-        <div className="text-xs text-gray-400">Cargando timeline…</div>
-      )}
-      {error && (
-        <div className="text-xs text-red-500">{error}</div>
-      )}
-
-      {/* Leyenda */}
-      <div className="flex items-center gap-4 text-[11px] text-gray-500">
-        <div className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" />
-          <span>Conectado (hubo datos)</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-gray-200 border border-gray-300" />
-          <span>Sin datos (posible caída / sin operación)</span>
-        </div>
-      </div>
-
-      {/* Timeline semanal */}
-      <div className="border rounded-2xl bg-white p-3 space-y-2">
-        {grouped.length === 0 && !loading && (
-          <div className="text-xs text-gray-400">
-            No hay datos de operación en los últimos {days} días.
-          </div>
-        )}
-
-        {grouped.map((day) => {
-          const cols = day.buckets.length || 1;
-          return (
-            <div
-              key={day.dateKey}
-              className="flex items-center gap-2 text-[11px]"
-            >
-              {/* Etiqueta de día */}
-              <div className="w-20 text-right text-gray-500 shrink-0">
-                {day.label}
-              </div>
-
-              {/* Barras */}
-              <div
-                className="flex-1 grid gap-[1px]"
-                style={{
-                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                }}
-              >
-                {day.buckets.map((b, idx) => (
-                  <div
-                    key={idx}
-                    className={`h-3 rounded-sm ${
-                      b.has_data
-                        ? "bg-emerald-500"
-                        : "bg-gray-200 border border-gray-200"
-                    }`}
-                  />
-                ))}
+        <div className="grid gap-6 xl:grid-cols-[1.7fr_1fr]">
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Operación por planta</h2>
+              <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm">
+                2 plantas monitoreadas
               </div>
             </div>
-          );
-        })}
+
+            {plantas.map((planta) => (
+              <div key={planta.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="text-2xl font-semibold">{planta.nombre}</h3>
+                      <span className={`rounded-full border px-3 py-1 text-sm font-medium ${colorEstado(planta.estadoGeneral)}`}>
+                        {planta.estadoGeneral}
+                      </span>
+                      <span className={`rounded-full border px-3 py-1 text-sm font-medium ${colorEstado(planta.modo)}`}>
+                        {planta.modo}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Vista operativa diaria con variables principales y desempeño por bomba.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:w-[440px]">
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Nivel</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.nivel}%</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Presión</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.presion} bar</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Caudal</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.caudal} m³/h</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Potencia</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.potenciaKw} kW</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">Energía</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.energiaKwh} kWh</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <div className="text-xs text-slate-500">kWh/m³</div>
+                      <div className="mt-1 text-xl font-semibold">{planta.eficiencia}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium">Bomba</th>
+                        <th className="px-4 py-3 text-left font-medium">Estado</th>
+                        <th className="px-4 py-3 text-right font-medium">Horas</th>
+                        <th className="px-4 py-3 text-right font-medium">Arranques</th>
+                        <th className="px-4 py-3 text-right font-medium">Disponibilidad</th>
+                        <th className="px-4 py-3 text-right font-medium">Fallas</th>
+                        <th className="px-4 py-3 text-right font-medium">MTBF</th>
+                        <th className="px-4 py-3 text-right font-medium">MTTR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {planta.bombas.map((bomba) => (
+                        <tr key={bomba.nombre} className="border-t border-slate-200">
+                          <td className="px-4 py-3 font-medium text-slate-900">{bomba.nombre}</td>
+                          <td className="px-4 py-3">
+                            <span className={`rounded-full border px-3 py-1 text-xs font-medium ${colorEstado(bomba.estado)}`}>
+                              {bomba.estado}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">{bomba.horas} h</td>
+                          <td className="px-4 py-3 text-right">{bomba.arranques}</td>
+                          <td className="px-4 py-3 text-right">{bomba.disponibilidad}%</td>
+                          <td className="px-4 py-3 text-right">{bomba.fallas}</td>
+                          <td className="px-4 py-3 text-right">{bomba.mtbf} h</td>
+                          <td className="px-4 py-3 text-right">{bomba.mttr} h</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <aside className="space-y-6">
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-xl font-semibold">Alarmas y observaciones</h2>
+              <div className="mt-4 space-y-3">
+                {plantas.flatMap((planta) =>
+                  planta.alarmas.map((alarma, idx) => (
+                    <div key={`${planta.id}-${idx}`} className={`rounded-2xl border p-4 ${colorAlarma(alarma.tipo)}`}>
+                      <div className="text-xs font-semibold uppercase tracking-wide">{planta.nombre}</div>
+                      <div className="mt-1 text-sm">{alarma.texto}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-xl font-semibold">Confiabilidad</h2>
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="text-sm text-slate-500">Equipo más comprometido</div>
+                  <div className="mt-1 text-lg font-semibold">Bomba 4</div>
+                  <div className="text-sm text-slate-600">2 fallas en el mes · MTBF 140 h · MTTR 4.5 h</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="text-sm text-slate-500">Mayor tiempo en marcha</div>
+                  <div className="mt-1 text-lg font-semibold">Bomba 3</div>
+                  <div className="text-sm text-slate-600">15.1 h hoy · 11 arranques</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="text-sm text-slate-500">Observación recomendada</div>
+                  <div className="mt-1 text-sm text-slate-700">
+                    Revisar causa de reincidencia térmica en Bomba 4 y validar si hay desbalance operativo en Planta Oeste 2.
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-xl font-semibold">Acciones sugeridas</h2>
+              <ul className="mt-4 space-y-3 text-sm text-slate-700">
+                <li className="rounded-2xl bg-slate-50 p-4">Verificar lógica de paso manual/automático cuando una bomba se detiene por protección.</li>
+                <li className="rounded-2xl bg-slate-50 p-4">Agregar motivo obligatorio cuando el operador pase una bomba a manual.</li>
+                <li className="rounded-2xl bg-slate-50 p-4">Relacionar fallas con consumo energético para detectar pérdida de rendimiento.</li>
+              </ul>
+            </section>
+          </aside>
+        </div>
       </div>
     </div>
   );
