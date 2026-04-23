@@ -269,8 +269,9 @@ async function fetchAreaMonthKpis(areaId: number, month: string, signal?: AbortS
 
 async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSignal): Promise<AreaHistoryResponse> {
   const root = getApiRoot();
-  const from = `${day}T00:00:00`;
-  const to = `${addDays(day, 1)}T00:00:00`;
+
+  const from = `${day}T00:00:00-03:00`;
+  const to = `${addDays(day, 1)}T00:00:00-03:00`;
 
   const qs = new URLSearchParams({
     from,
@@ -605,21 +606,25 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [dailyRows, selectedDay, detailOpen, monthPeakDay]);
 
-  const dayChartData = useMemo(() => {
-    const pts = dayHistory?.points ?? [];
-    return pts
-      .map((p) => {
-        const kwMax = toNum(p.kw_max);
-        const kwAvg = toNum(p.kw_avg);
-        return {
-          ts: p.ts,
-          hour: hourLabelFromTs(p.ts),
-          kw_max: kwMax ?? undefined,
-          kw_avg: kwAvg ?? undefined,
-        };
-      })
-      .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
-  }, [dayHistory]);
+ const dayChartData = useMemo(() => {
+  const pts = dayHistory?.points ?? [];
+
+  return pts
+    .map((p) => {
+      const kwMax = toNum(p.kw_max);
+      const kwAvg = toNum(p.kw_avg);
+      const d = new Date(p.ts);
+
+      return {
+        ts: p.ts,
+        sortMs: Number.isNaN(d.getTime()) ? 0 : d.getTime(),
+        hour: hourLabelFromTs(p.ts),
+        kw_max: kwMax ?? undefined,
+        kw_avg: kwAvg ?? undefined,
+      };
+    })
+    .sort((a, b) => a.sortMs - b.sortMs);
+}, [dayHistory]);
 
   const selectedDayPeak = useMemo(() => {
     let best: { ts: string; hour: string; kw: number } | null = null;
@@ -650,7 +655,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     );
   };
 
- const dayTooltip = ({ active, payload, label }: any) => {
+const dayTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
 
   const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
