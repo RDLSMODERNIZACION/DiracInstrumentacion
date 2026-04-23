@@ -12,8 +12,8 @@ import {
   LabelList,
   Line,
   Legend,
-  ComposedChart,
-  Scatter,
+  LineChart,
+  ReferenceDot,
 } from "recharts";
 
 import { getApiRoot, getApiHeaders } from "@/lib/config";
@@ -198,6 +198,22 @@ function hourLabelFromTs(ts?: string | null) {
 
   return d.toLocaleTimeString("es-AR", {
     timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function fullDateTimeLabelFromMs(ms?: number | null) {
+  if (ms == null) return "--";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "--";
+
+  return d.toLocaleString("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -637,16 +653,18 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         const kwMax = toNum(p.kw_max);
         const kwAvg = toNum(p.kw_avg);
         const d = new Date(p.ts);
+        const sortMs = Number.isNaN(d.getTime()) ? NaN : d.getTime();
 
         return {
           idx,
           ts: p.ts,
-          sortMs: Number.isNaN(d.getTime()) ? 0 : d.getTime(),
+          sortMs,
           hour: hourLabelFromTs(p.ts),
           kw_max: kwMax ?? undefined,
           kw_avg: kwAvg ?? undefined,
         };
       })
+      .filter((r) => Number.isFinite(r.sortMs))
       .sort((a, b) => a.sortMs - b.sortMs);
 
     console.log("[EnergyEfficiencyPage] dayChartData", {
@@ -659,32 +677,16 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   }, [dayHistory, selectedDay]);
 
   const selectedDayPeak = useMemo(() => {
-    let best: { ts: string; hour: string; kw: number } | null = null;
+    let best: { ts: string; sortMs: number; hour: string; kw: number } | null = null;
     for (const r of dayChartData) {
       const kw = toNum(r.kw_max);
       if (kw == null) continue;
-      if (!best || kw > best.kw) best = { ts: r.ts, hour: r.hour, kw };
+      if (!best || kw > best.kw) {
+        best = { ts: r.ts, sortMs: r.sortMs, hour: r.hour, kw };
+      }
     }
     return best;
   }, [dayChartData]);
-
-  const dayPeakScatter = useMemo(() => {
-    if (!selectedDayPeak) return [];
-    const row = dayChartData.find((r) => r.ts === selectedDayPeak.ts);
-    if (!row) return [];
-
-    const scatterRows = [
-      {
-        idx: row.idx,
-        hour: row.hour,
-        peak_marker: selectedDayPeak.kw,
-        ts: row.ts,
-      },
-    ];
-
-    console.log("[EnergyEfficiencyPage] dayPeakScatter", scatterRows);
-    return scatterRows;
-  }, [selectedDayPeak, dayChartData]);
 
   const chartTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
@@ -716,9 +718,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
     return (
       <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
-        <div className="font-medium">
-          {selectedDay ?? "--"} {row.hour ?? label ?? "--"}
-        </div>
+        <div className="font-medium">{fullDateTimeLabelFromMs(row.sortMs)}</div>
+        <div>Hora: {row.hour ?? "--"}</div>
         <div>kW promedio horario: {fmt(row.kw_avg, 2, " kW")}</div>
         <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div>
         <div className="mt-1 text-[10px] text-gray-500">ts: {row.ts ?? "--"}</div>
@@ -735,7 +736,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       <div className="rounded-md border border-gray-300 bg-[#f7f4ed] px-4 py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -889,17 +890,17 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         <ValueBox label="Reactiva máxima" value={fmt(reactiveKvarMaxMonth, 2, " kVAr")} />
       </div>
 
-      <div className="rounded-md border border-gray-400 bg-white overflow-hidden">
+      <div className="rounded-md border border-gray-400 bg-white overflow-hidden min-w-0">
         <div className="border-b border-gray-400 bg-[#e9e4da] px-3 py-2 text-sm font-semibold text-gray-900">
           Histórico diario del período
         </div>
 
-        <div className="p-3">
+        <div className="p-3 min-w-0">
           <div className="mb-2 text-xs text-gray-500">
             Borde dorado: día de mayor pico. Barras rojas: día con cos φ promedio bajo. Tocá una barra para abrir el detalle del día.
           </div>
 
-          <div className="h-80">
+          <div className="h-80 min-w-0">
             {loadingMonth ? (
               <div className="flex h-full items-center justify-center text-sm text-gray-500">Cargando histórico…</div>
             ) : monthChartData.length === 0 ? (
@@ -911,7 +912,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                   <XAxis dataKey="day" />
                   <YAxis yAxisId="left" />
                   <YAxis yAxisId="right" orientation="right" />
-                  <Tooltip content={chartTooltip} trigger="hover" />
+                  <Tooltip content={chartTooltip} />
                   <Legend />
 
                   <Bar
@@ -971,14 +972,14 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       </div>
 
       {detailOpen ? (
-        <div className="rounded-md border border-gray-400 bg-white overflow-hidden">
+        <div className="rounded-md border border-gray-400 bg-white overflow-hidden min-w-0">
           <div className="border-b border-gray-400 bg-[#e9e4da] px-3 py-2 text-sm font-semibold text-gray-900">
             Detalle horario del día {selectedDay ?? "--"}
           </div>
 
-          <div className="p-3">
+          <div className="p-3 min-w-0">
             <div className="mb-3 flex items-center justify-between">
-              <div className="grid gap-3 md:grid-cols-3 flex-1">
+              <div className="grid gap-3 md:grid-cols-3 flex-1 min-w-0">
                 <ValueBox label="Día" value={selectedDay ?? "--"} />
                 <ValueBox label="Hora del máximo" value={selectedDayPeak?.hour ?? "--"} />
                 <ValueBox label="Máximo del día" value={selectedDayPeak ? fmt(selectedDayPeak.kw, 2, " kW") : "--"} />
@@ -996,7 +997,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
               </button>
             </div>
 
-            <div className="h-96">
+            <div className="h-96 min-w-0">
               {loadingDay ? (
                 <div className="flex h-full items-center justify-center text-sm text-gray-500">Cargando detalle horario…</div>
               ) : dayChartData.length === 0 ? (
@@ -1005,12 +1006,11 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
+                  <LineChart
                     data={dayChartData}
-                    syncId="energy-day-detail"
                     margin={{ top: 24, right: 24, left: 8, bottom: 8 }}
                     onMouseMove={(state: any) => {
-                      console.log("[EnergyEfficiencyPage] ComposedChart onMouseMove", {
+                      console.log("[EnergyEfficiencyPage] LineChart onMouseMove", {
                         activeTooltipIndex: state?.activeTooltipIndex,
                         activeLabel: state?.activeLabel,
                         activePayload: state?.activePayload,
@@ -1021,9 +1021,26 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                     }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="hour" />
+                    <XAxis
+                      type="number"
+                      dataKey="sortMs"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(ms) => {
+                        const d = new Date(ms);
+                        if (Number.isNaN(d.getTime())) return "--";
+                        return d.toLocaleTimeString("es-AR", {
+                          timeZone: "America/Argentina/Buenos_Aires",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: false,
+                        });
+                      }}
+                    />
                     <YAxis yAxisId="left" />
-                    <Tooltip content={dayTooltip} trigger="hover" />
+                    <Tooltip
+                      content={dayTooltip}
+                      labelFormatter={(value) => fullDateTimeLabelFromMs(Number(value))}
+                    />
                     <Legend />
 
                     <Line
@@ -1041,7 +1058,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
                     <ReferenceLine
                       yAxisId="left"
-                      x={selectedDayPeak?.hour}
+                      x={selectedDayPeak?.sortMs}
                       stroke="#ef4444"
                       strokeDasharray="6 4"
                       label={{
@@ -1063,16 +1080,18 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       }}
                     />
 
-                    <Scatter
-                      yAxisId="left"
-                      name="Máximo"
-                      data={dayPeakScatter}
-                      dataKey="peak_marker"
-                      fill="#ef4444"
-                      shape="circle"
-                      isAnimationActive={false}
-                    />
-                  </ComposedChart>
+                    {selectedDayPeak ? (
+                      <ReferenceDot
+                        yAxisId="left"
+                        x={selectedDayPeak.sortMs}
+                        y={selectedDayPeak.kw}
+                        r={5}
+                        fill="#ef4444"
+                        stroke="none"
+                        ifOverflow="extendDomain"
+                      />
+                    ) : null}
+                  </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
