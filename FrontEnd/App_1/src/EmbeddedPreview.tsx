@@ -9,6 +9,7 @@ import TankLevelChart from "./components/TankLevelChart";
 import OpsPumpsProfile from "./components/OpsPumpsProfile";
 import EnergyEfficiencyPage from "./components/EnergyEfficiencyPage";
 import ByLocationTable from "./components/ByLocationTable";
+import ProcesoCalidad from "./components/ProcesoCalidad";
 
 // Helpers de formato
 const k = (n: number) => n.toLocaleString("es-AR");
@@ -27,6 +28,7 @@ type PumpAgg =
 
 // Si NO usás shadcn Tabs y tenías un Tabs propio con props { value, onChange, tabs }:
 type SimpleTab = { id: string; label: string };
+
 function SimpleTabs({
   value,
   onChange,
@@ -37,12 +39,12 @@ function SimpleTabs({
   tabs: SimpleTab[];
 }) {
   return (
-    <div className="flex gap-2 border-b mb-3">
+    <div className="mb-3 flex gap-2 border-b">
       {tabs.map((t) => (
         <button
           key={t.id}
-          className={`px-3 py-2 text-sm rounded-t-lg ${
-            value === t.id ? "bg-white border border-b-transparent" : "text-gray-500"
+          className={`rounded-t-lg px-3 py-2 text-sm ${
+            value === t.id ? "border border-b-transparent bg-white" : "text-gray-500"
           }`}
           onClick={() => onChange(t.id)}
         >
@@ -77,7 +79,7 @@ export default function DashboardView({
       <div className="flex flex-wrap items-center gap-2">
         <label className="text-sm text-gray-500">Ubicación:</label>
         <select
-          className="border rounded-lg px-3 py-2"
+          className="rounded-lg border px-3 py-2"
           value={locationId}
           onChange={(e) => setLocationId(e.target.value)}
         >
@@ -105,7 +107,7 @@ export default function DashboardView({
       {/* Operación */}
       {tab === "operacion" && (
         <>
-          <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
             <KPI label="Activos" value={k(MOCK_DATA.kpis.assets_total)} />
             <KPI label="Tanques" value={k(MOCK_DATA.kpis.tanks)} />
             <KPI label="Bombas" value={k(MOCK_DATA.kpis.pumps)} />
@@ -114,10 +116,8 @@ export default function DashboardView({
             <KPI label="Nivel prom. (30d)" value={pct(MOCK_DATA.kpis.avg_level_pct_30d)} />
           </section>
 
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Charts sincronizados por valor temporal; eje X en horas */}
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TankLevelChart ts={tankTs} syncId="op-sync" title="Nivel del tanque (24h)" />
-            {/* Reemplazamos barras por perfil horario estilo eficiencia */}
             <OpsPumpsProfile pumpsTs={pumpTs} syncId="op-sync" title="Perfil horario (24h)" />
           </section>
         </>
@@ -125,19 +125,18 @@ export default function DashboardView({
 
       {/* Eficiencia */}
       {tab === "eficiencia" && (
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Izquierda: perfiles/horas por franja + tarjetas */}
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <EnergyEfficiencyPage pumpAgg={pumpTs} />
 
-          {/* Derecha: notas */}
           <Card className="rounded-2xl">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-gray-500">Notas</CardTitle>
             </CardHeader>
             <CardContent>
-              <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1">
+              <ul className="list-disc space-y-1 pl-5 text-sm text-gray-600">
                 <li>
-                  Bandas horarias EPEN por defecto: <b>VALLE</b> 00–07 h, <b>PICO</b> 18–23 h, <b>RESTO</b> el resto.
+                  Bandas horarias EPEN por defecto: <b>VALLE</b> 00–07 h, <b>PICO</b> 18–23 h,{" "}
+                  <b>RESTO</b> el resto.
                 </li>
                 <li>Las tarjetas muestran horas-bomba y porcentaje por franja (24 h).</li>
                 <li>El filtro por localidad arriba recarga los datos y esta vista se actualiza sola.</li>
@@ -147,10 +146,49 @@ export default function DashboardView({
         </section>
       )}
 
+      {/* Operación y confiabilidad */}
+      {tab === "confiabilidad" && (
+        <section>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Operación y confiabilidad</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-gray-600">
+                Acá podés conectar después el mockup o módulo real de operación y confiabilidad.
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      {/* Proceso y calidad del agua */}
+      {tab === "calidad" && (
+        <section>
+          <ProcesoCalidad />
+        </section>
+      )}
+
+      {/* Gestión global */}
+      {tab === "gestion" && (
+        <section>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Gestión global</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-gray-600">
+                Espacio reservado para indicadores globales, seguimiento y administración.
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       {/* Resumen por ubicación */}
       <section>
         <Card className="rounded-2xl">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base">Resumen por ubicación</CardTitle>
           </CardHeader>
           <CardContent>
@@ -170,19 +208,22 @@ export default function DashboardView({
               {MOCK_DATA.alarms.map((a: any) => (
                 <div
                   key={a.id}
-                  className={`flex items-center justify-between p-3 rounded-xl border ${
-                    a.is_active ? "bg-amber-50 border-amber-200" : "bg-gray-50 border-gray-200"
+                  className={`flex items-center justify-between rounded-xl border p-3 ${
+                    a.is_active ? "border-amber-200 bg-amber-50" : "border-gray-200 bg-gray-50"
                   }`}
                 >
                   <div className="text-sm">
                     <div className="font-medium">{a.message}</div>
                     <div className="text-gray-500">
-                      {a.asset_type.toUpperCase()} #{a.asset_id} • {new Date(a.ts_raised).toLocaleString("es-AR")}
+                      {a.asset_type.toUpperCase()} #{a.asset_id} •{" "}
+                      {new Date(a.ts_raised).toLocaleString("es-AR")}
                     </div>
                   </div>
                   <div
-                    className={`text-xs px-2 py-1 rounded-full ${
-                      a.severity === "critical" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
+                    className={`rounded-full px-2 py-1 text-xs ${
+                      a.severity === "critical"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-amber-100 text-amber-700"
                     }`}
                   >
                     {a.severity}
