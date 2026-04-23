@@ -150,6 +150,12 @@ function fmtInt(v: any, unit = ""): string {
   return `${Math.round(n).toLocaleString("es-AR")}${unit}`;
 }
 
+function fmtPf(v: any, decimals = 3): string {
+  const n = normalizePf(v);
+  if (n === null) return "--";
+  return n.toFixed(decimals);
+}
+
 function fmtBarValue(v: any): string {
   const n = toNum(v);
   if (n === null) return "";
@@ -189,6 +195,8 @@ function hourLabelFromTs(ts?: string | null) {
   if (Number.isNaN(d.getTime())) return "--";
   return `${String(d.getHours()).padStart(2, "0")}:00`;
 }
+
+const PF_REF = 0.96;
 
 async function fetchEnergyAreas(companyId?: number, signal?: AbortSignal): Promise<EnergyAreaOption[]> {
   const root = getApiRoot();
@@ -530,8 +538,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const reactiveKvarAvgMonth = useMemo(() => toNum(monthData?.summary?.reactive_kvar_avg), [monthData]);
   const reactiveKvarMaxMonth = useMemo(() => toNum(monthData?.summary?.reactive_kvar_max), [monthData]);
-
   const avgKwMonth = useMemo(() => toNum(monthData?.summary?.avg_kw), [monthData]);
+  const pfAvgMonth = useMemo(() => normalizePf(monthData?.summary?.avg_pf), [monthData]);
 
   const monthPeakDay = useMemo(() => {
     let best: { date: string; kw: number } | null = null;
@@ -569,11 +577,16 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     return dailyRows
       .map((r) => {
         const date = String(r.day).slice(0, 10);
+        const pfAvg = normalizePf(r.avg_pf);
+        const lowPf = typeof pfAvg === "number" && pfAvg < PF_REF;
+
         return {
           day: String(r.day).slice(8, 10),
           date,
           kwh: toNum(r.kwh_est) ?? undefined,
           kw_max: toNum(r.max_kw) ?? undefined,
+          pf_avg: pfAvg ?? undefined,
+          lowPf,
           isPeakDay: monthPeakDay?.date === date,
           isSelected: selectedDay === date && detailOpen,
           kwhLabel: fmtBarValue(r.kwh_est),
@@ -621,6 +634,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         <div className="font-medium">{d?.date}</div>
         <div>Energía: {fmt(d?.kwh, 2, " kWh")}</div>
         <div>Pico: {fmt(d?.kw_max, 2, " kW")}</div>
+        <div>cos φ promedio: {fmtPf(d?.pf_avg, 3)}</div>
+        {d?.lowPf ? <div className="mt-1 text-red-700">PF promedio bajo</div> : null}
       </div>
     );
   };
@@ -791,7 +806,13 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         <ValueBox label="Energía aparente" value={fmtInt(apparentEnergyKvah, " kVAh")} subtext="Período actual" />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
+        <ValueBox
+          label="cos φ promedio"
+          value={fmtPf(pfAvgMonth, 3)}
+          subtext={`Referencia mínima ${PF_REF.toFixed(2)}`}
+          danger={pfAvgMonth !== null && pfAvgMonth < PF_REF}
+        />
         <ValueBox label="Reactiva promedio" value={fmt(reactiveKvarAvgMonth, 2, " kVAr")} />
         <ValueBox label="Reactiva máxima" value={fmt(reactiveKvarMaxMonth, 2, " kVAr")} />
       </div>
@@ -803,7 +824,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
         <div className="p-3">
           <div className="mb-2 text-xs text-gray-500">
-            La barra borde dorado marca el día de mayor pico. Tocá una barra para abrir el detalle del día.
+            Borde dorado: día de mayor pico. Barras rojas: día con cos φ promedio bajo. Tocá una barra para abrir el detalle del día.
           </div>
 
           <div className="h-80">
@@ -836,7 +857,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                     {monthChartData.map((row, idx) => (
                       <Cell
                         key={idx}
-                        fill={row.isSelected ? "#111827" : "#9ca3af"}
+                        fill={row.isSelected ? "#111827" : row.lowPf ? "#ef4444" : "#9ca3af"}
                         stroke={row.isPeakDay ? "#f59e0b" : "none"}
                         strokeWidth={row.isPeakDay ? 3 : 0}
                       />
@@ -957,13 +978,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       }}
                     />
 
-                    <Scatter
-                      yAxisId="left"
-                      name="Máximo"
-                      data={dayPeakScatter}
-                      fill="#ef4444"
-                      shape="circle"
-                    />
+                    <Scatter yAxisId="left" name="Máximo" data={dayPeakScatter} fill="#ef4444" shape="circle" />
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
