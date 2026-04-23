@@ -47,7 +47,7 @@ def has_column(cur, schema: str, table: str, column: str) -> bool:
 def ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
-    return dt
+    return dt.astimezone(timezone.utc)
 
 
 def _base_hourly_cte_sql(has_q_1h_avg: bool, has_q_1h_max: bool) -> str:
@@ -83,6 +83,7 @@ def _base_hourly_cte_sql(has_q_1h_avg: bool, has_q_1h_max: bool) -> str:
                 extract(hour from h.hour_ts)::int as hour_of_day,
                 sum(h.kwh_est) as kwh_est,
                 sum(h.kw_avg) as kw_avg,
+                sum(h.kw_max) as kw_max,
                 {pf_area_hour_sql},
                 {q_avg_sql},
                 {q_max_sql},
@@ -96,72 +97,6 @@ def _base_hourly_cte_sql(has_q_1h_avg: bool, has_q_1h_max: bool) -> str:
               and h.hour_ts >= %(from_ts)s
               and h.hour_ts < %(to_ts)s
             group by h.hour_ts
-        )
-    """
-
-
-def _hourly_max_from_snapshots_cte_sql() -> str:
-    return """
-        raw_area as (
-            select
-                r.ts,
-                date_trunc('hour', r.ts) as hour_ts,
-                r.analyzer_id,
-                r.p_kw,
-                r.max_p_kw
-            from public.network_analyzer_readings r
-            join public.network_analyzers na
-              on na.id = r.analyzer_id
-            join public.locations l
-              on l.id = na.location_id
-            where l.area_id = %(area_id)s
-              and r.ts >= %(from_ts)s
-              and r.ts < %(to_ts)s
-        ),
-        leader_per_hour as (
-            select distinct on (ra.hour_ts)
-                ra.hour_ts,
-                ra.ts as leader_ts,
-                ra.analyzer_id as leader_analyzer_id,
-                ra.max_p_kw as leader_max_p_kw
-            from raw_area ra
-            where ra.max_p_kw is not null or ra.p_kw is not null
-            order by
-                ra.hour_ts,
-                ra.max_p_kw desc nulls last,
-                ra.ts asc,
-                ra.analyzer_id asc
-        ),
-        completed_hour_max as (
-            select
-                lph.hour_ts,
-                lph.leader_ts,
-                lph.leader_analyzer_id,
-                sum(
-                    case
-                        when nearest.analyzer_id = lph.leader_analyzer_id
-                            then coalesce(nearest.max_p_kw, nearest.p_kw, 0)
-                        else coalesce(nearest.p_kw, nearest.max_p_kw, 0)
-                    end
-                ) as max_kw
-            from leader_per_hour lph
-            join lateral (
-                select distinct on (ra2.analyzer_id)
-                    ra2.analyzer_id,
-                    ra2.ts,
-                    ra2.p_kw,
-                    ra2.max_p_kw
-                from raw_area ra2
-                where ra2.hour_ts = lph.hour_ts
-                order by
-                    ra2.analyzer_id,
-                    abs(extract(epoch from (ra2.ts - lph.leader_ts))) asc,
-                    ra2.ts asc
-            ) nearest on true
-            group by
-                lph.hour_ts,
-                lph.leader_ts,
-                lph.leader_analyzer_id
         )
     """
 
@@ -340,17 +275,14 @@ def get_energy_area_month_kpis(
             has_q_1h_avg = has_column(cur, "kpi", "analyzers_1h", "q_kvar_avg")
             has_q_1h_max = has_column(cur, "kpi", "analyzers_1h", "q_kvar_max")
 
-            ctes = ",\n".join([
-                _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip(),
-                _hourly_max_from_snapshots_cte_sql().strip(),
-            ])
+            ctes = _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip()
 
             cur.execute(
                 f"""
                 with
                 {ctes}
                 select
-                    max(chm.max_kw) as max_kw,
+                    max(bh.kw_max) as max_kw,
                     avg(bh.kw_avg) as avg_kw,
                     sum(bh.kwh_est) as kwh_est,
                     avg(bh.pf_area) as avg_pf,
@@ -359,8 +291,6 @@ def get_energy_area_month_kpis(
                     max(bh.reactive_kvar_max) as reactive_kvar_max,
                     sum(bh.samples)::int as samples
                 from base_hourly bh
-                left join completed_hour_max chm
-                  on chm.hour_ts = bh.hour_ts
                 """,
                 {
                     "area_id": area_id,
@@ -401,7 +331,7 @@ def get_energy_area_month_kpis(
                 {ctes}
                 select
                     bh.day_ts as day,
-                    max(chm.max_kw) as max_kw,
+                    max(bh.kw_max) as max_kw,
                     avg(bh.kw_avg) as avg_kw,
                     sum(bh.kwh_est) as kwh_est,
                     avg(bh.pf_area) as avg_pf,
@@ -410,8 +340,6 @@ def get_energy_area_month_kpis(
                     max(bh.reactive_kvar_max) as reactive_kvar_max,
                     sum(bh.samples)::int as samples
                 from base_hourly bh
-                left join completed_hour_max chm
-                  on chm.hour_ts = bh.hour_ts
                 group by bh.day_ts
                 order by bh.day_ts
                 """,
@@ -430,15 +358,13 @@ def get_energy_area_month_kpis(
                 select
                     bh.hour_of_day as hour,
                     avg(bh.kw_avg) as avg_kw,
-                    max(chm.max_kw) as max_kw,
+                    max(bh.kw_max) as max_kw,
                     avg(bh.pf_area) as avg_pf,
                     min(bh.pf_area) as min_pf,
                     avg(bh.reactive_kvar_avg) as reactive_kvar_avg,
                     max(bh.reactive_kvar_max) as reactive_kvar_max,
                     sum(bh.samples)::int as samples
                 from base_hourly bh
-                left join completed_hour_max chm
-                  on chm.hour_ts = bh.hour_ts
                 group by bh.hour_of_day
                 order by bh.hour_of_day
                 """,
@@ -522,10 +448,7 @@ def get_energy_area_history(
                 rows = cur.fetchall() or []
 
             elif granularity == "hour":
-                ctes = ",\n".join([
-                    _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip(),
-                    _hourly_max_from_snapshots_cte_sql().strip(),
-                ])
+                ctes = _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip()
 
                 cur.execute(
                     f"""
@@ -535,15 +458,13 @@ def get_energy_area_history(
                         bh.hour_ts as ts,
                         bh.kwh_est,
                         bh.kw_avg,
-                        chm.max_kw as kw_max,
+                        bh.kw_max,
                         bh.pf_area as pf_avg,
                         bh.pf_area as pf_min,
                         bh.reactive_kvar_avg as q_kvar_avg,
                         bh.reactive_kvar_max as q_kvar_max,
                         bh.samples
                     from base_hourly bh
-                    left join completed_hour_max chm
-                      on chm.hour_ts = bh.hour_ts
                     order by bh.hour_ts asc
                     limit %(limit)s
                     """,
@@ -557,10 +478,7 @@ def get_energy_area_history(
                 rows = cur.fetchall() or []
 
             else:
-                ctes = ",\n".join([
-                    _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip(),
-                    _hourly_max_from_snapshots_cte_sql().strip(),
-                ])
+                ctes = _base_hourly_cte_sql(has_q_1h_avg, has_q_1h_max).strip()
 
                 cur.execute(
                     f"""
@@ -570,15 +488,13 @@ def get_energy_area_history(
                         bh.day_ts as ts,
                         sum(bh.kwh_est) as kwh_est,
                         avg(bh.kw_avg) as kw_avg,
-                        max(chm.max_kw) as kw_max,
+                        max(bh.kw_max) as kw_max,
                         avg(bh.pf_area) as pf_avg,
                         min(bh.pf_area) as pf_min,
                         avg(bh.reactive_kvar_avg) as q_kvar_avg,
                         max(bh.reactive_kvar_max) as q_kvar_max,
                         sum(bh.samples)::int as samples
                     from base_hourly bh
-                    left join completed_hour_max chm
-                      on chm.hour_ts = bh.hour_ts
                     group by bh.day_ts
                     order by bh.day_ts asc
                     limit %(limit)s
