@@ -184,16 +184,17 @@ function nextMonth(monthStr: string) {
 }
 
 function addDays(dateStr: string, days: number) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return isoDate(d);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
 function hourLabelFromTs(ts?: string | null) {
   if (!ts) return "--";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "--";
-  return `${String(d.getHours()).padStart(2, "0")}:00`;
+  return `${String(d.getUTCHours()).padStart(2, "0")}:00`;
 }
 
 const PF_REF = 0.96;
@@ -261,8 +262,8 @@ async function fetchAreaMonthKpis(areaId: number, month: string, signal?: AbortS
 
 async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSignal): Promise<AreaHistoryResponse> {
   const root = getApiRoot();
-  const from = `${day}T00:00:00`;
-  const to = `${addDays(day, 1)}T00:00:00`;
+  const from = `${day}T00:00:00Z`;
+  const to = `${addDays(day, 1)}T00:00:00Z`;
   const qs = new URLSearchParams({
     from,
     to,
@@ -623,7 +624,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const dayPeakScatter = useMemo(() => {
     if (!selectedDayPeak) return [];
-    return [{ hour: selectedDayPeak.hour, kw_max: selectedDayPeak.kw }];
+    return [{ hour: selectedDayPeak.hour, kw_avg: selectedDayPeak.kw }];
   }, [selectedDayPeak]);
 
   const chartTooltip = ({ active, payload }: any) => {
@@ -643,10 +644,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   const dayTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
 
-    const lineItem =
-      payload.find((p: any) => p?.dataKey === "kw_avg") ||
-      payload.find((p: any) => p?.dataKey === "kw_max");
-
+    const lineItem = payload.find((p: any) => p?.dataKey === "kw_avg");
     const row = lineItem?.payload;
 
     return (
@@ -655,7 +653,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
           {selectedDay ?? "--"} {label}
         </div>
         <div>kW promedio: {fmt(row?.kw_avg, 2, " kW")}</div>
-        <div>kW máximo: {fmt(row?.kw_max, 2, " kW")}</div>
+        <div>Máximo marcado del día: {fmt(selectedDayPeak?.kw, 2, " kW")}</div>
       </div>
     );
   };
@@ -948,16 +946,6 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       stroke="#6b7280"
                       strokeWidth={2}
                       dot={{ r: 2 }}
-                    />
-
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="kw_max"
-                      name="kW máximo"
-                      stroke="#2563eb"
-                      strokeWidth={3}
-                      dot={{ r: 3 }}
                     />
 
                     <ReferenceLine
