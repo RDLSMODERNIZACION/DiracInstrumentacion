@@ -606,25 +606,25 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [dailyRows, selectedDay, detailOpen, monthPeakDay]);
 
- const dayChartData = useMemo(() => {
-  const pts = dayHistory?.points ?? [];
+  const dayChartData = useMemo(() => {
+    const pts = dayHistory?.points ?? [];
 
-  return pts
-    .map((p) => {
-      const kwMax = toNum(p.kw_max);
-      const kwAvg = toNum(p.kw_avg);
-      const d = new Date(p.ts);
+    return pts
+      .map((p) => {
+        const kwMax = toNum(p.kw_max);
+        const kwAvg = toNum(p.kw_avg);
+        const d = new Date(p.ts);
 
-      return {
-        ts: p.ts,
-        sortMs: Number.isNaN(d.getTime()) ? 0 : d.getTime(),
-        hour: hourLabelFromTs(p.ts),
-        kw_max: kwMax ?? undefined,
-        kw_avg: kwAvg ?? undefined,
-      };
-    })
-    .sort((a, b) => a.sortMs - b.sortMs);
-}, [dayHistory]);
+        return {
+          ts: p.ts,
+          sortMs: Number.isNaN(d.getTime()) ? 0 : d.getTime(),
+          hour: hourLabelFromTs(p.ts),
+          kw_max: kwMax ?? undefined,
+          kw_avg: kwAvg ?? undefined,
+        };
+      })
+      .sort((a, b) => a.sortMs - b.sortMs);
+  }, [dayHistory]);
 
   const selectedDayPeak = useMemo(() => {
     let best: { ts: string; hour: string; kw: number } | null = null;
@@ -655,22 +655,22 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     );
   };
 
-const dayTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
+  const dayTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
 
-  const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
-  const row = avgItem?.payload;
+    const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
+    const row = avgItem?.payload;
 
-  return (
-    <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
-      <div className="font-medium">
-        {selectedDay ?? "--"} {label}
+    return (
+      <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
+        <div className="font-medium">
+          {selectedDay ?? "--"} {label}
+        </div>
+        <div>kW promedio horario: {fmt(row?.kw_avg, 2, " kW")}</div>
+        {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
       </div>
-      <div>kW promedio horario: {fmt(row?.kw_avg, 2, " kW")}</div>
-      {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
-    </div>
-  );
-};
+    );
+  };
 
   if (!loadingAreas && !areasError && areas.length === 0) {
     return (
@@ -960,6 +960,7 @@ const dayTooltip = ({ active, payload, label }: any) => {
                       stroke="#6b7280"
                       strokeWidth={2}
                       dot={{ r: 2 }}
+                      activeDot={{ r: 5 }}
                     />
 
                     <ReferenceLine
