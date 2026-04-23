@@ -642,7 +642,13 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const dayTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
-    const row = payload[0]?.payload;
+
+    const lineItem =
+      payload.find((p: any) => p?.dataKey === "kw_avg") ||
+      payload.find((p: any) => p?.dataKey === "kw_max");
+
+    const row = lineItem?.payload;
+
     return (
       <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
         <div className="font-medium">
