@@ -192,9 +192,10 @@ function addDays(dateStr: string, days: number) {
 
 function hourLabelFromTs(ts?: string | null) {
   if (!ts) return "--";
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "--";
-  return `${String(d.getUTCHours()).padStart(2, "0")}:00`;
+  const s = String(ts);
+  const m = s.match(/T(\d{2}):(\d{2})/);
+  if (m) return `${m[1]}:${m[2]}`;
+  return s.slice(11, 16) || "--";
 }
 
 const PF_REF = 0.96;
@@ -262,13 +263,15 @@ async function fetchAreaMonthKpis(areaId: number, month: string, signal?: AbortS
 
 async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSignal): Promise<AreaHistoryResponse> {
   const root = getApiRoot();
-  const from = `${day}T00:00:00Z`;
-  const to = `${addDays(day, 1)}T00:00:00Z`;
+  const from = `${day}T00:00:00`;
+  const to = `${addDays(day, 1)}T00:00:00`;
+
   const qs = new URLSearchParams({
     from,
     to,
     granularity: "hour",
   });
+
   const url = `${root}/energy_areas/${areaId}/history?${qs.toString()}`;
 
   const r = await fetch(url, {
@@ -624,7 +627,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const dayPeakScatter = useMemo(() => {
     if (!selectedDayPeak) return [];
-    return [{ hour: selectedDayPeak.hour, kw_avg: selectedDayPeak.kw }];
+    return [{ hour: selectedDayPeak.hour, peak_marker: selectedDayPeak.kw }];
   }, [selectedDayPeak]);
 
   const chartTooltip = ({ active, payload }: any) => {
@@ -644,16 +647,17 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   const dayTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
 
-    const lineItem = payload.find((p: any) => p?.dataKey === "kw_avg");
-    const row = lineItem?.payload;
+    const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
+    const row = avgItem?.payload;
 
     return (
       <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
         <div className="font-medium">
           {selectedDay ?? "--"} {label}
         </div>
-        <div>kW promedio: {fmt(row?.kw_avg, 2, " kW")}</div>
-        <div>Máximo marcado del día: {fmt(selectedDayPeak?.kw, 2, " kW")}</div>
+        <div>kW promedio: {fmt(avgItem?.value, 2, " kW")}</div>
+        <div>Máximo del día: {fmt(selectedDayPeak?.kw, 2, " kW")}</div>
+        {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
       </div>
     );
   };
@@ -972,7 +976,14 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       }}
                     />
 
-                    <Scatter yAxisId="left" name="Máximo" data={dayPeakScatter} fill="#ef4444" shape="circle" />
+                    <Scatter
+                      yAxisId="left"
+                      name="Máximo"
+                      data={dayPeakScatter}
+                      dataKey="peak_marker"
+                      fill="#ef4444"
+                      shape="circle"
+                    />
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
