@@ -192,10 +192,16 @@ function addDays(dateStr: string, days: number) {
 
 function hourLabelFromTs(ts?: string | null) {
   if (!ts) return "--";
-  const s = String(ts);
-  const m = s.match(/T(\d{2}):(\d{2})/);
-  if (m) return `${m[1]}:${m[2]}`;
-  return s.slice(11, 16) || "--";
+
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "--";
+
+  return d.toLocaleTimeString("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 const PF_REF = 0.96;
@@ -644,23 +650,22 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     );
   };
 
-  const dayTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload?.length) return null;
+ const dayTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
 
-    const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
-    const row = avgItem?.payload;
+  const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
+  const row = avgItem?.payload;
 
-    return (
-      <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
-        <div className="font-medium">
-          {selectedDay ?? "--"} {label}
-        </div>
-        <div>kW promedio: {fmt(avgItem?.value, 2, " kW")}</div>
-        <div>Máximo del día: {fmt(selectedDayPeak?.kw, 2, " kW")}</div>
-        {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
+  return (
+    <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
+      <div className="font-medium">
+        {selectedDay ?? "--"} {label}
       </div>
-    );
-  };
+      <div>kW promedio horario: {fmt(row?.kw_avg, 2, " kW")}</div>
+      {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
+    </div>
+  );
+};
 
   if (!loadingAreas && !areasError && areas.length === 0) {
     return (
