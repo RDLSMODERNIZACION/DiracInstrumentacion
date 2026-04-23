@@ -166,6 +166,37 @@ def _hourly_max_from_snapshots_cte_sql() -> str:
     """
 
 
+def _period_energy_sql() -> str:
+    return """
+        with per_analyzer as (
+            select
+                r.analyzer_id,
+                max(r.e_kwh_import)   - min(r.e_kwh_import)   as kwh_import_period,
+                max(r.e_kvarh_import) - min(r.e_kvarh_import) as kvarh_import_period,
+                max(r.e_kvah_import)  - min(r.e_kvah_import)  as kvah_import_period
+            from public.network_analyzer_readings r
+            join public.network_analyzers na
+              on na.id = r.analyzer_id
+            join public.locations l
+              on l.id = na.location_id
+            where l.area_id = %(area_id)s
+              and r.ts >= %(from_ts)s
+              and r.ts < %(to_ts)s
+              and (
+                    r.e_kwh_import is not null
+                 or r.e_kvarh_import is not null
+                 or r.e_kvah_import is not null
+              )
+            group by r.analyzer_id
+        )
+        select
+            sum(kwh_import_period)   as period_kwh,
+            sum(kvarh_import_period) as period_kvarh,
+            sum(kvah_import_period)  as period_kvah
+        from per_analyzer
+    """
+
+
 @router.get("")
 def list_energy_areas(
     company_id: Optional[int] = Query(None, description="Filtra por empresa"),
@@ -339,10 +370,23 @@ def get_energy_area_month_kpis(
             )
             summary_db = cur.fetchone() or {}
 
+            cur.execute(
+                _period_energy_sql(),
+                {
+                    "area_id": area_id,
+                    "from_ts": start_ts,
+                    "to_ts": end_ts,
+                },
+            )
+            energy_period = cur.fetchone() or {}
+
             summary = {
                 "max_kw": summary_db.get("max_kw"),
                 "avg_kw": summary_db.get("avg_kw"),
                 "kwh_est": summary_db.get("kwh_est"),
+                "period_kwh": energy_period.get("period_kwh"),
+                "period_kvarh": energy_period.get("period_kvarh"),
+                "period_kvah": energy_period.get("period_kvah"),
                 "avg_pf": summary_db.get("avg_pf"),
                 "min_pf": summary_db.get("min_pf"),
                 "reactive_kvar_avg": summary_db.get("reactive_kvar_avg"),
