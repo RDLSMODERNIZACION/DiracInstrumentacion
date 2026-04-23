@@ -8,6 +8,7 @@ import { Tabs } from "@/components/Tabs";
 
 import EnergyEfficiencyPage from "@/components/EnergyEfficiencyPage";
 import ReliabilityPage from "@/components/ReliabilityPage";
+import ProcesoCalidad from "@/components/ProcesoCalidad";
 
 import { loadDashboard } from "@/data/loadFromApi";
 import { k } from "@/utils/format";
@@ -155,7 +156,8 @@ export default function Widget() {
   }, [byLocation, locId]);
 
   const kpis = useMemo(() => {
-    let tanks = 0, pumps = 0;
+    let tanks = 0,
+      pumps = 0;
     for (const r of Array.isArray(byLocationFiltered) ? byLocationFiltered : []) {
       tanks += Number(r?.tanks_count ?? 0);
       pumps += Number(r?.pumps_count ?? 0);
@@ -174,13 +176,13 @@ export default function Widget() {
   );
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       {/* Filtros superiores */}
-      <div className="flex flex-wrap gap-4 items-center">
+      <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Ubicación:</span>
           <select
-            className="border rounded-xl p-2 text-sm"
+            className="rounded-xl border p-2 text-sm"
             value={loc === "all" ? "all" : String(loc)}
             onChange={(e) =>
               setLoc(e.target.value === "all" ? "all" : Number(e.target.value))
@@ -221,7 +223,7 @@ export default function Widget() {
 
       {tab === "operacion" && (
         <>
-          <section className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-2 gap-3">
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-2 lg:grid-cols-2">
             <KPI label="Tanques" value={k(kpis.tanks)} />
             <KPI label="Bombas" value={k(liveSync?.pumpsTotal ?? kpis.pumps)} />
           </section>
@@ -256,11 +258,15 @@ export default function Widget() {
             }
           />
 
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TankLevelChart
               ts={playback.tankTs}
               syncId="op-sync"
-              title={playback.playEnabled ? "Nivel del tanque (Playback 24 h)" : "Nivel del tanque (24h • en vivo)"}
+              title={
+                playback.playEnabled
+                  ? "Nivel del tanque (Playback 24 h)"
+                  : "Nivel del tanque (24h • en vivo)"
+              }
               tz="America/Argentina/Buenos_Aires"
               xDomain={playback.domain}
               xTicks={playback.ticks}
@@ -282,7 +288,7 @@ export default function Widget() {
           </section>
 
           {auditEnabled && auditLoc !== "" && (
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <TankLevelChart
                 ts={audit.tankTs ?? { timestamps: [], level_percent: [] }}
                 syncId="op-sync"
@@ -316,12 +322,36 @@ export default function Widget() {
       )}
 
       {tab === "confiabilidad" && (
-        <ReliabilityPage locationId={loc === "all" ? "all" : locId ?? "all"} thresholdLow={90} />
+        <ReliabilityPage
+          locationId={loc === "all" ? "all" : locId ?? "all"}
+          thresholdLow={90}
+        />
+      )}
+
+      {tab === "calidad" && (
+        <section>
+          <ProcesoCalidad />
+        </section>
+      )}
+
+      {tab === "gestion" && (
+        <section>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Gestión global</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-gray-600">
+                Espacio reservado para indicadores globales, seguimiento y administración.
+              </div>
+            </CardContent>
+          </Card>
+        </section>
       )}
 
       <section>
         <Card className="rounded-2xl">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-base">Resumen por ubicación</CardTitle>
           </CardHeader>
           <CardContent>
