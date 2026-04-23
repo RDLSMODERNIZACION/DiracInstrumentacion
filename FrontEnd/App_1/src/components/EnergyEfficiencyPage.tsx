@@ -79,9 +79,16 @@ type AreaMonthKpisResponse = {
     max_kw?: number | null;
     avg_kw?: number | null;
     kwh_est?: number | null;
+
+    period_kwh?: number | null;
+    period_kvarh?: number | null;
+    period_kvah?: number | null;
+
     kvarh_est?: number | null;
     kvah_est?: number | null;
+
     avg_pf?: number | null;
+    min_pf?: number | null;
     reactive_kvar_avg?: number | null;
     reactive_kvar_max?: number | null;
     apparent_kva_avg?: number | null;
@@ -386,9 +393,17 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
     );
   }, [monthData, areaDetail, currentArea]);
 
-  const activeEnergyKwh = useMemo(() => toNum(monthData?.summary?.kwh_est), [monthData]);
-  const reactiveEnergyKvarh = useMemo(() => toNum(monthData?.summary?.kvarh_est), [monthData]);
-  const apparentEnergyKvah = useMemo(() => toNum(monthData?.summary?.kvah_est), [monthData]);
+  const activeEnergyKwh = useMemo(() => {
+    return toNum(monthData?.summary?.period_kwh) ?? toNum(monthData?.summary?.kwh_est);
+  }, [monthData]);
+
+  const reactiveEnergyKvarh = useMemo(() => {
+    return toNum(monthData?.summary?.period_kvarh) ?? toNum(monthData?.summary?.kvarh_est);
+  }, [monthData]);
+
+  const apparentEnergyKvah = useMemo(() => {
+    return toNum(monthData?.summary?.period_kvah) ?? toNum(monthData?.summary?.kvah_est);
+  }, [monthData]);
 
   const avgDailyKwh = useMemo(() => {
     const vals = dailyRows.map((r) => toNum(r.kwh_est)).filter((x): x is number => x != null);
