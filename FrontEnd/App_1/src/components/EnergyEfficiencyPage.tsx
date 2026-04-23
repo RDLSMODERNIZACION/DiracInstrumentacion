@@ -281,6 +281,14 @@ async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSi
 
   const url = `${root}/energy_areas/${areaId}/history?${qs.toString()}`;
 
+  console.log("[EnergyEfficiencyPage] fetchAreaDayHistory -> request", {
+    areaId,
+    day,
+    from,
+    to,
+    url,
+  });
+
   const r = await fetch(url, {
     method: "GET",
     headers: getApiHeaders({ "Content-Type": undefined as any }),
@@ -289,6 +297,7 @@ async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSi
   });
 
   if (r.status === 404) {
+    console.log("[EnergyEfficiencyPage] fetchAreaDayHistory -> 404 sin datos", { areaId, day });
     return {
       area_id: areaId,
       granularity: "hour",
@@ -301,10 +310,24 @@ async function fetchAreaDayHistory(areaId: number, day: string, signal?: AbortSi
 
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    console.error("[EnergyEfficiencyPage] fetchAreaDayHistory -> error", {
+      status: r.status,
+      statusText: r.statusText,
+      body: txt,
+    });
     throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
   }
 
-  return await r.json();
+  const json = await r.json();
+
+  console.log("[EnergyEfficiencyPage] fetchAreaDayHistory -> response", {
+    areaId,
+    day,
+    points: Array.isArray(json?.points) ? json.points.length : 0,
+    firstPoints: Array.isArray(json?.points) ? json.points.slice(0, 5) : [],
+  });
+
+  return json;
 }
 
 function ValueBox({
@@ -609,13 +632,14 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   const dayChartData = useMemo(() => {
     const pts = dayHistory?.points ?? [];
 
-    return pts
-      .map((p) => {
+    const rows = pts
+      .map((p, idx) => {
         const kwMax = toNum(p.kw_max);
         const kwAvg = toNum(p.kw_avg);
         const d = new Date(p.ts);
 
         return {
+          idx,
           ts: p.ts,
           sortMs: Number.isNaN(d.getTime()) ? 0 : d.getTime(),
           hour: hourLabelFromTs(p.ts),
@@ -624,7 +648,15 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
         };
       })
       .sort((a, b) => a.sortMs - b.sortMs);
-  }, [dayHistory]);
+
+    console.log("[EnergyEfficiencyPage] dayChartData", {
+      selectedDay,
+      total: rows.length,
+      rows,
+    });
+
+    return rows;
+  }, [dayHistory, selectedDay]);
 
   const selectedDayPeak = useMemo(() => {
     let best: { ts: string; hour: string; kw: number } | null = null;
@@ -638,8 +670,21 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
 
   const dayPeakScatter = useMemo(() => {
     if (!selectedDayPeak) return [];
-    return [{ hour: selectedDayPeak.hour, peak_marker: selectedDayPeak.kw }];
-  }, [selectedDayPeak]);
+    const row = dayChartData.find((r) => r.ts === selectedDayPeak.ts);
+    if (!row) return [];
+
+    const scatterRows = [
+      {
+        idx: row.idx,
+        hour: row.hour,
+        peak_marker: selectedDayPeak.kw,
+        ts: row.ts,
+      },
+    ];
+
+    console.log("[EnergyEfficiencyPage] dayPeakScatter", scatterRows);
+    return scatterRows;
+  }, [selectedDayPeak, dayChartData]);
 
   const chartTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
@@ -658,16 +703,25 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   const dayTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
 
-    const avgItem = payload.find((p: any) => p?.dataKey === "kw_avg");
-    const row = avgItem?.payload;
+    const row = payload[0]?.payload;
+
+    console.log("[EnergyEfficiencyPage] dayTooltip", {
+      active,
+      label,
+      payload,
+      row,
+    });
+
+    if (!row) return null;
 
     return (
       <div className="rounded-md border bg-white px-3 py-2 text-xs shadow-sm">
         <div className="font-medium">
-          {selectedDay ?? "--"} {label}
+          {selectedDay ?? "--"} {row.hour ?? label ?? "--"}
         </div>
-        <div>kW promedio horario: {fmt(row?.kw_avg, 2, " kW")}</div>
-        {row?.kw_max != null ? <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div> : null}
+        <div>kW promedio horario: {fmt(row.kw_avg, 2, " kW")}</div>
+        <div>kW máximo horario: {fmt(row.kw_max, 2, " kW")}</div>
+        <div className="mt-1 text-[10px] text-gray-500">ts: {row.ts ?? "--"}</div>
       </div>
     );
   };
@@ -857,7 +911,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                   <XAxis dataKey="day" />
                   <YAxis yAxisId="left" />
                   <YAxis yAxisId="right" orientation="right" />
-                  <Tooltip content={chartTooltip} />
+                  <Tooltip content={chartTooltip} trigger="hover" />
                   <Legend />
 
                   <Bar
@@ -866,6 +920,10 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                     name="kWh/día"
                     onClick={(state: any) => {
                       const d = state?.payload?.date;
+                      console.log("[EnergyEfficiencyPage] click month bar", {
+                        state,
+                        selectedDate: d,
+                      });
                       if (!d) return;
                       setSelectedDay(d);
                       setDetailOpen(true);
@@ -891,6 +949,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                     stroke="#2563eb"
                     strokeWidth={2}
                     dot={false}
+                    isAnimationActive={false}
                   />
 
                   <ReferenceLine
@@ -928,6 +987,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
               <button
                 className="ml-3 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50"
                 onClick={() => {
+                  console.log("[EnergyEfficiencyPage] cerrar detalle día");
                   setDetailOpen(false);
                   setDayHistory(null);
                 }}
@@ -945,11 +1005,25 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={dayChartData} margin={{ top: 24, right: 24, left: 8, bottom: 8 }}>
+                  <ComposedChart
+                    data={dayChartData}
+                    syncId="energy-day-detail"
+                    margin={{ top: 24, right: 24, left: 8, bottom: 8 }}
+                    onMouseMove={(state: any) => {
+                      console.log("[EnergyEfficiencyPage] ComposedChart onMouseMove", {
+                        activeTooltipIndex: state?.activeTooltipIndex,
+                        activeLabel: state?.activeLabel,
+                        activePayload: state?.activePayload,
+                        chartX: state?.chartX,
+                        chartY: state?.chartY,
+                        isTooltipActive: state?.isTooltipActive,
+                      });
+                    }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="hour" />
                     <YAxis yAxisId="left" />
-                    <Tooltip content={dayTooltip} />
+                    <Tooltip content={dayTooltip} trigger="hover" />
                     <Legend />
 
                     <Line
@@ -961,6 +1035,8 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       strokeWidth={2}
                       dot={{ r: 2 }}
                       activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                      connectNulls={false}
                     />
 
                     <ReferenceLine
@@ -994,6 +1070,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
                       dataKey="peak_marker"
                       fill="#ef4444"
                       shape="circle"
+                      isAnimationActive={false}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
