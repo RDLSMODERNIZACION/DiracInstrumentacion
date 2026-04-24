@@ -3,7 +3,6 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from fastapi.encoders import jsonable_encoder
 from psycopg.rows import dict_row
 
 from app.db import get_conn
@@ -34,8 +33,7 @@ def _fetch_all(sql: str, params: tuple = ()) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
-            rows = cur.fetchall()
-            return [_clean_row(dict(r)) for r in rows]
+            return [_clean_row(dict(r)) for r in cur.fetchall()]
 
 
 def _fetch_one(sql: str, params: tuple = ()) -> dict:
@@ -54,34 +52,34 @@ def get_operation_reliability_summary():
                 select count(*)
                 from kpi.v_tank_critical_events_detail
                 where status = 'active'
-            ) as active_tank_events,
+            )::int as active_tank_events,
 
             (
                 select count(*)
                 from kpi.v_tank_critical_events_detail
-            ) as total_tank_events,
+            )::int as total_tank_events,
 
             (
                 select count(*)
                 from kpi.v_operation_pumps_front
                 where current_state = 'run'
-            ) as pumps_running,
+            )::int as pumps_running,
 
             (
                 select count(*)
                 from kpi.v_operation_pumps_front
                 where current_state = 'stop'
-            ) as pumps_stopped,
+            )::int as pumps_stopped,
 
             (
                 select coalesce(sum(starts_count), 0)
                 from kpi.v_operation_pumps_front
-            ) as total_starts,
+            )::int as total_starts,
 
             (
                 select coalesce(sum(stops_count), 0)
                 from kpi.v_operation_pumps_front
-            ) as total_stops
+            )::int as total_stops
     """
 
     return {
@@ -119,11 +117,11 @@ def get_tank_critical_events(
             status_label,
             created_at
         from kpi.v_tank_critical_events_detail
-        where (%s is null or status = %s)
-          and (%s is null or location_id = %s)
-          and (%s is null or tank_id = %s)
+        where (%s::text is null or status = %s::text)
+          and (%s::bigint is null or location_id = %s::bigint)
+          and (%s::bigint is null or tank_id = %s::bigint)
         order by started_at desc
-        limit %s
+        limit %s::int
     """
 
     items = _fetch_all(
@@ -174,9 +172,9 @@ def get_pump_operation_summary(
             last_activity_label
         from kpi.v_operation_pumps_front
         where pump_id is not null
-          and (%s is null or location_id = %s)
-          and (%s is null or pump_id = %s)
-          and (%s is null or current_state = %s)
+          and (%s::bigint is null or location_id = %s::bigint)
+          and (%s::bigint is null or pump_id = %s::bigint)
+          and (%s::text is null or current_state = %s::text)
         order by location_name, pump_name
     """
 
@@ -194,5 +192,5 @@ def get_pump_operation_summary(
 
     return {
         "ok": True,
-        "items": jsonable_encoder(items),
+        "items": items,
     }
