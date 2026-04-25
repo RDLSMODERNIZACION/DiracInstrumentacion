@@ -322,7 +322,7 @@ export default function Widget() {
       )}
 
       {tab === "confiabilidad" && (
-        <ReliabilityPage
+ <ReliabilityPage
   locationId={loc === "all" ? "all" : locId ?? "all"}
   selectedPumpIds={selectedPumpIds}
   selectedTankIds={selectedTankIds}
