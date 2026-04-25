@@ -1,45 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { scopedUrl, getApiHeaders } from "@/lib/config";
-
-/* ================= TYPES ================= */
-
-type PumpOperation = {
-  pump_id: number;
-  pump_name: string;
-  location_id: number | null;
-  location_name: string | null;
-  starts_count: number;
-  stops_count: number;
-  availability_pct: number | null;
-};
-
-type TankEvent = {
-  id: number;
-  tank_name: string;
-  location_id: number | null;
-  location_name: string | null;
-  event_label: string;
-  detected_value: number | null;
-  status_label: string;
-};
-
-type DailyStarts = {
-  date: string;
-  total_starts: number;
-  pumps: {
-    pump_id: number;
-    pump_name: string;
-    starts: number;
-  }[];
-};
 
 /* ================= FETCH ================= */
 
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson(path: string) {
   const res = await fetch(scopedUrl(path), {
     headers: getApiHeaders(),
   });
-  if (!res.ok) throw new Error("error");
+  if (!res.ok) throw new Error("Error cargando datos");
   return res.json();
 }
 
@@ -47,259 +23,203 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 export default function ReliabilityPage({
   locationId,
-  selectedPumpIds,
-  selectedTankIds,
 }: {
   locationId: string;
-  selectedPumpIds?: number[];
-  selectedTankIds?: number[];
 }) {
   const [view, setView] = useState<"pumps" | "tanks">("pumps");
+  const [month, setMonth] = useState("2026-04");
 
-  const [pumps, setPumps] = useState<PumpOperation[]>([]);
-  const [tanks, setTanks] = useState<TankEvent[]>([]);
-  const [daily, setDaily] = useState<DailyStarts[]>([]);
+  const [chart, setChart] = useState<any[]>([]);
+  const [ranking, setRanking] = useState<any[]>([]);
+  const [selectedDay, setSelectedDay] = useState<any>(null);
 
-  const [selectedDay, setSelectedDay] = useState<DailyStarts | null>(null);
-
-  const [sortKey, setSortKey] = useState<"starts" | "availability">("starts");
-  const [sortAsc, setSortAsc] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   /* ================= LOAD ================= */
 
   useEffect(() => {
-    async function load() {
-      const [p, t] = await Promise.all([
-        fetchJson<{ items: PumpOperation[] }>(
-          "/kpi/operation-reliability/pumps"
+    load();
+  }, [view, month, locationId]);
+
+  async function load() {
+    setLoading(true);
+
+    try {
+      const base =
+        view === "pumps"
+          ? "/kpi/operation-reliability/pump"
+          : "/kpi/operation-reliability/tank";
+
+      const [c, r] = await Promise.all([
+        fetchJson(
+          `${base}-daily-chart?month=${month}&location_id=${locationId}`
         ),
-        fetchJson<{ items: TankEvent[] }>(
-          "/kpi/operation-reliability/tank-events"
+        fetchJson(
+          `${base}-ranking?month=${month}&location_id=${locationId}`
         ),
       ]);
 
-      setPumps(p.items || []);
-      setTanks(t.items || []);
-
-      // series (si existe)
-      try {
-        const d = await fetchJson<{ items: DailyStarts[] }>(
-          "/kpi/operation-reliability/pump-starts-daily?days=31"
-        );
-        setDaily(d.items);
-      } catch {
-        // fallback
-        setDaily(
-          p.items.map((p) => ({
-            date: "Hoy",
-            total_starts: p.starts_count,
-            pumps: [
-              {
-                pump_id: p.pump_id,
-                pump_name: p.pump_name,
-                starts: p.starts_count,
-              },
-            ],
-          }))
-        );
-      }
+      setChart(c.items || []);
+      setRanking(r.items || []);
+      setSelectedDay(null);
+    } catch (e) {
+      console.error(e);
     }
 
-    load();
-  }, []);
+    setLoading(false);
+  }
 
-  /* ================= FILTER REAL (SUPERIOR) ================= */
+  /* ================= COLORS ================= */
 
-  const filteredPumps = useMemo(() => {
-    return pumps
-      .filter((p) => {
-        if (locationId !== "all" && String(p.location_id) !== locationId)
-          return false;
+  function getColor(row: any) {
+    if (view === "pumps") {
+      if (row.problem_score > 100) return "#ef4444";
+      if (row.problem_score > 40) return "#f97316";
+      if (row.problem_score > 20) return "#eab308";
+      return "#22c55e";
+    } else {
+      if (row.total_events > 20) return "#ef4444";
+      if (row.total_events > 10) return "#f97316";
+      if (row.total_events > 5) return "#eab308";
+      return "#22c55e";
+    }
+  }
 
-        if (
-          selectedPumpIds &&
-          selectedPumpIds.length > 0 &&
-          !selectedPumpIds.includes(p.pump_id)
-        )
-          return false;
-
-        return true;
-      })
-      .sort((a, b) => {
-        const aVal =
-          sortKey === "starts" ? a.starts_count : a.availability_pct || 0;
-        const bVal =
-          sortKey === "starts" ? b.starts_count : b.availability_pct || 0;
-
-        return sortAsc ? aVal - bVal : bVal - aVal;
-      });
-  }, [pumps, locationId, selectedPumpIds, sortKey, sortAsc]);
-
-  const filteredTanks = useMemo(() => {
-    return tanks.filter((t) => {
-      if (locationId !== "all" && String(t.location_id) !== locationId)
-        return false;
-
-      if (
-        selectedTankIds &&
-        selectedTankIds.length > 0 &&
-        !selectedTankIds.includes(Number(t.id))
-      )
-        return false;
-
-      return true;
-    });
-  }, [tanks, locationId, selectedTankIds]);
-
-  /* ================= HISTORIAL AUTOMATICO ================= */
-
-  const worstPumps = useMemo(() => {
-    return [...filteredPumps]
-      .sort((a, b) => b.starts_count - a.starts_count)
-      .slice(0, 5);
-  }, [filteredPumps]);
-
-  /* ================= UI ================= */
+  /* ================= RENDER ================= */
 
   return (
-    <div className="space-y-6">
-      {/* SELECTOR */}
-      <div className="flex gap-3">
+    <div className="p-6 space-y-6">
+
+      {/* HEADER */}
+      <div className="flex gap-4 items-center">
         <button
           onClick={() => setView("pumps")}
-          className={view === "pumps" ? "btn-active" : "btn"}
+          className={`px-3 py-1 rounded ${
+            view === "pumps" ? "bg-black text-white" : "bg-gray-200"
+          }`}
         >
           Bombas
         </button>
 
         <button
           onClick={() => setView("tanks")}
-          className={view === "tanks" ? "btn-active" : "btn"}
+          className={`px-3 py-1 rounded ${
+            view === "tanks" ? "bg-black text-white" : "bg-gray-200"
+          }`}
         >
           Tanques
         </button>
+
+        <input
+          type="month"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+        />
       </div>
 
-      {/* ================= PUMPS ================= */}
-      {view === "pumps" && (
-        <>
-          <h2 className="text-lg font-bold">
-            Arranques diarios (comparación)
-          </h2>
+      {/* LOADING */}
+      {loading && <div>Cargando...</div>}
 
-          {/* GRAFICO */}
-          <div className="flex gap-2 h-40 items-end">
-            {daily.map((d, i) => (
-              <div
-                key={i}
-                className="bg-blue-500 w-6 cursor-pointer hover:bg-blue-700"
-                style={{ height: d.total_starts * 4 }}
-                onClick={() => setSelectedDay(d)}
-                title={`${d.date} - ${d.total_starts}`}
-              />
-            ))}
-          </div>
+      {/* ================= GRAFICO ================= */}
+      <div style={{ width: "100%", height: 300 }}>
+        <ResponsiveContainer>
+          <BarChart data={chart}>
+            <XAxis dataKey="day_ts" />
+            <YAxis />
+            <Tooltip />
 
-          {/* DETALLE */}
-          <div className="border p-4 rounded">
-            {selectedDay ? (
+            <Bar
+              dataKey={view === "pumps" ? "total_starts" : "total_events"}
+              fill="#3b82f6"
+              onClick={(data: any) => setSelectedDay(data)}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ================= DETALLE ================= */}
+      <div className="border p-4 rounded">
+        {selectedDay ? (
+          <>
+            <h3 className="font-bold mb-2">
+              Día: {selectedDay.day_ts}
+            </h3>
+
+            {view === "pumps" ? (
               <>
-                <h3 className="font-bold mb-2">
-                  {selectedDay.date}
-                </h3>
-
-                {selectedDay.pumps.map((p) => (
-                  <div key={p.pump_id}>
-                    {p.pump_name} → {p.starts}
-                  </div>
-                ))}
+                Arranques: {selectedDay.total_starts}
+                <br />
+                Score: {selectedDay.total_problem_score}
               </>
             ) : (
               <>
-                <h3 className="font-bold mb-2">
-                  Bombas más problemáticas
-                </h3>
-
-                {worstPumps.map((p) => (
-                  <div key={p.pump_id}>
-                    {p.pump_name} → {p.starts_count} arranques
-                  </div>
-                ))}
+                Eventos: {selectedDay.total_events}
+                <br />
+                Activos: {selectedDay.active_events}
               </>
             )}
-          </div>
+          </>
+        ) : (
+          <>
+            <h3 className="font-bold mb-2">
+              Ranking (más problemáticos)
+            </h3>
 
-          {/* TABLA ORDENABLE */}
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th>Bomba</th>
+            {ranking.slice(0, 10).map((r, i) => (
+              <div
+                key={i}
+                className="flex justify-between border-b py-1"
+              >
+                <span>
+                  {view === "pumps"
+                    ? r.pump_name
+                    : r.tank_name}
+                </span>
 
-                <th
-                  className="cursor-pointer"
-                  onClick={() => {
-                    setSortKey("starts");
-                    setSortAsc(!sortAsc);
-                  }}
-                >
-                  Arranques ⬍
-                </th>
+                <span>
+                  {view === "pumps"
+                    ? `${r.starts_count} arr / ${r.availability_pct}%`
+                    : `${r.total_events} ev`}
+                </span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
 
-                <th
-                  className="cursor-pointer"
-                  onClick={() => {
-                    setSortKey("availability");
-                    setSortAsc(!sortAsc);
-                  }}
-                >
-                  Disponibilidad ⬍
-                </th>
-              </tr>
-            </thead>
+      {/* ================= TABLA ================= */}
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th>Equipo</th>
+            <th>Métrica</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
 
-            <tbody>
-              {filteredPumps.map((p) => (
-                <tr key={p.pump_id}>
-                  <td>{p.pump_name}</td>
-                  <td>{p.starts_count}</td>
-                  <td>{p.availability_pct ?? "-"}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+        <tbody>
+          {ranking.map((r: any, i: number) => (
+            <tr key={i}>
+              <td>
+                {view === "pumps"
+                  ? r.pump_name
+                  : r.tank_name}
+              </td>
 
-      {/* ================= TANKS ================= */}
-      {view === "tanks" && (
-        <>
-          <h2 className="text-lg font-bold">
-            Eventos de tanques
-          </h2>
+              <td>
+                {view === "pumps"
+                  ? `${r.starts_count} / ${r.availability_pct ?? "-"}%`
+                  : `${r.total_events}`}
+              </td>
 
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th>Tanque</th>
-                <th>Evento</th>
-                <th>Valor</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
+              <td style={{ color: getColor(r) }}>
+                {r.estado_operativo}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-            <tbody>
-              {filteredTanks.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.tank_name}</td>
-                  <td>{t.event_label}</td>
-                  <td>{t.detected_value}</td>
-                  <td>{t.status_label}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
     </div>
   );
 }
