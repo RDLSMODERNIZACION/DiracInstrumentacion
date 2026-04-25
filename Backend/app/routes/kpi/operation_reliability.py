@@ -592,3 +592,119 @@ def get_tank_ranking(
             ),
         ),
     }
+
+@router.get("/pump-day-events")
+def get_pump_day_events(
+    day: date = Query(...),
+    location_id: int | None = Query(default=None),
+    pump_id: int | None = Query(default=None),
+):
+    sql = """
+        select
+            psh.id,
+            psh.pump_id,
+            p.name as pump_name,
+            psh.location_id,
+            l.name as location_name,
+            psh.state,
+            case
+                when psh.state = 'run' then 'Encendida'
+                when psh.state = 'stop' then 'Apagada'
+                else psh.state
+            end as state_label,
+            psh.started_at,
+            psh.ended_at,
+            psh.duration_seconds,
+            case
+                when psh.duration_seconds is null then null
+                when psh.duration_seconds < 60 then psh.duration_seconds || ' seg'
+                when psh.duration_seconds < 3600 then round(psh.duration_seconds / 60.0, 1) || ' min'
+                else round(psh.duration_seconds / 3600.0, 1) || ' h'
+            end as duration_label,
+            psh.source
+        from kpi.pump_state_history psh
+        left join public.pumps p on p.id = psh.pump_id
+        left join public.locations l on l.id = psh.location_id
+        where (psh.started_at at time zone 'America/Argentina/Buenos_Aires')::date = %s::date
+          and (%s::bigint is null or psh.location_id = %s::bigint)
+          and (%s::bigint is null or psh.pump_id = %s::bigint)
+        order by psh.started_at asc
+    """
+
+    return {
+        "ok": True,
+        "day": day.isoformat(),
+        "items": _fetch_all(
+            sql,
+            (
+                day,
+                location_id,
+                location_id,
+                pump_id,
+                pump_id,
+            ),
+        ),
+    }
+
+
+@router.get("/tank-day-events")
+def get_tank_day_events(
+    day: date = Query(...),
+    location_id: int | None = Query(default=None),
+    tank_id: int | None = Query(default=None),
+):
+    sql = """
+        select
+            tce.id,
+            tce.tank_id,
+            t.name as tank_name,
+            tce.location_id,
+            l.name as location_name,
+            tce.event_type,
+            case
+                when tce.event_type = 'low' then 'Nivel bajo'
+                when tce.event_type = 'low_low' then 'Nivel bajo crítico'
+                when tce.event_type = 'high' then 'Nivel alto'
+                when tce.event_type = 'high_high' then 'Nivel alto crítico'
+                else tce.event_type
+            end as event_label,
+            tce.configured_limit,
+            tce.detected_value,
+            tce.started_at,
+            tce.ended_at,
+            tce.duration_seconds,
+            case
+                when tce.duration_seconds is null then null
+                when tce.duration_seconds < 60 then tce.duration_seconds || ' seg'
+                when tce.duration_seconds < 3600 then round(tce.duration_seconds / 60.0, 1) || ' min'
+                else round(tce.duration_seconds / 3600.0, 1) || ' h'
+            end as duration_label,
+            tce.status,
+            case
+                when tce.status = 'active' then 'Activo'
+                when tce.status = 'normalized' then 'Normalizado'
+                else tce.status
+            end as status_label
+        from kpi.tank_critical_events tce
+        left join public.tanks t on t.id = tce.tank_id
+        left join public.locations l on l.id = tce.location_id
+        where (tce.started_at at time zone 'America/Argentina/Buenos_Aires')::date = %s::date
+          and (%s::bigint is null or tce.location_id = %s::bigint)
+          and (%s::bigint is null or tce.tank_id = %s::bigint)
+        order by tce.started_at asc
+    """
+
+    return {
+        "ok": True,
+        "day": day.isoformat(),
+        "items": _fetch_all(
+            sql,
+            (
+                day,
+                location_id,
+                location_id,
+                tank_id,
+                tank_id,
+            ),
+        ),
+    }
