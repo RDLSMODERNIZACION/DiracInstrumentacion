@@ -323,9 +323,11 @@ export default function Widget() {
 
       {tab === "confiabilidad" && (
         <ReliabilityPage
-          locationId={loc === "all" ? "all" : locId ?? "all"}
-          thresholdLow={90}
-        />
+  locationId={loc === "all" ? "all" : locId ?? "all"}
+  selectedPumpIds={selectedPumpIds}
+  selectedTankIds={selectedTankIds}
+  thresholdLow={90}
+/>
       )}
 
       {tab === "calidad" && (
