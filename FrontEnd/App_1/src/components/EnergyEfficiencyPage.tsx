@@ -909,7 +909,10 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthChartData} margin={{ top: 24, right: 24, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="day" />
+                  <XAxis
+  dataKey="date"
+  tickFormatter={(d) => d.slice(8, 10)}
+/>
                   <YAxis yAxisId="left" />
                   <YAxis yAxisId="right" orientation="right" />
                   <Tooltip content={chartTooltip} />
