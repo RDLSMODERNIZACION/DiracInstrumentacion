@@ -4,83 +4,125 @@ export default function PlaybackControls({
   disabled,
   playEnabled,
   setPlayEnabled,
-  playing,
-  setPlaying,
-  playFinMin,
-  setPlayFinMin,
-  MIN_OFFSET_MIN,
-  MAX_OFFSET_MIN,
-  setDragging,
+  playDate,
+  setPlayDate,
+  minDate,
+  maxDate,
+  prevDay,
+  nextDay,
+  goToday,
+  selectedDayLabel,
   startLabel,
   endLabel,
+  loadingPlay,
 }: {
   disabled?: boolean;
+
   playEnabled: boolean;
   setPlayEnabled: (v: boolean) => void;
-  playing: boolean;
-  setPlaying: (v: boolean) => void;
-  playFinMin: number;
-  setPlayFinMin: (v: number) => void;
-  MIN_OFFSET_MIN: number;
-  MAX_OFFSET_MIN: number;
-  setDragging: (v: boolean) => void;
+
+  playDate: string;
+  setPlayDate: (v: string) => void;
+
+  minDate: string;
+  maxDate: string;
+
+  prevDay: () => void;
+  nextDay: () => void;
+  goToday: () => void;
+
+  selectedDayLabel: string;
+
   startLabel: string;
   endLabel: string;
+
+  loadingPlay?: boolean;
 }) {
+  const canPrev = playDate > minDate;
+  const canNext = playDate < maxDate;
+
   return (
-    <div className="flex-1 min-w-[320px]">
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2">
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
           <input
             type="checkbox"
             disabled={disabled}
             checked={playEnabled}
-            onChange={(e) => {
-              setPlayEnabled(e.target.checked);
-              setPlaying(false);
-            }}
+            onChange={(e) => setPlayEnabled(e.target.checked)}
           />
-          <span className={`text-sm ${disabled ? "text-gray-400" : "text-gray-700"}`}>
-            Playback 24 h (7 días → ahora)
-          </span>
+          Playback por día
         </label>
 
-        <button
-          className="px-2 py-1 border rounded-lg text-sm"
-          disabled={!playEnabled}
-          onClick={() => setPlaying(!playing)}
-          title={playing ? "Pausar" : "Reproducir"}
-        >
-          {playing ? "⏸" : "▶"}
-        </button>
+        {playEnabled && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={!canPrev}
+              onClick={prevDay}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Día anterior
+            </button>
+
+            <input
+              type="date"
+              value={playDate}
+              min={minDate}
+              max={maxDate}
+              onChange={(e) => setPlayDate(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-400"
+            />
+
+            <button
+              type="button"
+              disabled={!canNext}
+              onClick={nextDay}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Día siguiente
+            </button>
+
+            <button
+              type="button"
+              onClick={goToday}
+              className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              Hoy
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="mt-2 flex items-center gap-3">
-        <input
-          type="range"
-          min={MIN_OFFSET_MIN}
-          max={MAX_OFFSET_MIN}
-          step={1}
-          disabled={!playEnabled}
-          value={playFinMin}
-          onChange={(e) => setPlayFinMin(Number(e.target.value))}
-          onMouseDown={() => setDragging(true)}
-          onMouseUp={() => setDragging(false)}
-          onTouchStart={() => setDragging(true)}
-          onTouchEnd={() => setDragging(false)}
-          className="w-full"
-          title="Fin de la ventana (minutos desde el inicio base de 7 días)"
-        />
-      </div>
+      {playEnabled && (
+        <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Día seleccionado:{" "}
+              <span className="font-semibold text-slate-800">
+                {selectedDayLabel}
+              </span>
+            </span>
 
-      <div className="mt-1 flex items-center justify-between text-xs">
-        <span className="text-gray-500">
-          Inicio: <b>{startLabel}</b>
-        </span>
-        <span className="text-gray-500">
-          Fin: <b>{endLabel}</b>
-        </span>
-      </div>
+            {loadingPlay && (
+              <span className="font-semibold text-blue-700">
+                Cargando datos...
+              </span>
+            )}
+          </div>
+
+          <div className="mt-1 text-slate-500">
+            Ventana: <span className="font-medium">{startLabel}</span> →{" "}
+            <span className="font-medium">{endLabel}</span>
+          </div>
+        </div>
+      )}
+
+      {!playEnabled && (
+        <div className="mt-2 text-xs text-slate-400">
+          En vivo: se muestran las últimas 24 h.
+        </div>
+      )}
     </div>
   );
 }

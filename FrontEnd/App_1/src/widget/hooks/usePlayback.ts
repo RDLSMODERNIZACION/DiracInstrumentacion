@@ -9,17 +9,74 @@ import {
   fmtDayTime,
 } from "../helpers/time";
 
-type TsTank = { timestamps: number[]; level_percent: (number | null)[] } | null;
-type TsPump = { timestamps: number[]; is_on: (number | null)[] } | null;
+type TsTank =
+  | {
+      timestamps: number[];
+      level_percent: Array<number | null>;
+      level_min?: Array<number | null>;
+      level_max?: Array<number | null>;
+    }
+  | null;
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
+type TsPump =
+  | {
+      timestamps: number[];
+      is_on: Array<number | null>;
+      pumps_off?: Array<number | null>;
+      pumps_online?: Array<number | null>;
+      pumps_offline?: Array<number | null>;
+    }
+  | null;
 
 function stableKey(ids: number[] | "all") {
   if (ids === "all") return "all";
-  const copy = [...ids].filter(Number.isFinite).sort((a, b) => a - b);
-  return copy.join(",");
+
+  return [...ids]
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+    .join(",");
+}
+
+function toDateInputAR(ms = Date.now()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(ms);
+
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const d = parts.find((p) => p.type === "day")?.value;
+
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {
+    // fallback
+  }
+
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function dayBoundsArgentina(dateStr: string): [number, number] {
+  // Argentina usa UTC-03. Esto fuerza el día local:
+  // 00:00 a 24:00 horario Argentina.
+  const start = Date.parse(`${dateStr}T00:00:00-03:00`);
+  const end = start + 24 * H;
+
+  return [startOfMin(start), startOfMin(end)];
+}
+
+function addDaysToDateInput(dateStr: string, days: number) {
+  const [start] = dayBoundsArgentina(dateStr);
+  return toDateInputAR(start + days * 24 * H);
+}
+
+function clampDateInput(dateStr: string, minDate: string, maxDate: string) {
+  if (!dateStr) return maxDate;
+  if (dateStr < minDate) return minDate;
+  if (dateStr > maxDate) return maxDate;
+  return dateStr;
 }
 
 export function usePlayback({
@@ -39,98 +96,118 @@ export function usePlayback({
   selectedPumpIds: number[] | "all";
   selectedTankIds: number[] | "all";
 }) {
-  const MAX_OFFSET_MIN = 7 * 24 * 60; // 7 días hacia atrás
-  const MIN_OFFSET_MIN = 24 * 60; // ventana mínima: 24 h
+  const todayAR = useMemo(() => toDateInputAR(Date.now()), []);
+
+  // IMPORTANTE:
+  // La base guarda solamente los últimos 7 días.
+  // El selector de fecha queda limitado entre hoy y 7 días hacia atrás.
+  const minDate = useMemo(() => addDaysToDateInput(todayAR, -7), [todayAR]);
+  const maxDate = todayAR;
 
   const [playEnabled, setPlayEnabled] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [playFinMin, setPlayFinMin] = useState(MAX_OFFSET_MIN);
-  const [dragging, setDragging] = useState(false);
-  const [finDebounced, setFinDebounced] = useState(MAX_OFFSET_MIN);
+  const [playDateRaw, setPlayDateRaw] = useState(todayAR);
+  const [dateDebounced, setDateDebounced] = useState(todayAR);
 
   const [playTankTs, setPlayTankTs] = useState<TsTank>(null);
   const [playPumpTs, setPlayPumpTs] = useState<TsPump>(null);
   const [loadingPlay, setLoadingPlay] = useState(false);
 
-  // NUEVO: velocidad de playback (0.5x, 1x, 2x, 4x)
-  const [playSpeed, setPlaySpeed] = useState<0.5 | 1 | 2 | 4>(1);
-
-  // Abort real para series
   const abortRef = useRef<AbortController | null>(null);
 
-  // Base (inicio de la escala de 7 días), alineado a minuto. Se calcula una sola vez.
-  const baseStartMs = useMemo(() => startOfMin(Date.now() - 7 * 24 * H), []);
+  const playDate = useMemo(
+    () => clampDateInput(playDateRaw, minDate, maxDate),
+    [playDateRaw, minDate, maxDate]
+  );
 
-  // Dominio LIVE (fallback si no hay ventana en vivo todavía)
+  const setPlayDate = (v: string) => {
+    setPlayDateRaw(clampDateInput(v, minDate, maxDate));
+  };
+
+  const prevDay = () => {
+    setPlayDate(addDaysToDateInput(playDate, -1));
+  };
+
+  const nextDay = () => {
+    setPlayDate(addDaysToDateInput(playDate, 1));
+  };
+
+  const goToday = () => {
+    setPlayDate(todayAR);
+  };
+
   const xDomainLive = useMemo<[number, number]>(() => {
     const win = liveWindow;
-    if (win?.start && win?.end) return [win.start, win.end];
+
+    if (win?.start && win?.end) {
+      return [win.start, win.end];
+    }
+
     const end = startOfMin(Date.now());
     const start = end - 24 * H;
+
     return [start, end];
   }, [liveWindow]);
 
-  // Dominio del slider (cuando hay playback)
-  const sliderDomain: [number, number] = useMemo(() => {
-    const finClamped = clamp(playFinMin, MIN_OFFSET_MIN, MAX_OFFSET_MIN);
-    const to = baseStartMs + finClamped * 60_000;
-    const from = to - 24 * H;
-    return [from, to];
-  }, [baseStartMs, playFinMin, MIN_OFFSET_MIN, MAX_OFFSET_MIN]);
+  const dayDomain = useMemo<[number, number]>(() => {
+    return dayBoundsArgentina(playDate);
+  }, [playDate]);
 
-  // Dominio efectivo usado por los charts
-  const domain = (playEnabled ? sliderDomain : xDomainLive) as [number, number];
+  const domain = (playEnabled ? dayDomain : xDomainLive) as [number, number];
 
-  // Ticks y labels
   const ticks = useMemo(() => buildHourTicks(domain), [domain[0], domain[1]]);
+
   const startLabel = useMemo(() => fmtDayTime(domain[0], TZ), [domain[0]]);
   const endLabel = useMemo(() => fmtDayTime(domain[1], TZ), [domain[1]]);
 
-  // Si salís de la pestaña Operación, apagamos playback/autoplay
+  const selectedDayLabel = useMemo(() => {
+    const [start] = dayBoundsArgentina(playDate);
+
+    return new Intl.DateTimeFormat("es-AR", {
+      timeZone: TZ,
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(start);
+  }, [playDate]);
+
   useEffect(() => {
     if (tab !== "operacion") {
       setPlayEnabled(false);
-      setPlaying(false);
     }
   }, [tab]);
 
-  // Debounce cuando NO estás arrastrando (programa fetch a los 600 ms)
   useEffect(() => {
-    if (!playEnabled || !locId) return;
-    if (dragging) return;
     const id = window.setTimeout(() => {
-      setFinDebounced(clamp(playFinMin, MIN_OFFSET_MIN, MAX_OFFSET_MIN));
-    }, 600);
-    return () => window.clearTimeout(id);
-  }, [playEnabled, dragging, playFinMin, locId, MIN_OFFSET_MIN, MAX_OFFSET_MIN]);
+      setDateDebounced(playDate);
+    }, 350);
 
-  // Keys estables para deps (evita re-fetch por referencia distinta)
+    return () => window.clearTimeout(id);
+  }, [playDate]);
+
   const pumpIdsKey = useMemo(() => stableKey(selectedPumpIds), [selectedPumpIds]);
   const tankIdsKey = useMemo(() => stableKey(selectedTankIds), [selectedTankIds]);
 
-  // Fetch de la ventana 24h (playback)
   useEffect(() => {
     if (!playEnabled || !locId) {
       abortRef.current?.abort();
       abortRef.current = null;
+
       setPlayTankTs(null);
       setPlayPumpTs(null);
       setLoadingPlay(false);
+
       return;
     }
 
-    // si justo está arrastrando, no tiene sentido disparar (el debounce lo hará)
-    if (dragging) return;
-
-    const finClamped = clamp(finDebounced, MIN_OFFSET_MIN, MAX_OFFSET_MIN);
-    const toMs = startOfMin(baseStartMs + finClamped * 60_000);
-    const fromMs = toMs - 24 * H;
+    const safeDate = clampDateInput(dateDebounced, minDate, maxDate);
+    const [fromMs, toMs] = dayBoundsArgentina(safeDate);
 
     const fromISO = floorToMinuteISO(new Date(fromMs));
     const toISO = floorToMinuteISO(new Date(toMs));
 
-    // abort anterior
     abortRef.current?.abort();
+
     const ac = new AbortController();
     abortRef.current = ac;
 
@@ -144,13 +221,13 @@ export function usePlayback({
             to: toISO,
             locationId: locId,
             pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
-            // ✅ KPI fijo a 5min
             bucket: "5min",
             aggMode: "avg",
             connectedOnly: true,
-            // @ts-ignore (si luego soportás signal en graphs.ts, ya queda listo)
+            // @ts-ignore
             signal: ac.signal,
           } as any),
+
           fetchTanksLive({
             from: fromISO,
             to: toISO,
@@ -158,7 +235,6 @@ export function usePlayback({
             tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
             agg: "avg",
             carry: true,
-            // ✅ KPI fijo a 5min
             bucket: "5min",
             connectedOnly: true,
             // @ts-ignore
@@ -168,15 +244,31 @@ export function usePlayback({
 
         if (ac.signal.aborted) return;
 
-        setPlayPumpTs({ timestamps: pumps.timestamps, is_on: pumps.is_on });
-        setPlayTankTs({ timestamps: tanks.timestamps, level_percent: tanks.level_percent });
+        setPlayPumpTs({
+          timestamps: pumps?.timestamps ?? [],
+          is_on: pumps?.is_on ?? [],
+          pumps_off: pumps?.pumps_off ?? [],
+          pumps_online: pumps?.pumps_online ?? [],
+          pumps_offline: pumps?.pumps_offline ?? [],
+        });
+
+        setPlayTankTs({
+          timestamps: tanks?.timestamps ?? [],
+          level_percent: tanks?.level_percent ?? tanks?.level_avg ?? [],
+          level_min: tanks?.level_min ?? [],
+          level_max: tanks?.level_max ?? [],
+        });
       } catch (e: any) {
         if (e?.name === "AbortError") return;
+
         setPlayPumpTs(null);
         setPlayTankTs(null);
-        console.error("[playback] fetch error:", e);
+
+        console.error("[playback day] fetch error:", e);
       } finally {
-        if (!ac.signal.aborted) setLoadingPlay(false);
+        if (!ac.signal.aborted) {
+          setLoadingPlay(false);
+        }
       }
     })();
 
@@ -186,53 +278,26 @@ export function usePlayback({
   }, [
     playEnabled,
     locId,
-    dragging,
-    finDebounced,
-    baseStartMs,
-    MIN_OFFSET_MIN,
-    MAX_OFFSET_MIN,
+    dateDebounced,
+    minDate,
+    maxDate,
     pumpIdsKey,
     tankIdsKey,
+    selectedPumpIds,
+    selectedTankIds,
   ]);
 
-  // Auto-play fluido: avanza según velocidad (0.5x, 1x, 2x, 4x)
-  useEffect(() => {
-    if (!playEnabled || !playing) return;
-
-    const BASE_STEP_MIN = 2; // minutos por tick a 1x → suave
-    const TICK_MS = 250; // 4 veces por segundo
-
-    const id = window.setInterval(() => {
-      setPlayFinMin((prev) => {
-        const step = BASE_STEP_MIN * playSpeed;
-        const next = clamp(prev + step, MIN_OFFSET_MIN, MAX_OFFSET_MIN);
-
-        if (next >= MAX_OFFSET_MIN) {
-          setPlaying(false);
-        }
-        return next;
-      });
-    }, TICK_MS);
-
-    return () => window.clearInterval(id);
-  }, [playEnabled, playing, playSpeed, MIN_OFFSET_MIN, MAX_OFFSET_MIN]);
-
-  // Reset seguro al deshabilitar playback
   useEffect(() => {
     if (!playEnabled) {
       abortRef.current?.abort();
       abortRef.current = null;
 
-      setPlaying(false);
-      setPlayFinMin(MAX_OFFSET_MIN);
-      setFinDebounced(MAX_OFFSET_MIN);
       setPlayPumpTs(null);
       setPlayTankTs(null);
       setLoadingPlay(false);
     }
-  }, [playEnabled, MAX_OFFSET_MIN]);
+  }, [playEnabled]);
 
-  // Series finales (usa live cuando playback está apagado)
   const tankTs =
     playEnabled && playTankTs
       ? playTankTs
@@ -244,29 +309,28 @@ export function usePlayback({
       : livePumpTs ?? { timestamps: [], is_on: [] };
 
   return {
-    // state
     playEnabled,
     setPlayEnabled,
-    playing,
-    setPlaying,
-    playFinMin,
-    setPlayFinMin,
-    MIN_OFFSET_MIN,
-    MAX_OFFSET_MIN,
-    dragging,
-    setDragging,
-    // speed
-    playSpeed,
-    setPlaySpeed,
-    // view
+
+    playDate,
+    setPlayDate,
+    minDate,
+    maxDate,
+
+    prevDay,
+    nextDay,
+    goToday,
+
+    selectedDayLabel,
+
     domain,
     ticks,
     startLabel,
     endLabel,
-    // series
+
     tankTs,
     pumpTs,
-    // flags
+
     loadingPlay,
   };
 }
