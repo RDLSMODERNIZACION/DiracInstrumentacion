@@ -141,6 +141,32 @@ function MiniBadge({
   );
 }
 
+function getTankId(t: any): number {
+  return Number(t?.id ?? t?.tank_id);
+}
+
+function getPumpId(p: any): number {
+  return Number(p?.id ?? p?.pump_id);
+}
+
+function getTankName(t: any): string {
+  return String(
+    t?.name ??
+      t?.tank_name ??
+      t?.label ??
+      (Number.isFinite(getTankId(t)) ? `Tanque ${getTankId(t)}` : "Tanque")
+  );
+}
+
+function getPumpName(p: any): string {
+  return String(
+    p?.name ??
+      p?.pump_name ??
+      p?.label ??
+      (Number.isFinite(getPumpId(p)) ? `Bomba ${getPumpId(p)}` : "Bomba")
+  );
+}
+
 function LocationSelect({
   label,
   value,
@@ -185,6 +211,143 @@ function LocationSelect({
         ))}
       </select>
     </div>
+  );
+}
+
+function EntitySelector<T>({
+  title,
+  allLabel,
+  options,
+  selectedIds,
+  setSelectedIds,
+  getId,
+  getName,
+}: {
+  title: string;
+  allLabel: string;
+  options: T[];
+  selectedIds: number[] | "all";
+  setSelectedIds: (v: number[] | "all") => void;
+  getId: (v: T) => number;
+  getName: (v: T) => string;
+}) {
+  const cleanOptions = useMemo(
+    () =>
+      (options ?? [])
+        .map((item) => ({
+          id: getId(item),
+          name: getName(item),
+        }))
+        .filter((x) => Number.isFinite(x.id)),
+    [options, getId, getName]
+  );
+
+  const allChecked = selectedIds === "all";
+
+  const selectedCount =
+    selectedIds === "all"
+      ? cleanOptions.length
+      : Array.isArray(selectedIds)
+        ? selectedIds.length
+        : 0;
+
+  const label =
+    selectedIds === "all"
+      ? allLabel
+      : selectedCount === 0
+        ? "Sin selección"
+        : `${selectedCount} seleccionado${selectedCount === 1 ? "" : "s"}`;
+
+  return (
+    <details className="group rounded-xl border border-slate-200 bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {title}
+          </div>
+
+          <div className="font-medium text-slate-700">{label}</div>
+        </div>
+
+        <span className="text-xs text-slate-400 transition-transform group-open:rotate-180">
+          ▼
+        </span>
+      </summary>
+
+      <div className="border-t border-slate-100 p-3">
+        <label className="mb-2 flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={allChecked}
+            onChange={(e) => {
+              setSelectedIds(e.target.checked ? "all" : []);
+            }}
+          />
+          {allLabel}
+        </label>
+
+        <div className="max-h-44 space-y-2 overflow-auto rounded-xl bg-slate-50 p-2">
+          {cleanOptions.length === 0 ? (
+            <div className="text-xs text-slate-400">
+              No hay elementos para esta ubicación.
+            </div>
+          ) : (
+            cleanOptions.map(({ id, name }) => {
+              const ids = Array.isArray(selectedIds) ? selectedIds : [];
+              const checked = selectedIds === "all" || ids.includes(id);
+
+              return (
+                <label
+                  key={id}
+                  className="flex items-center gap-2 rounded-lg bg-white px-2 py-1 text-sm text-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={selectedIds === "all"}
+                    onChange={(e) => {
+                      if (selectedIds === "all") return;
+
+                      const current = Array.isArray(selectedIds)
+                        ? selectedIds
+                        : [];
+
+                      if (e.target.checked) {
+                        setSelectedIds(Array.from(new Set([...current, id])));
+                      } else {
+                        setSelectedIds(current.filter((x) => x !== id));
+                      }
+                    }}
+                  />
+
+                  <span>{name}</span>
+                </label>
+              );
+            })
+          )}
+        </div>
+
+        {selectedIds !== "all" && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIds("all")}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Seleccionar todos
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Limpiar selección
+            </button>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -517,20 +680,23 @@ export default function Widget() {
     };
   }, [locId]);
 
-  const pollMs = tab === "operacion" ? 15_000 : 10 * 60_000;
+  const pollMs = tab === "operacion" ? 60_000 : 10 * 60_000;
 
   const liveSync = useLiveOps({
     locationId: locId,
     periodHours: 24,
-    bucket: "1min",
+    bucket: "5min",
     pollMs,
     pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
     tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
-    loadPumpTimeline: true,
+
+    // Optimización: evita pedir timeline-1m, que era el request más pesado.
+    loadPumpTimeline: false,
+
     loadPumpEvents: true,
     loadTankEvents: true,
-    limitTimeline: 200000,
-    limitEvents: 500,
+    limitTimeline: 0,
+    limitEvents: 150,
   });
 
   const playback = usePlayback({
@@ -586,8 +752,7 @@ export default function Widget() {
     const firstDifferent =
       locOptionsAll.find(
         (o) =>
-          Number(o.id) !== Number(loc) &&
-          Number(o.id) !== Number(auditLoc)
+          Number(o.id) !== Number(loc) && Number(o.id) !== Number(auditLoc)
       ) ?? locOptionsAll[0];
 
     if (firstDifferent) {
@@ -699,22 +864,32 @@ export default function Widget() {
       .sort((a, b) => b.tsMs - a.tsMs);
   }, [liveSync.pumpEvents?.items, liveSync.tankEvents?.items]);
 
-  const totalPumpsCap = useMemo(
-    () =>
+  const totalPumpsCap = useMemo(() => {
+    if (selectedPumpIds !== "all") {
+      return selectedPumpIds.length || undefined;
+    }
+
+    return (
       pumpSummary?.pumps_total ??
       liveSync.pumpsTotal ??
-      (kpis.pumps || undefined),
-    [pumpSummary?.pumps_total, liveSync.pumpsTotal, kpis.pumps]
-  );
+      (kpis.pumps || undefined)
+    );
+  }, [selectedPumpIds, pumpSummary?.pumps_total, liveSync.pumpsTotal, kpis.pumps]);
 
   const auditPumpsCap = useMemo(
-    () => (audit.pumpOptions?.length || 0) || undefined,
-    [audit.pumpOptions]
+    () =>
+      audit.selectedPumpIds !== "all"
+        ? audit.selectedPumpIds.length || undefined
+        : (audit.pumpOptions?.length || 0) || undefined,
+    [audit.selectedPumpIds, audit.pumpOptions]
   );
 
   const auditPumpsCap2 = useMemo(
-    () => (audit2.pumpOptions?.length || 0) || undefined,
-    [audit2.pumpOptions]
+    () =>
+      audit2.selectedPumpIds !== "all"
+        ? audit2.selectedPumpIds.length || undefined
+        : (audit2.pumpOptions?.length || 0) || undefined,
+    [audit2.selectedPumpIds, audit2.pumpOptions]
   );
 
   const operationLoading = Boolean(liveSync.meta?.isLoading || loading);
@@ -776,7 +951,7 @@ export default function Widget() {
             </MiniBadge>
 
             <MiniBadge className="bg-slate-100 text-slate-600">
-              bucket {liveSync.meta?.bucket ?? "1min"}
+              bucket {liveSync.meta?.bucket ?? "5min"}
             </MiniBadge>
 
             {liveSync.meta?.lastOkAt && (
@@ -815,7 +990,6 @@ export default function Widget() {
 
       {tab === "operacion" && (
         <>
-          {/* Gráficos principales normales */}
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TankLevelChart
               ts={playback.tankTs}
@@ -835,7 +1009,6 @@ export default function Widget() {
 
             <OpsPumpsProfile
               pumpsTs={playback.pumpTs}
-              timelineItems={liveSync.pumpTimeline?.items ?? []}
               max={totalPumpsCap}
               syncId="op-sync"
               title={`Principal · Bombas ON · ${principalLocName} · 24h`}
@@ -847,7 +1020,6 @@ export default function Widget() {
             />
           </section>
 
-          {/* Auditoría compacta */}
           <section>
             <Card className="rounded-2xl border-blue-200 bg-blue-50/40">
               <CardHeader className="pb-2">
@@ -891,28 +1063,27 @@ export default function Widget() {
                 {auditEnabled && (
                   <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-3">
                     <PlaybackControls
-  disabled={!locId}
-  playEnabled={playback.playEnabled}
-  setPlayEnabled={playback.setPlayEnabled}
-  playDate={playback.playDate}
-  setPlayDate={playback.setPlayDate}
-  minDate={playback.minDate}
-  maxDate={playback.maxDate}
-  prevDay={playback.prevDay}
-  nextDay={playback.nextDay}
-  goToday={playback.goToday}
-  selectedDayLabel={playback.selectedDayLabel}
-  startLabel={playback.startLabel}
-  endLabel={playback.endLabel}
-  loadingPlay={playback.loadingPlay}
-/>
+                      disabled={!locId}
+                      playEnabled={playback.playEnabled}
+                      setPlayEnabled={playback.setPlayEnabled}
+                      playDate={playback.playDate}
+                      setPlayDate={playback.setPlayDate}
+                      minDate={playback.minDate}
+                      maxDate={playback.maxDate}
+                      prevDay={playback.prevDay}
+                      nextDay={playback.nextDay}
+                      goToday={playback.goToday}
+                      selectedDayLabel={playback.selectedDayLabel}
+                      startLabel={playback.startLabel}
+                      endLabel={playback.endLabel}
+                      loadingPlay={playback.loadingPlay}
+                    />
                   </div>
                 )}
               </CardContent>
             </Card>
           </section>
 
-          {/* Comparación directa por filas: izquierda tanques / derecha bombas */}
           {auditEnabled && (
             <section className="rounded-2xl border-2 border-blue-300 bg-blue-50/30 p-3">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -922,196 +1093,244 @@ export default function Widget() {
                   </div>
 
                   <div className="text-xs text-blue-700">
-                    Izquierda: tanques. Derecha: bombas. Cada fila representa
-                    una localidad.
+                    Cada fila tiene una sola ubicación. Dentro de cada fila
+                    podés seleccionar qué tanques y qué bombas mostrar.
                   </div>
                 </div>
               </div>
 
-              {/* Fila principal */}
               <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3">
-                <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  <div>
-                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
-                      PRINCIPAL · TANQUES
-                    </div>
-
-                    <LocationSelect
-                      label="Ubicación principal"
-                      value={loc}
-                      onChange={(v) => setLoc(v as number | "all")}
-                      options={locOptionsAll}
-                      allowAll
-                    />
-                  </div>
-
-                  <div>
-                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
-                      PRINCIPAL · BOMBAS
-                    </div>
-
-                    <LocationSelect
-                      label="Ubicación principal"
-                      value={loc}
-                      onChange={(v) => setLoc(v as number | "all")}
-                      options={locOptionsAll}
-                      allowAll
-                    />
-                  </div>
+                <div className="mb-3">
+                  <LocationSelect
+                    label="Ubicación principal"
+                    value={loc}
+                    onChange={(v) => setLoc(v as number | "all")}
+                    options={locOptionsAll}
+                    allowAll
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  <TankLevelChart
-                    ts={playback.tankTs}
-                    syncId="row-principal-sync"
-                    title={`Principal · Nivel de tanques · ${principalLocName}`}
-                    tz="America/Argentina/Buenos_Aires"
-                    xDomain={playback.domain}
-                    xTicks={playback.ticks}
-                    hoverX={null}
-                    onHoverX={() => {}}
-                    showBrushIf={120}
-                  />
+                  <div>
+                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                      PRINCIPAL · TANQUES · {principalLocName}
+                    </div>
 
-                  <OpsPumpsProfile
-                    pumpsTs={playback.pumpTs}
-                    timelineItems={liveSync.pumpTimeline?.items ?? []}
-                    max={totalPumpsCap}
-                    syncId="row-principal-sync"
-                    title={`Principal · Bombas ON · ${principalLocName}`}
-                    tz="America/Argentina/Buenos_Aires"
-                    xDomain={playback.domain}
-                    xTicks={playback.ticks}
-                    hoverX={null}
-                    onHoverX={() => {}}
-                  />
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Tanques"
+                        allLabel="Todos los tanques"
+                        options={tankOptions}
+                        selectedIds={selectedTankIds}
+                        setSelectedIds={setSelectedTankIds}
+                        getId={getTankId}
+                        getName={getTankName}
+                      />
+                    </div>
+
+                    <TankLevelChart
+                      ts={playback.tankTs}
+                      syncId="row-principal-sync"
+                      title={`Principal · Nivel de tanques · ${principalLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                      showBrushIf={120}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                      PRINCIPAL · BOMBAS · {principalLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Bombas"
+                        allLabel="Todas las bombas"
+                        options={pumpOptions}
+                        selectedIds={selectedPumpIds}
+                        setSelectedIds={setSelectedPumpIds}
+                        getId={getPumpId}
+                        getName={getPumpName}
+                      />
+                    </div>
+
+                    <OpsPumpsProfile
+                      pumpsTs={playback.pumpTs}
+                      max={totalPumpsCap}
+                      syncId="row-principal-sync"
+                      title={`Principal · Bombas ON · ${principalLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Fila auditada 1 */}
               <div className="mb-4 rounded-2xl border border-blue-200 bg-white p-3">
-                <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-                  <div>
-                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
-                      AUDITADO 1 · TANQUES
-                    </div>
-
-                    <LocationSelect
-                      label="Ubicación auditada 1"
-                      value={auditLoc}
-                      onChange={(v) => setAuditLoc(v as number | "")}
-                      options={locOptionsAll}
-                    />
-                  </div>
-
-                  <div>
-                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
-                      AUDITADO 1 · BOMBAS
-                    </div>
-
-                    <LocationSelect
-                      label="Ubicación auditada 1"
-                      value={auditLoc}
-                      onChange={(v) => setAuditLoc(v as number | "")}
-                      options={locOptionsAll}
-                    />
-                  </div>
+                <div className="mb-3">
+                  <LocationSelect
+                    label="Ubicación auditada 1"
+                    value={auditLoc}
+                    onChange={(v) => setAuditLoc(v as number | "")}
+                    options={locOptionsAll}
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  <TankLevelChart
-                    ts={audit.tankTs ?? { timestamps: [], level_percent: [] }}
-                    syncId="row-audit-1-sync"
-                    title={`Auditado 1 · Nivel de tanques · ${auditLocName}`}
-                    tz="America/Argentina/Buenos_Aires"
-                    xDomain={playback.domain}
-                    xTicks={playback.ticks}
-                    hoverX={null}
-                    onHoverX={() => {}}
-                  />
+                  <div>
+                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                      AUDITADO 1 · TANQUES · {auditLocName}
+                    </div>
 
-                  <OpsPumpsProfile
-                    pumpsTs={audit.pumpTs ?? { timestamps: [], is_on: [] }}
-                    max={auditPumpsCap}
-                    syncId="row-audit-1-sync"
-                    title={`Auditado 1 · Bombas ON · ${auditLocName}`}
-                    tz="America/Argentina/Buenos_Aires"
-                    xDomain={playback.domain}
-                    xTicks={playback.ticks}
-                    hoverX={null}
-                    onHoverX={() => {}}
-                  />
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Tanques"
+                        allLabel="Todos los tanques"
+                        options={audit.tankOptions ?? []}
+                        selectedIds={audit.selectedTankIds}
+                        setSelectedIds={audit.setSelectedTankIds}
+                        getId={getTankId}
+                        getName={getTankName}
+                      />
+                    </div>
+
+                    <TankLevelChart
+                      ts={audit.tankTs ?? { timestamps: [], level_percent: [] }}
+                      syncId="row-audit-1-sync"
+                      title={`Auditado 1 · Nivel de tanques · ${auditLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                      AUDITADO 1 · BOMBAS · {auditLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Bombas"
+                        allLabel="Todas las bombas"
+                        options={audit.pumpOptions ?? []}
+                        selectedIds={audit.selectedPumpIds}
+                        setSelectedIds={audit.setSelectedPumpIds}
+                        getId={getPumpId}
+                        getName={getPumpName}
+                      />
+                    </div>
+
+                    <OpsPumpsProfile
+                      pumpsTs={audit.pumpTs ?? { timestamps: [], is_on: [] }}
+                      max={auditPumpsCap}
+                      syncId="row-audit-1-sync"
+                      title={`Auditado 1 · Bombas ON · ${auditLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Fila auditada 2 */}
               {audit2Enabled && (
                 <div className="rounded-2xl border border-indigo-200 bg-white p-3">
-                  <div className="mb-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
-                    <div>
-                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
-                        AUDITADO 2 · TANQUES
-                      </div>
-
-                      <LocationSelect
-                        label="Ubicación auditada 2"
-                        value={auditLoc2}
-                        onChange={(v) => setAuditLoc2(v as number | "")}
-                        options={locOptionsAll}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
-                        AUDITADO 2 · BOMBAS
-                      </div>
-
-                      <LocationSelect
-                        label="Ubicación auditada 2"
-                        value={auditLoc2}
-                        onChange={(v) => setAuditLoc2(v as number | "")}
-                        options={locOptionsAll}
-                      />
-                    </div>
+                  <div className="mb-3">
+                    <LocationSelect
+                      label="Ubicación auditada 2"
+                      value={auditLoc2}
+                      onChange={(v) => setAuditLoc2(v as number | "")}
+                      options={locOptionsAll}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                    <TankLevelChart
-                      ts={audit2.tankTs ?? { timestamps: [], level_percent: [] }}
-                      syncId="row-audit-2-sync"
-                      title={`Auditado 2 · Nivel de tanques · ${auditLocName2}`}
-                      tz="America/Argentina/Buenos_Aires"
-                      xDomain={playback.domain}
-                      xTicks={playback.ticks}
-                      hoverX={null}
-                      onHoverX={() => {}}
-                    />
+                    <div>
+                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
+                        AUDITADO 2 · TANQUES · {auditLocName2}
+                      </div>
 
-                    <OpsPumpsProfile
-                      pumpsTs={audit2.pumpTs ?? { timestamps: [], is_on: [] }}
-                      max={auditPumpsCap2}
-                      syncId="row-audit-2-sync"
-                      title={`Auditado 2 · Bombas ON · ${auditLocName2}`}
-                      tz="America/Argentina/Buenos_Aires"
-                      xDomain={playback.domain}
-                      xTicks={playback.ticks}
-                      hoverX={null}
-                      onHoverX={() => {}}
-                    />
+                      <div className="mb-2">
+                        <EntitySelector
+                          title="Tanques"
+                          allLabel="Todos los tanques"
+                          options={audit2.tankOptions ?? []}
+                          selectedIds={audit2.selectedTankIds}
+                          setSelectedIds={audit2.setSelectedTankIds}
+                          getId={getTankId}
+                          getName={getTankName}
+                        />
+                      </div>
+
+                      <TankLevelChart
+                        ts={
+                          audit2.tankTs ?? { timestamps: [], level_percent: [] }
+                        }
+                        syncId="row-audit-2-sync"
+                        title={`Auditado 2 · Nivel de tanques · ${auditLocName2}`}
+                        tz="America/Argentina/Buenos_Aires"
+                        xDomain={playback.domain}
+                        xTicks={playback.ticks}
+                        hoverX={null}
+                        onHoverX={() => {}}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
+                        AUDITADO 2 · BOMBAS · {auditLocName2}
+                      </div>
+
+                      <div className="mb-2">
+                        <EntitySelector
+                          title="Bombas"
+                          allLabel="Todas las bombas"
+                          options={audit2.pumpOptions ?? []}
+                          selectedIds={audit2.selectedPumpIds}
+                          setSelectedIds={audit2.setSelectedPumpIds}
+                          getId={getPumpId}
+                          getName={getPumpName}
+                        />
+                      </div>
+
+                      <OpsPumpsProfile
+                        pumpsTs={
+                          audit2.pumpTs ?? { timestamps: [], is_on: [] }
+                        }
+                        max={auditPumpsCap2}
+                        syncId="row-audit-2-sync"
+                        title={`Auditado 2 · Bombas ON · ${auditLocName2}`}
+                        tz="America/Argentina/Buenos_Aires"
+                        xDomain={playback.domain}
+                        xTicks={playback.ticks}
+                        hoverX={null}
+                        onHoverX={() => {}}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
             </section>
           )}
 
-          {/* Eventos + síntesis */}
-        {/* Eventos operativos */}
-<section>
-  <OperationEventFeed
-    events={combinedEvents}
-    loading={operationLoading}
-  />
-</section>
+          <section>
+            <OperationEventFeed
+              events={combinedEvents}
+              loading={operationLoading}
+            />
+          </section>
 
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <TankHealthTable items={tankHealthRows} />

@@ -1,16 +1,11 @@
 // src/hooks/useLiveOps.ts
 //
 // Hook PRO de Operación.
-// Consume endpoints nuevos:
-// - /kpi/tanques/operation/summary-24h
-// - /kpi/tanques/operation/level-1m
-// - /kpi/tanques/operation/events
-// - /kpi/bombas/operation/summary-24h
-// - /kpi/bombas/operation/on-1m
-// - /kpi/bombas/operation/timeline-1m
-// - /kpi/bombas/operation/events
+// Optimizado para que los gráficos aparezcan primero:
+// 1) Carga inmediata: level-1m + on-1m
+// 2) Segundo plano: summary-24h + eventos + timeline opcional
 //
-// Mantiene compatibilidad con el front viejo:
+// Mantiene compatibilidad con el front:
 // - tankTs.timestamps
 // - tankTs.level_percent
 // - pumpTs.timestamps
@@ -127,7 +122,7 @@ function pickAutoBucket(hours: number): NonNullable<Args["bucket"]> {
   if (hours >= 24 * 30) return "1d";
   if (hours > 48) return "1h";
   if (hours > 24) return "15min";
-  return "1min";
+  return "5min";
 }
 
 function toNumOrNull(v: any): number | null {
@@ -177,17 +172,18 @@ export function useLiveOps({
   periodHours = 24,
   bucket,
 
-  pollMs = 15_000,
-  pollMsHidden = 60_000,
+  pollMs = 60_000,
+  pollMsHidden = 120_000,
 
-  // Para el gráfico de bombas con nombres por minuto.
-  loadPumpTimeline = true,
+  // Optimización: por defecto no traemos timeline-1m porque era el request más pesado.
+  // Si en algún momento querés detalle de nombres por minuto, pasá loadPumpTimeline: true.
+  loadPumpTimeline = false,
 
   loadPumpEvents = true,
   loadTankEvents = true,
 
-  limitTimeline = 200000,
-  limitEvents = 500,
+  limitTimeline = 0,
+  limitEvents = 150,
 }: Args = {}): LiveOps {
   const [tankLevel, setTankLevel] =
     useState<TankOperationLevelResp | null>(null);
@@ -232,10 +228,10 @@ export function useLiveOps({
     let alive = true;
     let timer: number | undefined;
 
-    const seq = ++seqRef.current;
-
     const runLoad = async () => {
       if (loadingRef.current) return;
+
+      const seq = ++seqRef.current;
 
       loadingRef.current = true;
       setIsLoading(true);
@@ -276,22 +272,8 @@ export function useLiveOps({
           loadTankEvents,
         });
 
-        const [
-          tankSummaryRes,
-          tankLevelRes,
-          pumpSummaryRes,
-          pumpsOnRes,
-          tankEventsRes,
-          pumpTimelineRes,
-          pumpEventsRes,
-        ] = await Promise.all([
-          fetchOperationTankSummary24h({
-            companyId,
-            locationId: locId,
-            tankIds: tankIds && tankIds.length ? tankIds : undefined,
-            limit: 500,
-          }),
-
+        // 1) PRIMERO: datos mínimos para pintar gráficos rápido.
+        const [tankLevelRes, pumpsOnRes] = await Promise.all([
           fetchOperationTankLevel1m({
             ...tankScope,
             bucket: effBucket,
@@ -299,55 +281,28 @@ export function useLiveOps({
             limit: 300000,
           }),
 
-          fetchOperationPumpSummary24h({
-            companyId,
-            locationId: locId,
-            pumpIds: pumpIds && pumpIds.length ? pumpIds : undefined,
-            limit: 500,
-          }),
-
           fetchOperationPumpsOn1m({
             ...pumpScope,
           }),
-
-          loadTankEvents
-            ? fetchOperationTankEvents({
-                ...tankScope,
-                limit: limitEvents,
-              })
-            : Promise.resolve(null),
-
-          loadPumpTimeline
-            ? fetchOperationPumpTimeline1m({
-                ...pumpScope,
-                limit: limitTimeline,
-              })
-            : Promise.resolve(null),
-
-          loadPumpEvents
-            ? fetchOperationPumpEvents({
-                ...pumpScope,
-                limit: limitEvents,
-              })
-            : Promise.resolve(null),
         ]);
 
-        if (!alive || seq !== seqRef.current) return;
+        if (!alive || seq !== seqRef.current) {
+          loadingRef.current = false;
+          return;
+        }
 
-        setTanksSummary(tankSummaryRes);
         setTankLevel(tankLevelRes);
-
-        setPumpsSummary(pumpSummaryRes);
         setPumpsOn(pumpsOnRes);
-
-        setTankEvents(tankEventsRes);
-        setPumpTimeline(pumpTimelineRes);
-        setPumpEvents(pumpEventsRes);
 
         setLastOkAt(Date.now());
         setLastErr(undefined);
 
-        dlog("poll success", {
+        // Liberamos acá para que el front pueda renderizar gráficos
+        // sin esperar summary-24h ni eventos.
+        loadingRef.current = false;
+        setIsLoading(false);
+
+        dlog("charts loaded", {
           tankLevelPoints:
             tankLevelRes?.items?.length ??
             tankLevelRes?.timestamps?.length ??
@@ -356,14 +311,81 @@ export function useLiveOps({
             pumpsOnRes?.items?.length ??
             pumpsOnRes?.timestamps?.length ??
             0,
-          pumpTimelineRows: pumpTimelineRes?.items?.length ?? 0,
-          pumpEvents: pumpEventsRes?.items?.length ?? 0,
-          tankEvents: tankEventsRes?.items?.length ?? 0,
         });
-      } catch (err: any) {
-        console.error("[useLiveOps] fetch error:", err);
 
-        if (!alive || seq !== seqRef.current) return;
+        // 2) DESPUÉS: resumen, eventos y timeline opcional en segundo plano.
+        void (async () => {
+          try {
+            const [
+              tankSummaryRes,
+              pumpSummaryRes,
+              tankEventsRes,
+              pumpTimelineRes,
+              pumpEventsRes,
+            ] = await Promise.all([
+              fetchOperationTankSummary24h({
+                companyId,
+                locationId: locId,
+                tankIds: tankIds && tankIds.length ? tankIds : undefined,
+                limit: 500,
+              }),
+
+              fetchOperationPumpSummary24h({
+                companyId,
+                locationId: locId,
+                pumpIds: pumpIds && pumpIds.length ? pumpIds : undefined,
+                limit: 500,
+              }),
+
+              loadTankEvents
+                ? fetchOperationTankEvents({
+                    ...tankScope,
+                    limit: limitEvents,
+                  })
+                : Promise.resolve(null),
+
+              loadPumpTimeline
+                ? fetchOperationPumpTimeline1m({
+                    ...pumpScope,
+                    limit: limitTimeline,
+                  })
+                : Promise.resolve(null),
+
+              loadPumpEvents
+                ? fetchOperationPumpEvents({
+                    ...pumpScope,
+                    limit: limitEvents,
+                  })
+                : Promise.resolve(null),
+            ]);
+
+            if (!alive || seq !== seqRef.current) return;
+
+            setTanksSummary(tankSummaryRes);
+            setPumpsSummary(pumpSummaryRes);
+
+            setTankEvents(tankEventsRes);
+            setPumpTimeline(pumpTimelineRes);
+            setPumpEvents(pumpEventsRes);
+
+            dlog("background loaded", {
+              pumpTimelineRows: pumpTimelineRes?.items?.length ?? 0,
+              pumpEvents: pumpEventsRes?.items?.length ?? 0,
+              tankEvents: tankEventsRes?.items?.length ?? 0,
+            });
+          } catch (err: any) {
+            if (!alive || seq !== seqRef.current) return;
+
+            console.error("[useLiveOps] background fetch error:", err);
+          }
+        })();
+      } catch (err: any) {
+        console.error("[useLiveOps] chart fetch error:", err);
+
+        if (!alive || seq !== seqRef.current) {
+          loadingRef.current = false;
+          return;
+        }
 
         setLastErr(String(err?.message ?? err));
       } finally {
@@ -400,6 +422,7 @@ export function useLiveOps({
 
     return () => {
       alive = false;
+      loadingRef.current = false;
 
       document.removeEventListener("visibilitychange", onVis);
 
@@ -428,9 +451,9 @@ export function useLiveOps({
 
     if (Array.isArray(tankLevel.timestamps)) {
       return {
-        timestamps: tankLevel.timestamps.map(toMs).filter(
-          (v): v is number => v !== null
-        ),
+        timestamps: tankLevel.timestamps
+          .map(toMs)
+          .filter((v): v is number => v !== null),
         level_percent: tankLevel.level_avg ?? [],
         level_min: tankLevel.level_min ?? [],
         level_max: tankLevel.level_max ?? [],

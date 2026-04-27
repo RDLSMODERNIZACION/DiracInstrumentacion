@@ -120,7 +120,8 @@ export default function PlaybackControls({
 
       {!playEnabled && (
         <div className="mt-2 text-xs text-slate-400">
-          En vivo: se muestran las últimas 24 h.
+          En vivo: se muestran las últimas 24 h. El playback permite consultar
+          hasta 7 días hacia atrás.
         </div>
       )}
     </div>

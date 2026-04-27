@@ -59,8 +59,8 @@ function toDateInputAR(ms = Date.now()) {
 }
 
 function dayBoundsArgentina(dateStr: string): [number, number] {
-  // Argentina usa UTC-03. Esto fuerza el día local:
-  // 00:00 a 24:00 horario Argentina.
+  // Argentina actualmente usa UTC-03 todo el año.
+  // Usamos offset explícito para que el día quede 00:00 → 24:00 horario Argentina.
   const start = Date.parse(`${dateStr}T00:00:00-03:00`);
   const end = start + 24 * H;
 
@@ -73,7 +73,6 @@ function addDaysToDateInput(dateStr: string, days: number) {
 }
 
 function clampDateInput(dateStr: string, minDate: string, maxDate: string) {
-  if (!dateStr) return maxDate;
   if (dateStr < minDate) return minDate;
   if (dateStr > maxDate) return maxDate;
   return dateStr;
@@ -98,14 +97,14 @@ export function usePlayback({
 }) {
   const todayAR = useMemo(() => toDateInputAR(Date.now()), []);
 
-  // IMPORTANTE:
-  // La base guarda solamente los últimos 7 días.
-  // El selector de fecha queda limitado entre hoy y 7 días hacia atrás.
-  const minDate = useMemo(() => addDaysToDateInput(todayAR, -7), [todayAR]);
+  // Dejamos 30 días para atrás para que sea más práctico.
+  // Si querés más, cambiá este 30 por 60 o 90.
+  const minDate = useMemo(() => addDaysToDateInput(todayAR, -30), [todayAR]);
   const maxDate = todayAR;
 
   const [playEnabled, setPlayEnabled] = useState(false);
-  const [playDateRaw, setPlayDateRaw] = useState(todayAR);
+  const [playing, setPlaying] = useState(false);
+  const [playDate, setPlayDateRaw] = useState(todayAR);
   const [dateDebounced, setDateDebounced] = useState(todayAR);
 
   const [playTankTs, setPlayTankTs] = useState<TsTank>(null);
@@ -114,12 +113,8 @@ export function usePlayback({
 
   const abortRef = useRef<AbortController | null>(null);
 
-  const playDate = useMemo(
-    () => clampDateInput(playDateRaw, minDate, maxDate),
-    [playDateRaw, minDate, maxDate]
-  );
-
   const setPlayDate = (v: string) => {
+    setPlaying(false);
     setPlayDateRaw(clampDateInput(v, minDate, maxDate));
   };
 
@@ -155,7 +150,6 @@ export function usePlayback({
   const domain = (playEnabled ? dayDomain : xDomainLive) as [number, number];
 
   const ticks = useMemo(() => buildHourTicks(domain), [domain[0], domain[1]]);
-
   const startLabel = useMemo(() => fmtDayTime(domain[0], TZ), [domain[0]]);
   const endLabel = useMemo(() => fmtDayTime(domain[1], TZ), [domain[1]]);
 
@@ -174,6 +168,7 @@ export function usePlayback({
   useEffect(() => {
     if (tab !== "operacion") {
       setPlayEnabled(false);
+      setPlaying(false);
     }
   }, [tab]);
 
@@ -200,8 +195,7 @@ export function usePlayback({
       return;
     }
 
-    const safeDate = clampDateInput(dateDebounced, minDate, maxDate);
-    const [fromMs, toMs] = dayBoundsArgentina(safeDate);
+    const [fromMs, toMs] = dayBoundsArgentina(dateDebounced);
 
     const fromISO = floorToMinuteISO(new Date(fromMs));
     const toISO = floorToMinuteISO(new Date(toMs));
@@ -245,18 +239,18 @@ export function usePlayback({
         if (ac.signal.aborted) return;
 
         setPlayPumpTs({
-          timestamps: pumps?.timestamps ?? [],
-          is_on: pumps?.is_on ?? [],
-          pumps_off: pumps?.pumps_off ?? [],
-          pumps_online: pumps?.pumps_online ?? [],
-          pumps_offline: pumps?.pumps_offline ?? [],
+          timestamps: pumps.timestamps ?? [],
+          is_on: pumps.is_on ?? [],
+          pumps_off: pumps.pumps_off ?? [],
+          pumps_online: pumps.pumps_online ?? [],
+          pumps_offline: pumps.pumps_offline ?? [],
         });
 
         setPlayTankTs({
-          timestamps: tanks?.timestamps ?? [],
-          level_percent: tanks?.level_percent ?? tanks?.level_avg ?? [],
-          level_min: tanks?.level_min ?? [],
-          level_max: tanks?.level_max ?? [],
+          timestamps: tanks.timestamps ?? [],
+          level_percent: tanks.level_percent ?? tanks.level_avg ?? [],
+          level_min: tanks.level_min ?? [],
+          level_max: tanks.level_max ?? [],
         });
       } catch (e: any) {
         if (e?.name === "AbortError") return;
@@ -279,19 +273,37 @@ export function usePlayback({
     playEnabled,
     locId,
     dateDebounced,
-    minDate,
-    maxDate,
     pumpIdsKey,
     tankIdsKey,
     selectedPumpIds,
     selectedTankIds,
   ]);
 
+  // Play simple: avanza un día cada 1.5 s hasta hoy.
+  useEffect(() => {
+    if (!playEnabled || !playing) return;
+
+    const id = window.setInterval(() => {
+      setPlayDateRaw((prev) => {
+        const next = clampDateInput(addDaysToDateInput(prev, 1), minDate, maxDate);
+
+        if (next >= maxDate) {
+          setPlaying(false);
+        }
+
+        return next;
+      });
+    }, 1500);
+
+    return () => window.clearInterval(id);
+  }, [playEnabled, playing, minDate, maxDate]);
+
   useEffect(() => {
     if (!playEnabled) {
       abortRef.current?.abort();
       abortRef.current = null;
 
+      setPlaying(false);
       setPlayPumpTs(null);
       setPlayTankTs(null);
       setLoadingPlay(false);
@@ -312,11 +324,13 @@ export function usePlayback({
     playEnabled,
     setPlayEnabled,
 
+    playing,
+    setPlaying,
+
     playDate,
     setPlayDate,
     minDate,
     maxDate,
-
     prevDay,
     nextDay,
     goToday,

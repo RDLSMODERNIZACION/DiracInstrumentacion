@@ -701,13 +701,7 @@ export default function OpsPumpsProfile({
         </div>
       </div>
 
-      {!hasTimelineDetail && (
-        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          El gráfico tiene el conteo de bombas, pero todavía no llegó el detalle
-          por bomba. Revisá que `loadPumpTimeline: true` esté activado en
-          `useLiveOps` y que el backend responda el endpoint de timeline.
-        </div>
-      )}
+    
 
       <div className="h-72">
         {!hasData ? (
