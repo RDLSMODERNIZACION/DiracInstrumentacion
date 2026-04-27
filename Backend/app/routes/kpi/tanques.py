@@ -27,13 +27,14 @@ router = APIRouter(prefix="/kpi", tags=["kpi-tanques"])
 
 TANKS_TABLE = (os.getenv("TANKS_TABLE") or "public.tanks").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
+TANK_INGEST_TABLE = (os.getenv("TANK_INGEST_TABLE") or "public.tank_ingest").strip()
 
 # Vistas existentes
 TANKS_WITH_CONFIG_VIEW = (
     os.getenv("TANKS_WITH_CONFIG_VIEW") or "kpi.v_tanks_with_config"
 ).strip()
 
-# Nuevas vistas operativas
+# Vistas operativas
 OP_TANK_LEVEL_1M = (
     os.getenv("OP_TANK_LEVEL_1M") or "kpi.v_operation_tank_level_1m"
 ).strip()
@@ -398,175 +399,321 @@ def operation_tanks_summary_24h(
     only_problems: bool = Query(False),
     limit: int = Query(200, ge=1, le=1000),
 ):
+    """
+    Resumen operativo de tanques últimas 24h.
+
+    Optimizado:
+      - No usa kpi.v_operation_tank_summary_24h.
+      - Calcula directo desde public.tank_ingest.
+      - Usa kpi.v_tanks_with_config solo para umbrales/config/online.
+    """
     ids = _parse_ids(tank_ids)
 
+    dt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    df = dt - timedelta(hours=24)
+    online_from = dt - timedelta(minutes=5)
+
     sql_items = f"""
-        select
-            s.tank_id,
-            s.tank_name,
-            s.location_id,
-            s.location_name,
-
-            s.current_level,
-            s.last_level_at,
-
-            s.min_24h,
-            s.min_24h_at,
-
-            s.max_24h,
-            s.max_24h_at,
-
-            s.avg_24h,
-            s.samples_24h,
-
-            cfg.low_pct,
-            cfg.low_low_pct,
-            cfg.high_pct,
-            cfg.high_high_pct,
-            cfg.age_sec,
-            cfg.online,
-            cfg.alarma,
-
-            case
-                when cfg.online = false then 'sin comunicación'
-                when cfg.alarma is not null and cfg.alarma <> 'normal' then cfg.alarma
-                when s.min_24h is not null and cfg.low_low_pct is not null and s.min_24h <= cfg.low_low_pct then 'mínimo crítico'
-                when s.min_24h is not null and cfg.low_pct is not null and s.min_24h <= cfg.low_pct then 'mínimo bajo'
-                when s.max_24h is not null and cfg.high_high_pct is not null and s.max_24h >= cfg.high_high_pct then 'máximo crítico'
-                when s.max_24h is not null and cfg.high_pct is not null and s.max_24h >= cfg.high_pct then 'máximo alto'
-                else 'normal'
-            end as estado_operativo,
-
-            case
-                when cfg.online = false then 'critical'
-                when cfg.alarma is not null and cfg.alarma <> 'normal' then 'critical'
-                when s.min_24h is not null and cfg.low_low_pct is not null and s.min_24h <= cfg.low_low_pct then 'critical'
-                when s.max_24h is not null and cfg.high_high_pct is not null and s.max_24h >= cfg.high_high_pct then 'critical'
-                when s.min_24h is not null and cfg.low_pct is not null and s.min_24h <= cfg.low_pct then 'warning'
-                when s.max_24h is not null and cfg.high_pct is not null and s.max_24h >= cfg.high_pct then 'warning'
-                else 'normal'
-            end as severity
-
-        from {OP_TANK_SUMMARY_24H} s
-        left join {TANKS_WITH_CONFIG_VIEW} cfg
-          on cfg.tank_id = s.tank_id
-        left join {LOCATIONS_TABLE} l
-          on l.id = s.location_id
-
-        where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-          and (%(location_id)s::bigint is null or s.location_id = %(location_id)s::bigint)
-          and (%(tank_ids)s::int[] is null or s.tank_id = any(%(tank_ids)s::int[]))
-          and (
-                %(only_problems)s::boolean = false
-             or cfg.online = false
-             or (cfg.alarma is not null and cfg.alarma <> 'normal')
-             or (s.min_24h is not null and cfg.low_low_pct is not null and s.min_24h <= cfg.low_low_pct)
-             or (s.min_24h is not null and cfg.low_pct is not null and s.min_24h <= cfg.low_pct)
-             or (s.max_24h is not null and cfg.high_high_pct is not null and s.max_24h >= cfg.high_high_pct)
-             or (s.max_24h is not null and cfg.high_pct is not null and s.max_24h >= cfg.high_pct)
-          )
-
-        order by
-            case
-                when cfg.online = false then 1
-                when cfg.alarma is not null and cfg.alarma <> 'normal' then 2
-                when s.min_24h is not null and cfg.low_low_pct is not null and s.min_24h <= cfg.low_low_pct then 3
-                when s.max_24h is not null and cfg.high_high_pct is not null and s.max_24h >= cfg.high_high_pct then 4
-                when s.min_24h is not null and cfg.low_pct is not null and s.min_24h <= cfg.low_pct then 5
-                when s.max_24h is not null and cfg.high_pct is not null and s.max_24h >= cfg.high_pct then 6
-                else 9
-            end asc,
-            s.location_name asc,
-            s.tank_name asc
-
-        limit %(limit)s
-    """
-
-    sql_summary = f"""
-        with rows as (
+        with scope as (
             select
-                s.*,
+                t.id as tank_id,
+                t.name as tank_name,
+                t.location_id,
+                l.name as location_name
+            from {TANKS_TABLE} t
+            left join {LOCATIONS_TABLE} l
+              on l.id = t.location_id
+            where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
+              and (%(location_id)s::bigint is null or t.location_id = %(location_id)s::bigint)
+              and (%(tank_ids)s::int[] is null or t.id = any(%(tank_ids)s::int[]))
+        ),
+
+        levels as (
+            select
+                ti.tank_id,
+                ti.created_at,
+                ti.level_pct::numeric as level_pct
+            from {TANK_INGEST_TABLE} ti
+            join scope s
+              on s.tank_id = ti.tank_id
+            where ti.created_at >= %(df)s
+              and ti.created_at < %(dt)s
+        ),
+
+        agg as (
+            select
+                tank_id,
+
+                min(level_pct) as min_24h,
+                (array_agg(created_at order by level_pct asc, created_at asc))[1] as min_24h_at,
+
+                max(level_pct) as max_24h,
+                (array_agg(created_at order by level_pct desc, created_at asc))[1] as max_24h_at,
+
+                round(avg(level_pct), 2) as avg_24h,
+                count(*)::int as samples_24h
+            from levels
+            group by tank_id
+        ),
+
+        latest as (
+            select distinct on (ti.tank_id)
+                ti.tank_id,
+                ti.level_pct::numeric as current_level,
+                ti.created_at as last_level_at
+            from {TANK_INGEST_TABLE} ti
+            join scope s
+              on s.tank_id = ti.tank_id
+            where ti.created_at < %(dt)s
+            order by ti.tank_id, ti.created_at desc, ti.id desc
+        ),
+
+        cfg as (
+            select
+                c.tank_id,
+                c.low_pct,
+                c.low_low_pct,
+                c.high_pct,
+                c.high_high_pct,
+                c.age_sec,
+                c.online,
+                c.alarma
+            from {TANKS_WITH_CONFIG_VIEW} c
+            join scope s
+              on s.tank_id = c.tank_id
+        ),
+
+        enriched as (
+            select
+                s.tank_id,
+                s.tank_name,
+                s.location_id,
+                s.location_name,
+
+                latest.current_level,
+                latest.last_level_at,
+
+                agg.min_24h,
+                agg.min_24h_at,
+
+                agg.max_24h,
+                agg.max_24h_at,
+
+                agg.avg_24h,
+                coalesce(agg.samples_24h, 0)::int as samples_24h,
+
                 cfg.low_pct,
                 cfg.low_low_pct,
                 cfg.high_pct,
                 cfg.high_high_pct,
-                cfg.online,
-                cfg.alarma
-            from {OP_TANK_SUMMARY_24H} s
-            left join {TANKS_WITH_CONFIG_VIEW} cfg
+
+                case
+                    when cfg.age_sec is not null then cfg.age_sec
+                    when latest.last_level_at is not null then
+                        extract(epoch from (%(dt)s::timestamptz - latest.last_level_at))::int
+                    else null
+                end as age_sec,
+
+                coalesce(
+                    cfg.online,
+                    latest.last_level_at is not null and latest.last_level_at >= %(online_from)s,
+                    false
+                ) as online,
+
+                coalesce(cfg.alarma, 'normal') as alarma
+
+            from scope s
+            left join latest
+              on latest.tank_id = s.tank_id
+            left join agg
+              on agg.tank_id = s.tank_id
+            left join cfg
               on cfg.tank_id = s.tank_id
-            left join {LOCATIONS_TABLE} l
-              on l.id = s.location_id
-            where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-              and (%(location_id)s::bigint is null or s.location_id = %(location_id)s::bigint)
-              and (%(tank_ids)s::int[] is null or s.tank_id = any(%(tank_ids)s::int[]))
-        ),
-        active_events as (
-            select
-                count(*)::int as active_events
-            from {TANK_CRITICAL_EVENTS} e
-            left join {LOCATIONS_TABLE} l
-              on l.id = e.location_id
-            where e.status = 'active'
-              and (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-              and (%(location_id)s::bigint is null or e.location_id = %(location_id)s::bigint)
-              and (%(tank_ids)s::int[] is null or e.tank_id = any(%(tank_ids)s::int[]))
         )
+
         select
-            count(*)::int as tanks_total,
-            count(*) filter (where online)::int as tanks_online,
-            count(*) filter (where not online)::int as tanks_offline,
+            e.*,
 
-            count(*) filter (
-                where alarma is not null and alarma <> 'normal'
-            )::int as tanks_in_alarm,
+            case
+                when e.online = false then 'sin comunicación'
+                when e.alarma is not null and e.alarma <> 'normal' then e.alarma
+                when e.min_24h is not null and e.low_low_pct is not null and e.min_24h <= e.low_low_pct then 'mínimo crítico'
+                when e.min_24h is not null and e.low_pct is not null and e.min_24h <= e.low_pct then 'mínimo bajo'
+                when e.max_24h is not null and e.high_high_pct is not null and e.max_24h >= e.high_high_pct then 'máximo crítico'
+                when e.max_24h is not null and e.high_pct is not null and e.max_24h >= e.high_pct then 'máximo alto'
+                else 'normal'
+            end as estado_operativo,
 
-            count(*) filter (
-                where min_24h is not null and low_low_pct is not null and min_24h <= low_low_pct
-            )::int as low_critical_count,
+            case
+                when e.online = false then 'critical'
+                when e.alarma is not null and e.alarma <> 'normal' then 'critical'
+                when e.min_24h is not null and e.low_low_pct is not null and e.min_24h <= e.low_low_pct then 'critical'
+                when e.max_24h is not null and e.high_high_pct is not null and e.max_24h >= e.high_high_pct then 'critical'
+                when e.min_24h is not null and e.low_pct is not null and e.min_24h <= e.low_pct then 'warning'
+                when e.max_24h is not null and e.high_pct is not null and e.max_24h >= e.high_pct then 'warning'
+                else 'normal'
+            end as severity
 
-            count(*) filter (
-                where min_24h is not null and low_pct is not null and min_24h <= low_pct
-            )::int as low_count,
+        from enriched e
+        order by
+            case
+                when e.online = false then 1
+                when e.alarma is not null and e.alarma <> 'normal' then 2
+                when e.min_24h is not null and e.low_low_pct is not null and e.min_24h <= e.low_low_pct then 3
+                when e.max_24h is not null and e.high_high_pct is not null and e.max_24h >= e.high_high_pct then 4
+                when e.min_24h is not null and e.low_pct is not null and e.min_24h <= e.low_pct then 5
+                when e.max_24h is not null and e.high_pct is not null and e.max_24h >= e.high_pct then 6
+                else 9
+            end asc,
+            e.location_name asc nulls last,
+            e.tank_name asc nulls last
+    """
 
-            count(*) filter (
-                where max_24h is not null and high_high_pct is not null and max_24h >= high_high_pct
-            )::int as high_critical_count,
-
-            count(*) filter (
-                where max_24h is not null and high_pct is not null and max_24h >= high_pct
-            )::int as high_count,
-
-            min(min_24h) as min_level_24h,
-            max(max_24h) as max_level_24h,
-            round(avg(avg_24h), 2) as avg_level_24h,
-
-            coalesce((select active_events from active_events), 0)::int as active_events
-
-        from rows
+    sql_active_events = f"""
+        select
+            count(*)::int as active_events
+        from {TANK_CRITICAL_EVENTS} e
+        left join {LOCATIONS_TABLE} l
+          on l.id = e.location_id
+        where e.status = 'active'
+          and (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
+          and (%(location_id)s::bigint is null or e.location_id = %(location_id)s::bigint)
+          and (%(tank_ids)s::int[] is null or e.tank_id = any(%(tank_ids)s::int[]))
     """
 
     params = {
         "company_id": company_id,
         "location_id": location_id,
         "tank_ids": ids,
-        "only_problems": only_problems,
-        "limit": limit,
+        "df": df,
+        "dt": dt,
+        "online_from": online_from,
     }
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql_summary, params)
-        summary = _clean_row(dict(cur.fetchone() or {}))
-
         cur.execute(sql_items, params)
-        items = _clean_rows(cur.fetchall())
+        rows_all = _clean_rows(cur.fetchall())
+
+        cur.execute(sql_active_events, params)
+        active_events_row = cur.fetchone() or {}
+        active_events = int(active_events_row.get("active_events") or 0)
+
+    def _num(v: Any, default: float = 0.0) -> float:
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except Exception:
+            return default
+
+    def _is_problem(r: dict) -> bool:
+        return (
+            r.get("estado_operativo") != "normal"
+            or bool(r.get("online")) is False
+            or (r.get("alarma") is not None and r.get("alarma") != "normal")
+        )
+
+    def _score(r: dict) -> int:
+        severity = str(r.get("severity") or "").lower()
+        estado = str(r.get("estado_operativo") or "").lower()
+
+        if not r.get("online"):
+            return 0
+        if severity == "critical":
+            return 1
+        if "crítico" in estado or "critico" in estado:
+            return 2
+        if severity == "warning":
+            return 3
+        if estado != "normal":
+            return 4
+        return 9
+
+    rows_items = rows_all
+
+    if only_problems:
+        rows_items = [r for r in rows_items if _is_problem(r)]
+
+    rows_items = sorted(
+        rows_items,
+        key=lambda r: (
+            _score(r),
+            str(r.get("location_name") or ""),
+            str(r.get("tank_name") or ""),
+        ),
+    )[:limit]
+
+    online_rows = [r for r in rows_all if bool(r.get("online"))]
+    offline_rows = [r for r in rows_all if not bool(r.get("online"))]
+
+    min_values = [r.get("min_24h") for r in rows_all if r.get("min_24h") is not None]
+    max_values = [r.get("max_24h") for r in rows_all if r.get("max_24h") is not None]
+    avg_values = [r.get("avg_24h") for r in rows_all if r.get("avg_24h") is not None]
+
+    summary = {
+        "tanks_total": len(rows_all),
+        "tanks_online": len(online_rows),
+        "tanks_offline": len(offline_rows),
+
+        "tanks_in_alarm": sum(
+            1
+            for r in rows_all
+            if r.get("alarma") is not None and r.get("alarma") != "normal"
+        ),
+
+        "low_critical_count": sum(
+            1
+            for r in rows_all
+            if r.get("min_24h") is not None
+            and r.get("low_low_pct") is not None
+            and _num(r.get("min_24h")) <= _num(r.get("low_low_pct"))
+        ),
+
+        "low_count": sum(
+            1
+            for r in rows_all
+            if r.get("min_24h") is not None
+            and r.get("low_pct") is not None
+            and _num(r.get("min_24h")) <= _num(r.get("low_pct"))
+        ),
+
+        "high_critical_count": sum(
+            1
+            for r in rows_all
+            if r.get("max_24h") is not None
+            and r.get("high_high_pct") is not None
+            and _num(r.get("max_24h")) >= _num(r.get("high_high_pct"))
+        ),
+
+        "high_count": sum(
+            1
+            for r in rows_all
+            if r.get("max_24h") is not None
+            and r.get("high_pct") is not None
+            and _num(r.get("max_24h")) >= _num(r.get("high_pct"))
+        ),
+
+        "min_level_24h": min([_num(v) for v in min_values]) if min_values else None,
+        "max_level_24h": max([_num(v) for v in max_values]) if max_values else None,
+        "avg_level_24h": (
+            round(sum(_num(v) for v in avg_values) / len(avg_values), 2)
+            if avg_values
+            else None
+        ),
+
+        "active_events": active_events,
+    }
 
     return {
         "ok": True,
-        "window": {"last_hours": 24},
+        "window": {
+            "from": df.isoformat(),
+            "to": dt.isoformat(),
+            "last_hours": 24,
+        },
         "summary": summary,
-        "count": len(items),
-        "items": items,
+        "count": len(rows_items),
+        "items": rows_items,
     }
 
 
