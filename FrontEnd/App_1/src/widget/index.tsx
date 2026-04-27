@@ -682,6 +682,8 @@ export default function Widget() {
 
   const pollMs = tab === "operacion" ? 60_000 : 10 * 60_000;
 
+  const shouldLoadPumpTimeline = tab === "operacion" && locId != null;
+
   const liveSync = useLiveOps({
     locationId: locId,
     periodHours: 24,
@@ -690,14 +692,19 @@ export default function Widget() {
     pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
     tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
 
-    // Optimización: evita pedir timeline-1m, que era el request más pesado.
-    loadPumpTimeline: false,
+    // Carga nombres de bombas solamente cuando hay una ubicación seleccionada.
+    // En "Todas" queda apagado para no volver lento el dashboard.
+    loadPumpTimeline: shouldLoadPumpTimeline,
 
     loadPumpEvents: true,
     loadTankEvents: true,
-    limitTimeline: 0,
+    limitTimeline: shouldLoadPumpTimeline ? 50000 : 0,
     limitEvents: 150,
   });
+
+  const pumpTimelineItems = shouldLoadPumpTimeline
+    ? liveSync.pumpTimeline?.items ?? []
+    : [];
 
   const playback = usePlayback({
     locId,
@@ -954,6 +961,18 @@ export default function Widget() {
               bucket {liveSync.meta?.bucket ?? "5min"}
             </MiniBadge>
 
+            {locId != null && (
+              <MiniBadge
+                className={
+                  shouldLoadPumpTimeline
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-100 text-slate-600"
+                }
+              >
+                detalle bombas activo
+              </MiniBadge>
+            )}
+
             {liveSync.meta?.lastOkAt && (
               <span>actualizado {fmtShortTime(liveSync.meta.lastOkAt)}</span>
             )}
@@ -1009,6 +1028,7 @@ export default function Widget() {
 
             <OpsPumpsProfile
               pumpsTs={playback.pumpTs}
+              timelineItems={pumpTimelineItems}
               max={totalPumpsCap}
               syncId="op-sync"
               title={`Principal · Bombas ON · ${principalLocName} · 24h`}
@@ -1160,6 +1180,7 @@ export default function Widget() {
 
                     <OpsPumpsProfile
                       pumpsTs={playback.pumpTs}
+                      timelineItems={pumpTimelineItems}
                       max={totalPumpsCap}
                       syncId="row-principal-sync"
                       title={`Principal · Bombas ON · ${principalLocName}`}
