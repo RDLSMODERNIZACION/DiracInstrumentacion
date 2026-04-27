@@ -17,13 +17,10 @@ LOCAL_TZ = (os.getenv("LOCAL_TZ") or "America/Argentina/Buenos_Aires").strip()
 PUMPS_TABLE = (os.getenv("PUMPS_TABLE") or "public.pumps").strip()
 LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 
-# Fuente para detectar conectividad.
 HB_SOURCE = (os.getenv("PUMP_HB_SOURCE") or "kpi.v_pump_hb_clean").strip()
 
-# Fuente agregada liviana por minuto.
 PUMP_STATE_1M = (os.getenv("PUMP_STATE_1M") or "kpi.mv_pump_state_1m").strip()
 
-# Vistas operativas enriquecidas.
 OP_PUMP_STATE_1M_FULL = (
     os.getenv("OP_PUMP_STATE_1M_FULL") or "kpi.v_operation_pump_state_1m_full"
 ).strip()
@@ -38,7 +35,6 @@ OP_PUMP_EVENTS = (
 
 PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
 
-# Para operación conviene 5min por defecto.
 DEFAULT_BUCKET = (os.getenv("KPI_PUMPS_BUCKET") or "5min").strip()
 
 ADMIN_REFRESH_TOKEN = (os.getenv("ADMIN_REFRESH_TOKEN") or "").strip()
@@ -71,14 +67,6 @@ def _bounds_utc_minute(
     date_from: Optional[datetime],
     date_to: Optional[datetime],
 ) -> Tuple[datetime, datetime, datetime]:
-    """
-    Devuelve:
-      - df_floor: from UTC redondeado a minuto.
-      - dt_floor: to UTC redondeado a minuto.
-      - now_utc: ahora real UTC.
-
-    Por defecto: últimas 24 hs.
-    """
     now_utc = datetime.now(timezone.utc)
 
     if date_to is None:
@@ -135,10 +123,6 @@ def _validate_bucket(bucket: str) -> str:
 
 
 def _bucket_expr_sql(col: str, bucket: str) -> str:
-    """
-    Devuelve expresión SQL para agrupar timestamps.
-    Para 1d usa día local Argentina.
-    """
     bucket = _validate_bucket(bucket)
 
     if bucket == "1min":
@@ -189,11 +173,33 @@ def _duration_label_sql(expr: str) -> str:
     """
 
 
+def _num(v: Any, default: float = 0.0) -> float:
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def _int(v: Any, default: int = 0) -> int:
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def _avg(values: List[Any]) -> Optional[float]:
+    xs = [_num(v) for v in values if v is not None]
+    if not xs:
+        return None
+    return round(sum(xs) / len(xs), 2)
+
+
 @router.post("/refresh")
 def refresh_mv_pump_state_1m(x_token: str = Header(default="", alias="X-Token")):
-    """
-    Refresca la MV kpi.mv_pump_state_1m.
-    """
     if not ADMIN_REFRESH_TOKEN:
         raise HTTPException(status_code=500, detail="ADMIN_REFRESH_TOKEN no configurado")
 
@@ -260,16 +266,6 @@ def pumps_live(
     agg_mode: str = Query("avg", pattern="^(avg|max)$"),
     connected_only: bool = Query(True),
 ):
-    """
-    Gráfico legacy de Bombas ON.
-
-    Permite resolución:
-      - 1min
-      - 5min
-      - 15min
-      - 1h
-      - 1d
-    """
     df, dt, now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
     bucket = _validate_bucket(bucket)
@@ -434,10 +430,6 @@ def operation_pumps_timeline_1m(
     data_quality: Optional[str] = Query(None, pattern="^(ok|dato viejo|sin dato)$"),
     limit: int = Query(200000, ge=1, le=300000),
 ):
-    """
-    Timeline operativo minuto a minuto por bomba.
-    Este endpoint es pesado y debería pedirse solo bajo demanda.
-    """
     df, dt, _now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
@@ -519,15 +511,6 @@ def operation_pumps_on_1m(
     online_only: bool = Query(False),
     bucket: str = Query("5min", pattern="^(1min|5min|15min|1h|1d)$"),
 ):
-    """
-    Serie agregada para el gráfico operativo de bombas.
-
-    Optimizado:
-      - acepta bucket real, por defecto 5min.
-      - usa kpi.mv_pump_state_1m en vez de kpi.v_operation_pump_state_1m_full.
-      - no hace select v.*.
-      - devuelve el mismo formato que espera el frontend.
-    """
     df, dt, _now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
     bucket = _validate_bucket(bucket)
@@ -593,6 +576,7 @@ def operation_pumps_on_1m(
             end::int as pumps_total,
 
             b.pumps_online,
+
             case
                 when %(online_only)s::boolean then 0
                 else b.pumps_offline
@@ -668,110 +652,318 @@ def operation_pumps_summary_24h(
     only_problems: bool = Query(False),
     limit: int = Query(200, ge=1, le=1000),
 ):
-    """
-    Resumen operativo de bombas últimas 24h.
-
-    Incluye:
-      - estado actual
-      - online / data_quality
-      - último heartbeat
-      - age_sec
-      - arranques/paradas 24h
-      - tiempo encendida/apagada
-      - disponibilidad operativa
-      - disponibilidad de comunicación
-      - estado operativo
-    """
     ids = _parse_ids(pump_ids)
 
-    sql_items = f"""
-        select
-            s.*
-        from {OP_PUMP_SUMMARY_24H_FULL} s
-        left join {LOCATIONS_TABLE} l
-          on l.id = s.location_id
-        where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-          and (%(location_id)s::bigint is null or s.location_id = %(location_id)s::bigint)
-          and (%(pump_ids)s::int[] is null or s.pump_id = any(%(pump_ids)s::int[]))
-          and (
-                %(only_problems)s::boolean = false
-             or s.estado_operativo <> 'normal'
-             or s.online = false
-          )
-        order by
-            s.online asc,
-            case
-                when s.estado_operativo = 'sin comunicación' then 1
-                when s.estado_operativo = 'ciclado severo' then 2
-                when s.estado_operativo = 'baja disponibilidad' then 3
-                when s.estado_operativo = 'sin marcha' then 4
-                when s.estado_operativo = 'alta utilización' then 5
-                else 9
-            end asc,
-            s.starts_24h desc,
-            s.availability_pct_24h asc nulls last,
-            s.pump_name asc
-        limit %(limit)s
-    """
+    dt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    df = dt - timedelta(hours=24)
+    online_from = dt - timedelta(minutes=PUMP_CONNECTED_WINDOW_MIN)
+    expected_minutes = int((dt - df).total_seconds() // 60)
 
-    sql_summary = f"""
-        with rows as (
-            select s.*
-            from {OP_PUMP_SUMMARY_24H_FULL} s
+    sql = f"""
+        with scope as (
+            select
+                p.id as pump_id,
+                p.name as pump_name,
+                p.location_id,
+                l.name as location_name
+            from {PUMPS_TABLE} p
             left join {LOCATIONS_TABLE} l
-              on l.id = s.location_id
+              on l.id = p.location_id
             where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-              and (%(location_id)s::bigint is null or s.location_id = %(location_id)s::bigint)
-              and (%(pump_ids)s::int[] is null or s.pump_id = any(%(pump_ids)s::int[]))
+              and (%(location_id)s::bigint is null or p.location_id = %(location_id)s::bigint)
+              and (%(pump_ids)s::int[] is null or p.id = any(%(pump_ids)s::int[]))
+        ),
+
+        base as (
+            select
+                m.minute_ts,
+                m.pump_id,
+                m.is_on
+            from {PUMP_STATE_1M} m
+            join scope s
+              on s.pump_id = m.pump_id
+            where m.minute_ts >= %(df)s
+              and m.minute_ts < %(dt)s
+        ),
+
+        time_agg as (
+            select
+                pump_id,
+
+                count(*)::int as minutes_total,
+
+                count(*) filter (where is_on)::int * 60 as running_seconds_24h,
+                count(*) filter (where not is_on)::int * 60 as stopped_seconds_24h,
+
+                round(
+                    case
+                        when count(*) > 0 then
+                            count(*) filter (where is_on)::numeric / count(*)::numeric * 100
+                        else null
+                    end,
+                    2
+                ) as availability_pct_24h,
+
+                max(minute_ts) as current_state_at
+            from base
+            group by pump_id
+        ),
+
+        latest as (
+            select distinct on (pump_id)
+                pump_id,
+                is_on,
+                minute_ts as current_state_at
+            from base
+            order by pump_id, minute_ts desc
+        ),
+
+        hb_agg as (
+            select
+                ph.pump_id,
+                max(ph.created_at) as last_hb_at,
+                least(
+                    count(distinct date_trunc('minute', ph.created_at))::int,
+                    %(expected_minutes)s::int
+                ) as heartbeat_minutes
+            from public.pump_heartbeat ph
+            join scope s
+              on s.pump_id = ph.pump_id
+            where ph.created_at >= %(df)s
+              and ph.created_at < %(dt)s
+            group by ph.pump_id
+        ),
+
+        event_agg as (
+            select
+                e.pump_id,
+                count(*) filter (where e.state = 'run')::int as starts_24h,
+                count(*) filter (where e.state = 'stop')::int as stops_24h
+            from {OP_PUMP_EVENTS} e
+            join scope s
+              on s.pump_id = e.pump_id
+            where e.started_at >= %(df)s
+              and e.started_at < %(dt)s
+            group by e.pump_id
         )
+
         select
-            count(*)::int as pumps_total,
-            count(*) filter (where online)::int as pumps_online,
-            count(*) filter (where not online)::int as pumps_offline,
+            s.pump_id,
+            s.pump_name,
+            s.location_id,
+            s.location_name,
 
-            count(*) filter (where current_state = 'run')::int as pumps_running,
-            count(*) filter (where current_state = 'stop')::int as pumps_stopped,
+            case
+                when coalesce(l.is_on, false) then 'run'
+                else 'stop'
+            end as current_state,
 
-            coalesce(sum(starts_24h), 0)::int as starts_24h,
-            coalesce(sum(stops_24h), 0)::int as stops_24h,
+            case
+                when l.is_on is null then 'Sin dato'
+                when l.is_on then 'Encendida'
+                else 'Apagada'
+            end as current_state_label,
 
-            coalesce(sum(running_seconds_24h), 0)::int as running_seconds_24h,
-            coalesce(sum(stopped_seconds_24h), 0)::int as stopped_seconds_24h,
+            l.current_state_at,
 
-            round(avg(availability_pct_24h), 2) as avg_availability_pct_24h,
-            round(avg(online_pct_24h), 2) as avg_online_pct_24h,
+            case
+                when h.last_hb_at is not null
+                 and h.last_hb_at >= %(online_from)s
+                then true
+                else false
+            end as online,
 
-            count(*) filter (where estado_operativo <> 'normal')::int as pumps_with_alert,
-            count(*) filter (where estado_operativo = 'sin comunicación')::int as without_communication,
-            count(*) filter (where estado_operativo = 'ciclado severo')::int as cycling_severe,
-            count(*) filter (where estado_operativo = 'baja disponibilidad')::int as low_availability,
-            count(*) filter (where estado_operativo = 'sin marcha')::int as no_running,
-            count(*) filter (where estado_operativo = 'alta utilización')::int as high_utilization
+            case
+                when h.last_hb_at is null then 'sin dato'
+                when h.last_hb_at >= %(online_from)s then 'ok'
+                else 'dato viejo'
+            end as data_quality,
 
-        from rows
+            h.last_hb_at,
+
+            case
+                when h.last_hb_at is null then null
+                else extract(epoch from (%(dt)s::timestamptz - h.last_hb_at))::int
+            end as age_sec,
+
+            coalesce(ea.starts_24h, 0)::int as starts_24h,
+            coalesce(ea.stops_24h, 0)::int as stops_24h,
+
+            coalesce(ta.running_seconds_24h, 0)::int as running_seconds_24h,
+            coalesce(ta.stopped_seconds_24h, 0)::int as stopped_seconds_24h,
+
+            ta.availability_pct_24h,
+
+            round(
+                case
+                    when %(expected_minutes)s::int > 0 then
+                        coalesce(h.heartbeat_minutes, 0)::numeric
+                        / %(expected_minutes)s::numeric
+                        * 100
+                    else null
+                end,
+                2
+            ) as online_pct_24h,
+
+            coalesce(h.heartbeat_minutes, 0)::int as minutes_online,
+
+            greatest(
+                %(expected_minutes)s::int - coalesce(h.heartbeat_minutes, 0)::int,
+                0
+            )::int as minutes_offline,
+
+            case
+                when h.last_hb_at is null
+                  or h.last_hb_at < %(online_from)s
+                then 'sin comunicación'
+
+                when coalesce(ea.starts_24h, 0) >= 30
+                then 'ciclado severo'
+
+                when coalesce(ea.starts_24h, 0) >= 15
+                then 'muchos arranques'
+
+                when coalesce(ta.availability_pct_24h, 0::numeric) = 0::numeric
+                then 'sin marcha'
+
+                when ta.availability_pct_24h is not null
+                 and ta.availability_pct_24h < 20::numeric
+                then 'baja disponibilidad'
+
+                when ta.availability_pct_24h is not null
+                 and ta.availability_pct_24h > 90::numeric
+                then 'alta utilización'
+
+                else 'normal'
+            end as estado_operativo
+
+        from scope s
+        left join time_agg ta
+          on ta.pump_id = s.pump_id
+        left join latest l
+          on l.pump_id = s.pump_id
+        left join hb_agg h
+          on h.pump_id = s.pump_id
+        left join event_agg ea
+          on ea.pump_id = s.pump_id
+        order by
+            s.location_id asc nulls last,
+            s.pump_name asc
     """
 
     params = {
         "company_id": company_id,
         "location_id": location_id,
         "pump_ids": ids,
-        "only_problems": only_problems,
-        "limit": limit,
+        "df": df,
+        "dt": dt,
+        "online_from": online_from,
+        "expected_minutes": expected_minutes,
     }
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql_summary, params)
-        summary = _clean_row(dict(cur.fetchone() or {}))
+        cur.execute(sql, params)
+        rows_all = _clean_rows(cur.fetchall())
 
-        cur.execute(sql_items, params)
-        items = _clean_rows(cur.fetchall())
+    def _is_problem(r: Dict[str, Any]) -> bool:
+        return (
+            r.get("estado_operativo") != "normal"
+            or bool(r.get("online")) is False
+        )
+
+    def _score(r: Dict[str, Any]) -> int:
+        estado = str(r.get("estado_operativo") or "").lower()
+
+        if not r.get("online"):
+            return 0
+        if estado == "sin comunicación":
+            return 1
+        if estado == "ciclado severo":
+            return 2
+        if estado == "baja disponibilidad":
+            return 3
+        if estado == "sin marcha":
+            return 4
+        if estado == "alta utilización":
+            return 5
+        if estado != "normal":
+            return 6
+        return 9
+
+    rows_items = rows_all
+
+    if only_problems:
+        rows_items = [r for r in rows_items if _is_problem(r)]
+
+    rows_items = sorted(
+        rows_items,
+        key=lambda r: (
+            _score(r),
+            -_int(r.get("starts_24h")),
+            _num(r.get("availability_pct_24h"), 999),
+            str(r.get("pump_name") or ""),
+        ),
+    )[:limit]
+
+    summary = {
+        "pumps_total": len(rows_all),
+        "pumps_online": sum(1 for r in rows_all if bool(r.get("online"))),
+        "pumps_offline": sum(1 for r in rows_all if not bool(r.get("online"))),
+
+        "pumps_running": sum(
+            1 for r in rows_all if r.get("current_state") == "run"
+        ),
+        "pumps_stopped": sum(
+            1 for r in rows_all if r.get("current_state") == "stop"
+        ),
+
+        "starts_24h": sum(_int(r.get("starts_24h")) for r in rows_all),
+        "stops_24h": sum(_int(r.get("stops_24h")) for r in rows_all),
+
+        "running_seconds_24h": sum(
+            _int(r.get("running_seconds_24h")) for r in rows_all
+        ),
+        "stopped_seconds_24h": sum(
+            _int(r.get("stopped_seconds_24h")) for r in rows_all
+        ),
+
+        "avg_availability_pct_24h": _avg(
+            [r.get("availability_pct_24h") for r in rows_all]
+        ),
+        "avg_online_pct_24h": _avg(
+            [r.get("online_pct_24h") for r in rows_all]
+        ),
+
+        "pumps_with_alert": sum(
+            1 for r in rows_all if r.get("estado_operativo") != "normal"
+        ),
+        "without_communication": sum(
+            1 for r in rows_all if r.get("estado_operativo") == "sin comunicación"
+        ),
+        "cycling_severe": sum(
+            1 for r in rows_all if r.get("estado_operativo") == "ciclado severo"
+        ),
+        "low_availability": sum(
+            1 for r in rows_all if r.get("estado_operativo") == "baja disponibilidad"
+        ),
+        "no_running": sum(
+            1 for r in rows_all if r.get("estado_operativo") == "sin marcha"
+        ),
+        "high_utilization": sum(
+            1 for r in rows_all if r.get("estado_operativo") == "alta utilización"
+        ),
+    }
 
     return {
         "ok": True,
-        "window": {"last_hours": 24},
+        "window": {
+            "from": df.isoformat(),
+            "to": dt.isoformat(),
+            "last_hours": 24,
+        },
         "summary": summary,
-        "count": len(items),
-        "items": items,
+        "count": len(rows_items),
+        "items": rows_items,
     }
 
 
@@ -786,17 +978,6 @@ def operation_pump_events(
     only_open: bool = Query(False),
     limit: int = Query(500, ge=1, le=5000),
 ):
-    """
-    Eventos operativos de bombas.
-
-    Devuelve cambios de estado:
-      - Encendida
-      - Apagada
-      - inicio
-      - fin
-      - duración
-      - si está abierto
-    """
     df, dt, _now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
 
