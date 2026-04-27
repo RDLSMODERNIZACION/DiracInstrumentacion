@@ -20,10 +20,10 @@ LOCATIONS_TABLE = (os.getenv("LOCATIONS_TABLE") or "public.locations").strip()
 # Fuente para detectar conectividad.
 HB_SOURCE = (os.getenv("PUMP_HB_SOURCE") or "kpi.v_pump_hb_clean").strip()
 
-# Fuente agregada por minuto.
+# Fuente agregada liviana por minuto.
 PUMP_STATE_1M = (os.getenv("PUMP_STATE_1M") or "kpi.mv_pump_state_1m").strip()
 
-# Nuevas vistas operativas enriquecidas.
+# Vistas operativas enriquecidas.
 OP_PUMP_STATE_1M_FULL = (
     os.getenv("OP_PUMP_STATE_1M_FULL") or "kpi.v_operation_pump_state_1m_full"
 ).strip()
@@ -38,8 +38,8 @@ OP_PUMP_EVENTS = (
 
 PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
 
-# Ya no se fuerza 5min. Queda como default opcional si querés cambiarlo por env.
-DEFAULT_BUCKET = (os.getenv("KPI_PUMPS_BUCKET") or "1min").strip()
+# Para operación conviene 5min por defecto.
+DEFAULT_BUCKET = (os.getenv("KPI_PUMPS_BUCKET") or "5min").strip()
 
 ADMIN_REFRESH_TOKEN = (os.getenv("ADMIN_REFRESH_TOKEN") or "").strip()
 REFRESH_LOCK_KEY = 987654321
@@ -76,6 +76,7 @@ def _bounds_utc_minute(
       - df_floor: from UTC redondeado a minuto.
       - dt_floor: to UTC redondeado a minuto.
       - now_utc: ahora real UTC.
+
     Por defecto: últimas 24 hs.
     """
     now_utc = datetime.now(timezone.utc)
@@ -125,7 +126,7 @@ def _parse_ids(csv: Optional[str]) -> Optional[List[int]]:
 
 
 def _validate_bucket(bucket: str) -> str:
-    bucket = (bucket or DEFAULT_BUCKET or "1min").strip()
+    bucket = (bucket or DEFAULT_BUCKET or "5min").strip()
 
     if bucket not in ("1min", "5min", "15min", "1h", "1d"):
         raise HTTPException(status_code=400, detail="bucket inválido")
@@ -262,16 +263,12 @@ def pumps_live(
     """
     Gráfico legacy de Bombas ON.
 
-    Ahora permite resolución real:
+    Permite resolución:
       - 1min
       - 5min
       - 15min
       - 1h
       - 1d
-
-    Devuelve:
-      - timestamps
-      - is_on = cantidad promedio/máxima de bombas encendidas por bucket
     """
     df, dt, now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
@@ -383,7 +380,7 @@ def pumps_live(
               from {PUMP_STATE_1M} m
               join scope s on s.pump_id = m.pump_id
               where m.minute_ts >= (select df from bounds)
-                and m.minute_ts <= (select dt from bounds)
+                and m.minute_ts < (select dt from bounds)
             ),
             per_min_sum as (
               select
@@ -439,14 +436,7 @@ def operation_pumps_timeline_1m(
 ):
     """
     Timeline operativo minuto a minuto por bomba.
-
-    Devuelve una fila por bomba por minuto:
-      - is_on
-      - state / state_label
-      - online
-      - last_hb_at
-      - age_sec
-      - data_quality
+    Este endpoint es pesado y debería pedirse solo bajo demanda.
     """
     df, dt, _now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
@@ -478,7 +468,7 @@ def operation_pumps_timeline_1m(
           on l.id = v.location_id
 
         where v.minute_ts >= %(df)s
-          and v.minute_ts <= %(dt)s
+          and v.minute_ts < %(dt)s
 
           and (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
           and (%(location_id)s::bigint is null or v.location_id = %(location_id)s::bigint)
@@ -527,50 +517,101 @@ def operation_pumps_on_1m(
     date_from: Optional[datetime] = Query(None, alias="from"),
     date_to: Optional[datetime] = Query(None, alias="to"),
     online_only: bool = Query(False),
+    bucket: str = Query("5min", pattern="^(1min|5min|15min|1h|1d)$"),
 ):
     """
-    Serie agregada minuto a minuto para el gráfico:
-      - bombas encendidas
-      - bombas apagadas
-      - bombas online
-      - bombas offline
-      - porcentaje ON
-      - porcentaje online
+    Serie agregada para el gráfico operativo de bombas.
+
+    Optimizado:
+      - acepta bucket real, por defecto 5min.
+      - usa kpi.mv_pump_state_1m en vez de kpi.v_operation_pump_state_1m_full.
+      - no hace select v.*.
+      - devuelve el mismo formato que espera el frontend.
     """
     df, dt, _now_utc = _bounds_utc_minute(date_from, date_to)
     ids = _parse_ids(pump_ids)
+    bucket = _validate_bucket(bucket)
+
+    bucket_expr = _bucket_expr_sql("m.minute_ts", bucket)
 
     sql = f"""
-        with filtered as (
+        with scope as (
             select
-                v.*
-            from {OP_PUMP_STATE_1M_FULL} v
+                p.id as pump_id
+            from {PUMPS_TABLE} p
             left join {LOCATIONS_TABLE} l
-              on l.id = v.location_id
-            where v.minute_ts >= %(df)s
-              and v.minute_ts <= %(dt)s
+              on l.id = p.location_id
+            where (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
+              and (%(location_id)s::bigint is null or p.location_id = %(location_id)s::bigint)
+              and (%(pump_ids)s::int[] is null or p.id = any(%(pump_ids)s::int[]))
+        ),
+        scope_count as (
+            select count(*)::int as pumps_total
+            from scope
+        ),
+        filtered as (
+            select
+                {bucket_expr} as bucket_ts,
+                m.pump_id,
+                bool_or(m.is_on) as is_on
+            from {PUMP_STATE_1M} m
+            join scope s
+              on s.pump_id = m.pump_id
+            where m.minute_ts >= %(df)s
+              and m.minute_ts < %(dt)s
+            group by bucket_ts, m.pump_id
+        ),
+        bucketed as (
+            select
+                f.bucket_ts,
 
-              and (%(company_id)s::bigint is null or l.company_id = %(company_id)s::bigint)
-              and (%(location_id)s::bigint is null or v.location_id = %(location_id)s::bigint)
-              and (%(pump_ids)s::int[] is null or v.pump_id = any(%(pump_ids)s::int[]))
-              and (%(online_only)s::boolean = false or v.online = true)
+                (select pumps_total from scope_count)::int as pumps_total,
+
+                count(distinct f.pump_id)::int as pumps_online,
+
+                greatest(
+                    (select pumps_total from scope_count)::int
+                    - count(distinct f.pump_id)::int,
+                    0
+                )::int as pumps_offline,
+
+                count(distinct f.pump_id) filter (where f.is_on)::int as pumps_on,
+
+                count(distinct f.pump_id) filter (where not f.is_on)::int as pumps_off
+
+            from filtered f
+            group by f.bucket_ts
         )
         select
-            minute_ts,
-            extract(epoch from minute_ts)::bigint * 1000 as ts_ms,
-            (minute_ts at time zone '{LOCAL_TZ}') as local_minute_ts,
+            b.bucket_ts as minute_ts,
+            extract(epoch from b.bucket_ts)::bigint * 1000 as ts_ms,
+            (b.bucket_ts at time zone '{LOCAL_TZ}') as local_minute_ts,
 
-            count(*)::int as pumps_total,
-            count(*) filter (where online)::int as pumps_online,
-            count(*) filter (where not online)::int as pumps_offline,
+            case
+                when %(online_only)s::boolean then b.pumps_online
+                else b.pumps_total
+            end::int as pumps_total,
 
-            count(*) filter (where is_on)::int as pumps_on,
-            count(*) filter (where not is_on)::int as pumps_off,
+            b.pumps_online,
+            case
+                when %(online_only)s::boolean then 0
+                else b.pumps_offline
+            end::int as pumps_offline,
+
+            b.pumps_on,
+            b.pumps_off,
 
             round(
                 case
-                    when count(*) > 0 then
-                        count(*) filter (where is_on)::numeric / count(*)::numeric * 100
+                    when case
+                        when %(online_only)s::boolean then b.pumps_online
+                        else b.pumps_total
+                    end > 0 then
+                        b.pumps_on::numeric /
+                        case
+                            when %(online_only)s::boolean then b.pumps_online
+                            else b.pumps_total
+                        end::numeric * 100
                     else null
                 end,
                 2
@@ -578,16 +619,16 @@ def operation_pumps_on_1m(
 
             round(
                 case
-                    when count(*) > 0 then
-                        count(*) filter (where online)::numeric / count(*)::numeric * 100
+                    when b.pumps_total > 0 then
+                        b.pumps_online::numeric / b.pumps_total::numeric * 100
                     else null
                 end,
                 2
             ) as online_pct
 
-        from filtered
-        group by minute_ts
-        order by minute_ts asc
+        from bucketed b
+        where (%(online_only)s::boolean = false or b.pumps_online > 0)
+        order by b.bucket_ts asc
     """
 
     params = {
@@ -607,6 +648,7 @@ def operation_pumps_on_1m(
 
     return {
         "ok": True,
+        "bucket": bucket,
         "window": {"from": df.isoformat(), "to": dt.isoformat()},
         "count": len(items),
         "timestamps": [r["ts_ms"] for r in items],
