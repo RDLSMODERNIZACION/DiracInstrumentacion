@@ -1,7 +1,7 @@
 import React from "react";
 import { useMap } from "react-leaflet";
 import L from "leaflet";
-import { fetchPipesExtent } from "../services/mapasagua";
+import { fetchPipesExtent } from "../../services/mapasagua";
 
 export default function FitToPipesExtent({ enabled }: { enabled: boolean }) {
   const map = useMap();

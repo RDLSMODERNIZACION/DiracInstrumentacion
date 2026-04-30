@@ -1,7 +1,7 @@
 import React from "react";
 import type L from "leaflet";
 import { createPortal } from "react-dom";
-import { patchPipeGeometry, fetchPipeById } from "../services/mapasagua";
+import { patchPipeGeometry, fetchPipeById } from "../../services/mapasagua";
 
 type Props = {
   open: boolean;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { fetchPipeById, patchPipe } from "../services/mapasagua";
+import { fetchPipeById, patchPipe } from "../../services/mapasagua";
 
 type Props = {
   pipeId: string | null;

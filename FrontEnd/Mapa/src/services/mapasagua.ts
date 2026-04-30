@@ -217,6 +217,8 @@ export async function patchPipeGeometry(id: string, geometry: GeoJSONGeometry) {
 export async function createPipe(input: {
   geometry: GeoJSONGeometry;
   properties?: {
+    from_node?: string | null;
+    to_node?: string | null;
     diametro_mm?: number | null;
     material?: string | null;
     type?: string | null;
@@ -224,6 +226,7 @@ export async function createPipe(input: {
     flow_func?: string | null;
     props?: Record<string, any>;
     style?: Record<string, any>;
+    [key: string]: any;
   };
 }) {
   const url = `${API_BASE}/mapa/mapasagua/pipes`;
@@ -264,4 +267,55 @@ export async function updateNode(nodeId: string, patch: NodeUpdateInput): Promis
 export async function deleteNode(nodeId: string): Promise<{ ok: boolean; node_id: string }> {
   const url = `${API_BASE}/mapa/nodes/${encodeURIComponent(nodeId)}`;
   return fetchJSON(url, { method: "DELETE" });
+}
+
+/* =========================
+   CREAR PIPE ENTRE DOS NODOS
+   - usado por NodeConnectDrawer
+   - crea una línea simple entre nodo origen y nodo destino
+========================= */
+export async function createPipeBetweenNodes(input: {
+  from_node: string;
+  to_node: string;
+  from_lat: number;
+  from_lng: number;
+  to_lat: number;
+  to_lng: number;
+  properties?: {
+    diametro_mm?: number | null;
+    material?: string | null;
+    type?: string | null;
+    estado?: string | null;
+    flow_func?: string | null;
+    props?: Record<string, any>;
+    style?: Record<string, any>;
+    [key: string]: any;
+  };
+}) {
+  const geometry: GeoJSONGeometry = {
+    type: "LineString",
+    coordinates: [
+      [input.from_lng, input.from_lat],
+      [input.to_lng, input.to_lat],
+    ],
+  };
+
+  return createPipe({
+    geometry,
+    properties: {
+      from_node: input.from_node,
+      to_node: input.to_node,
+      type: input.properties?.type ?? "WATER",
+      estado: input.properties?.estado ?? "OK",
+      flow_func: input.properties?.flow_func ?? "DISTRIBUCION",
+      diametro_mm: input.properties?.diametro_mm ?? null,
+      material: input.properties?.material ?? null,
+      props: {
+        Layer: "Conexión manual nodo-nodo",
+        ...(input.properties?.props ?? {}),
+      },
+      style: input.properties?.style ?? {},
+      ...(input.properties ?? {}),
+    },
+  });
 }

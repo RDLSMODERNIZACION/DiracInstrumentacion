@@ -16,7 +16,6 @@ import {
   type Zone,
 } from "./data/demo/index";
 
-
 import { useToasts } from "./hooks/useToasts";
 import { useSimulatedAssets } from "./hooks/useSimulatedAssets";
 import { useInventory } from "./hooks/useInventory";
@@ -69,7 +68,6 @@ function valveImpactFromRouting(args: {
   });
 
   const hasPipesToOtherLocation = hasOtherLocationTarget || crossesLocation;
-
   const showImpact = hasBarrios || hasPipesToOtherLocation;
 
   return {
@@ -94,7 +92,9 @@ export default function App() {
 
   const [valveEnabled, setValveEnabled] = useState<Record<string, boolean>>(() => {
     const m: Record<string, boolean> = {};
-    for (const a of baseAssets) if (a.type === "VALVE") m[a.id] = true;
+    for (const a of baseAssets) {
+      if (a.type === "VALVE") m[a.id] = true;
+    }
     return m;
   });
 
@@ -110,15 +110,17 @@ export default function App() {
     [selectedAssetId, assetsById]
   );
 
-  const locationInventory = useInventory({ selectedZoneId, assets, assetsById });
+  const locationInventory = useInventory({
+    selectedZoneId,
+    assets,
+    assetsById,
+  });
 
   const shrinkOthers = mode === "ZONE" && !!selectedZoneId;
 
   const [focusPair] = useState<FocusPair>(null);
-
   const [activeValveId, setActiveValveId] = useState<string | null>(null);
 
-  // ✅ Vista/Filtro (Todos / Localidades / Cañerías / Barrios)
   const [viewMode, setViewMode] = useState<ViewMode>("ALL");
   const [viewSelectedId, setViewSelectedId] = useState<string | null>(null);
 
@@ -170,15 +172,23 @@ export default function App() {
     if (mode === "ZONE" && selectedZoneId) {
       for (const v of locationInventory.valves) {
         if (valveEnabled[v.id] === false) continue;
+
         const rt = valveRouting[v.id];
-        for (const t of rt?.targets ?? []) if (t.kind === "BARRIO") ids.add(t.barrioId);
+        for (const t of rt?.targets ?? []) {
+          if (t.kind === "BARRIO") ids.add(t.barrioId);
+        }
       }
+
       return ids;
     }
 
     if (mode === "ASSET" && selectedAsset?.type === "VALVE") {
       const rt = valveRouting[selectedAsset.id];
-      for (const t of rt?.targets ?? []) if (t.kind === "BARRIO") ids.add(t.barrioId);
+
+      for (const t of rt?.targets ?? []) {
+        if (t.kind === "BARRIO") ids.add(t.barrioId);
+      }
+
       return ids;
     }
 
@@ -187,17 +197,21 @@ export default function App() {
 
   const highlightedEdgeIds = useMemo(() => {
     const ids = new Set<string>();
+
     if (mode === "ASSET" && selectedAsset?.type === "VALVE") {
       for (const e of edges) {
-        if (e.from === selectedAsset.id || e.to === selectedAsset.id) ids.add(e.id);
-        if (e.to === selectedAsset.id) ids.add(e.id);
+        if (e.from === selectedAsset.id || e.to === selectedAsset.id) {
+          ids.add(e.id);
+        }
       }
     }
+
     return ids;
   }, [mode, selectedAsset]);
 
   const valveImpact = useMemo(() => {
     if (!activeValveId) return null;
+
     return valveImpactFromRouting({
       valveId: activeValveId,
       selectedZoneId,
@@ -208,30 +222,44 @@ export default function App() {
 
   const highlightedBarrioIdsByValve = useMemo(() => {
     const ids = new Set<string>();
+
     if (!valveImpact?.showImpact) return ids;
     if (!valveImpact.hasBarrios) return ids;
-    for (const id of valveImpact.barrioIds) ids.add(id);
+
+    for (const id of valveImpact.barrioIds) {
+      ids.add(id);
+    }
+
     return ids;
   }, [valveImpact]);
 
   const dashedEdgeIdsByValve = useMemo(() => {
     const ids = new Set<string>();
+
     if (!valveImpact?.showImpact) return ids;
     if (!valveImpact.hasPipesToOtherLocation) return ids;
-    for (const id of valveImpact.pipeIds) ids.add(id);
+
+    for (const id of valveImpact.pipeIds) {
+      ids.add(id);
+    }
+
     return ids;
   }, [valveImpact]);
 
   const focusTarget = useMemo<LatLng | null>(() => {
-    if (mode === "ASSET" && selectedAsset) return [selectedAsset.lat, selectedAsset.lng];
+    if (mode === "ASSET" && selectedAsset) {
+      return [selectedAsset.lat, selectedAsset.lng];
+    }
 
     if (mode === "ZONE" && selectedZoneId) {
       const locAssets = assets.filter((a) => a.locationId === selectedZoneId);
+
       if (locAssets.length) {
         const lat = locAssets.reduce((acc, a) => acc + a.lat, 0) / locAssets.length;
         const lng = locAssets.reduce((acc, a) => acc + a.lng, 0) / locAssets.length;
         return [lat, lng];
       }
+
       const z = zones.find((x) => x.id === selectedZoneId);
       if (z) return centroid(z.polygon);
     }
@@ -239,53 +267,28 @@ export default function App() {
     return null;
   }, [mode, selectedAsset, selectedZoneId, assets]);
 
-  /**
-   * ✅ FIX: mapa gris
-   * - Antes: solo se ponía gris si había selección o si viewMode != ALL
-   * - Ahora: también se pone gris cuando los barrios están visibles (ALL incluye barrios, o BARRIOS)
-   */
   const showBarrios = viewMode === "ALL" || viewMode === "BARRIOS";
+
   const mapGrey = mode !== "NONE" || viewMode !== "ALL" || showBarrios;
 
-  // ✅ NUEVO: posición de la válvula activa (para encuadrar junto a barrios)
   const activeValvePos = useMemo<LatLng | null>(() => {
     if (!activeValveId) return null;
+
     const a = assetsById.get(activeValveId);
     if (!a) return null;
+
     return [a.lat, a.lng];
   }, [activeValveId, assetsById]);
 
-  // ✅ NUEVO: forzar mostrar marcador de esa válvula aunque el zoom sea bajo
   const forceShowAssetIds = useMemo(() => {
     const s = new Set<string>();
-    if (activeValveId) s.add(activeValveId);
+
+    if (activeValveId) {
+      s.add(activeValveId);
+    }
+
     return s;
   }, [activeValveId]);
-
-  // =========================
-  // DEBUG LOGS (App)
-  // =========================
-  useEffect(() => {
-    console.log("[DEBUG][App] mapGrey calc", {
-      mode,
-      viewMode,
-      showBarrios,
-      selectedZoneId,
-      selectedAssetId,
-      zoom,
-      mapGrey,
-    });
-  }, [mode, viewMode, showBarrios, selectedZoneId, selectedAssetId, zoom, mapGrey]);
-
-  useEffect(() => {
-    console.log("[DEBUG][App] selection snapshot", {
-      selectedZone: selectedZone?.id ?? null,
-      selectedAsset: selectedAsset?.id ?? null,
-      activeValveId,
-      activeValvePos,
-      viewSelectedId,
-    });
-  }, [selectedZone?.id, selectedAsset?.id, activeValveId, activeValvePos, viewSelectedId]);
 
   return (
     <div className="app">
@@ -303,7 +306,6 @@ export default function App() {
         activeValveId={activeValveId}
         setActiveValveId={setActiveValveId}
         showValveImpact={!!valveImpact?.showImpact}
-        // ✅ NUEVO
         viewMode={viewMode}
         setViewMode={setViewMode}
         viewSelectedId={viewSelectedId}
@@ -319,16 +321,18 @@ export default function App() {
             <div className="badgeTitle">
               {mode === "ZONE" && selectedZone ? selectedZone.name : "Vista general"}
             </div>
+
             <div className="badgeSub">
               {viewMode === "ALL"
                 ? "Mostrando todo"
                 : viewMode === "ZONES"
-                ? "Filtrado: Localidades"
-                : viewMode === "PIPES"
-                ? "Filtrado: Cañerías"
-                : "Filtrado: Barrios"}
+                  ? "Filtrado: Localidades"
+                  : viewMode === "PIPES"
+                    ? "Filtrado: Cañerías"
+                    : "Filtrado: Barrios"}
             </div>
           </div>
+
           <span className="pill">
             <span className="dot" style={{ background: "var(--zone)" }} /> Localidades
           </span>
@@ -360,11 +364,9 @@ export default function App() {
           focusTarget={focusTarget}
           highlightedBarrioIdsExtra={highlightedBarrioIdsByValve}
           dashedEdgeIdsExtra={dashedEdgeIdsByValve}
-          // ✅ NUEVO
           viewMode={viewMode}
           viewSelectedId={viewSelectedId}
           mapGrey={mapGrey}
-          // ✅ NUEVO: encuadre + marker de válvula activa
           activeValvePos={activeValvePos}
           forceShowAssetIds={forceShowAssetIds}
         />

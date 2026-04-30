@@ -2,7 +2,7 @@ import React from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import type L from "leaflet";
 
-import { fetchPipesBBox } from "../services/mapasagua";
+import { fetchPipesBBox } from "../../services/mapasagua";
 
 type Props = {
   onSelect: (featureId: string) => void;

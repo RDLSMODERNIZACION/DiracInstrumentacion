@@ -1,21 +1,26 @@
-// src/components/PipesLayer.tsx
 import React from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import L from "leaflet";
 
-import { fetchPipesBBox, fetchPipesAll } from "../services/mapasagua";
+import { fetchPipesBBox, fetchPipesAll } from "../../services/mapasagua";
 
 /**
- * Resultado de simulación (backend /mapa/sim/run)
- * - model puede ser "SIMPLE" o "LINEAR"
- * - nodes puede traer head_m/pressure_bar null y reached=false
- * - pipes puede traer dH_m null si está bloqueada/no alcanzada
+ * Resultado de simulación backend /mapa/sim/run
  */
 export type SimRunResponse = {
   model: "SIMPLE" | "LINEAR" | string;
   nodes?: Record<
     string,
-    { head_m: number | null; pressure_bar: number | null; blocked?: boolean; kind?: string; reached?: boolean }
+    {
+      head_m: number | null;
+      elev_m?: number | null;
+      pressure_mca?: number | null;
+      pressure_bar: number | null;
+      blocked?: boolean;
+      kind?: string;
+      label?: string | null;
+      reached?: boolean;
+    }
   >;
   pipes?: Record<
     string,
@@ -53,25 +58,26 @@ type Props = {
   selectedId?: string | null;
   styleFn?: (feature: any) => L.PathOptions;
 
-  /** congela fetch/listeners mientras editás (pero mantiene líneas visibles) */
   freeze?: boolean;
-
-  /** log SOLO click (si querés) */
   debug?: boolean;
 
-  /** estado de simulación para pintar caudales/sentido */
   sim?: SimRunResponse | null;
 
-  /** resalta pipes sin conectar como punteado */
   highlightUnconnected?: boolean;
-
-  /** aplica estilo de simulación (grosor por caudal) si no pasás styleFn */
   simStyle?: boolean;
-
-  /** muestra flechas de simulación */
   showArrows?: boolean;
+  colorByPressure?: boolean;
+
+  /**
+   * Si está activo y hay simulación, solo dibuja las cañerías que existen en sim.pipes.
+   * Ideal para que al tocar SIM desaparezca todo lo que no entró en la simulación.
+   */
+  showOnlySimulated?: boolean;
 };
 
+/* ============================================================
+   Helpers
+============================================================ */
 function pickLabel(feature: any): string | null {
   const candidates = [
     feature?.properties?.props?.Layer,
@@ -84,6 +90,7 @@ function pickLabel(feature: any): string | null {
   for (const c of candidates) {
     if (typeof c === "string" && c.trim()) return c.trim();
   }
+
   return null;
 }
 
@@ -117,10 +124,15 @@ function pickFirstConn(...values: any[]) {
     const n = normalizeConnValue(v);
     if (n) return n;
   }
+
   return null;
 }
 
-function getConnHint(feature: any): { from_node: string | null; to_node: string | null; connected: boolean } {
+function getConnHint(feature: any): {
+  from_node: string | null;
+  to_node: string | null;
+  connected: boolean;
+} {
   const p = feature?.properties ?? {};
   const props = p?.props ?? {};
 
@@ -179,6 +191,7 @@ function getConnHint(feature: any): { from_node: string | null; to_node: string 
 
 function computeConnectivityStats(data: any): PipeConnectivityStats {
   const features = Array.isArray(data?.features) ? data.features : [];
+
   let connected = 0;
   let unconnected = 0;
 
@@ -188,23 +201,35 @@ function computeConnectivityStats(data: any): PipeConnectivityStats {
     else unconnected += 1;
   }
 
-  return { total: features.length, connected, unconnected };
+  return {
+    total: features.length,
+    connected,
+    unconnected,
+  };
 }
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
+
 function weightFromAbsQ(absQ: number) {
   const w = 2 + Math.log10(1 + Math.max(0, absQ)) * 4;
   return clamp(w, 2, 10);
 }
-function fmt(n: number) {
-  if (!isFinite(n)) return "-";
-  const a = Math.abs(n);
-  if (a >= 100) return n.toFixed(0);
-  if (a >= 10) return n.toFixed(1);
-  return n.toFixed(2);
+
+function fmt(n: number | null | undefined, digits = 2) {
+  if (n == null) return "N/D";
+  if (!isFinite(Number(n))) return "N/D";
+
+  const x = Number(n);
+  const a = Math.abs(x);
+
+  if (a >= 100) return x.toFixed(0);
+  if (a >= 10) return x.toFixed(1);
+
+  return x.toFixed(digits);
 }
+
 function escapeHtml(s: string) {
   return s
     .replaceAll("&", "&amp;")
@@ -213,11 +238,209 @@ function escapeHtml(s: string) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-function shortId(s: string | null) {
+
+function shortId(s: string | null | undefined) {
   if (!s) return "—";
   return s.length > 12 ? `${s.slice(0, 8)}…` : s;
 }
 
+function pressureColor(bar: number | null | undefined) {
+  if (bar == null || !isFinite(Number(bar))) return "#94a3b8";
+
+  const p = Number(bar);
+
+  if (p < 0.5) return "#ef4444";
+  if (p < 1.2) return "#f97316";
+  if (p < 2.0) return "#facc15";
+  if (p <= 5.0) return "#22c55e";
+  if (p <= 6.5) return "#38bdf8";
+
+  return "#a855f7";
+}
+
+function pressureLabel(bar: number | null | undefined) {
+  if (bar == null || !isFinite(Number(bar))) return "Presión N/D";
+
+  const p = Number(bar);
+
+  if (p < 0.5) return "Muy baja";
+  if (p < 1.2) return "Baja";
+  if (p < 2.0) return "Aceptable baja";
+  if (p <= 5.0) return "Normal";
+  if (p <= 6.5) return "Alta";
+
+  return "Sobrepresión";
+}
+
+function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: string | null) {
+  if (!sim?.pipes || !sim?.nodes || !pipeId) return null;
+
+  const ps = sim.pipes[pipeId];
+  if (!ps) return null;
+
+  const u = ps.u;
+  const v = ps.v;
+
+  const nu = u ? sim.nodes[u] : null;
+  const nv = v ? sim.nodes[v] : null;
+
+  const pu = nu?.pressure_bar;
+  const pv = nv?.pressure_bar;
+
+  const valid = [pu, pv]
+    .filter((x) => x != null && isFinite(Number(x)))
+    .map(Number);
+
+  if (!valid.length) {
+    return {
+      u,
+      v,
+      min_bar: null,
+      max_bar: null,
+      avg_bar: null,
+      u_bar: pu ?? null,
+      v_bar: pv ?? null,
+      u_elev_m: nu?.elev_m ?? null,
+      v_elev_m: nv?.elev_m ?? null,
+      u_pressure_mca: nu?.pressure_mca ?? null,
+      v_pressure_mca: nv?.pressure_mca ?? null,
+      reached: false,
+    };
+  }
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+
+  return {
+    u,
+    v,
+    min_bar: min,
+    max_bar: max,
+    avg_bar: avg,
+    u_bar: pu ?? null,
+    v_bar: pv ?? null,
+    u_elev_m: nu?.elev_m ?? null,
+    v_elev_m: nv?.elev_m ?? null,
+    u_pressure_mca: nu?.pressure_mca ?? null,
+    v_pressure_mca: nv?.pressure_mca ?? null,
+    reached: true,
+  };
+}
+
+function getProp(feature: any, ...keys: string[]) {
+  const p = feature?.properties ?? {};
+  const props = p?.props ?? {};
+
+  for (const k of keys) {
+    if (p?.[k] != null) return p[k];
+    if (props?.[k] != null) return props[k];
+  }
+
+  return null;
+}
+
+function getDiameterMm(feature: any, sim?: SimRunResponse | null) {
+  const id = featureId(feature);
+  const ps = id && sim?.pipes ? sim.pipes[id] : null;
+
+  const raw =
+    getProp(feature, "diametro_mm", "diameter_mm", "diam_mm", "diametro") ??
+    ps?.diam_mm ??
+    null;
+
+  if (raw == null) return null;
+
+  const n = Number(raw);
+  if (!isFinite(n)) return null;
+
+  return n;
+}
+
+function diameterWeight(d: number | null) {
+  if (d == null) return 3;
+  if (d <= 63) return 2.5;
+  if (d <= 75) return 3.0;
+  if (d <= 90) return 3.6;
+  if (d <= 110) return 4.3;
+  if (d <= 140) return 5.0;
+  if (d <= 160) return 5.8;
+  if (d <= 200) return 6.8;
+  if (d <= 250) return 8.0;
+
+  return 9.2;
+}
+
+function normalizeText(s: string) {
+  return String(s ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function inferPipeRole(feature: any) {
+  const label = String(pickLabel(feature) ?? "");
+  const flowFunc = String(getProp(feature, "flow_func", "flowFunc", "funcion", "función") ?? "");
+
+  const layerTxt = normalizeText(label);
+  const flowTxt = normalizeText(flowFunc);
+
+  /*
+    Regla importante:
+    - El diámetro NO define el tipo.
+    - Ø200 puede ser distribución.
+    - Solo pintamos azul si dice claramente IMPULSIÓN o si flow_func viene como IMPULSION.
+    - ACUEDUCTO / TRONCAL pueden ser distribución principal, no necesariamente impulsión.
+  */
+  const explicitImpulsion =
+    /IMPULS|IMPULSION/.test(flowTxt) ||
+    /IMPULS|IMPULSION/.test(layerTxt);
+
+  if (explicitImpulsion) {
+    return {
+      key: "impulsion",
+      label: "Impulsión",
+      color: "#2563eb",
+      dashArray: undefined as string | undefined,
+    };
+  }
+
+  const isRamal =
+    /RAMAL|SECUNDARIA|SECUNDARIO|SERVICIO|DOMICILIARIA|PVC 063|PVC 075|PVC 090/.test(layerTxt);
+
+  if (isRamal) {
+    return {
+      key: "ramal",
+      label: "Ramal / secundaria",
+      color: "#14b8a6",
+      dashArray: "4 7",
+    };
+  }
+
+  const explicitDistribution =
+    /DISTRIB|DISTRIBUCION|RED|MALLA|ACUEDUCTO|TRONCAL|COLECTOR|SALIDA/.test(flowTxt) ||
+    /DISTRIB|DISTRIBUCION|RED|MALLA|ACUEDUCTO|TRONCAL|COLECTOR|SALIDA/.test(layerTxt);
+
+  if (explicitDistribution) {
+    return {
+      key: "distribucion",
+      label: "Distribución",
+      color: "#16a34a",
+      dashArray: "10 6",
+    };
+  }
+
+  return {
+    key: "distribucion",
+    label: "Distribución",
+    color: "#16a34a",
+    dashArray: "10 6",
+  };
+}
+
+/* ============================================================
+   COMPONENT
+============================================================ */
 export default function PipesLayer({
   visible = true,
   useBBox = true,
@@ -233,28 +456,23 @@ export default function PipesLayer({
   highlightUnconnected = true,
   simStyle = true,
   showArrows = true,
+  colorByPressure = true,
+  showOnlySimulated = false,
 }: Props) {
-  // ✅ HOOKS SIEMPRE ARRIBA (no condicionales)
   const map = useMap();
+
   const [data, setData] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  // candado freeze
   const freezeRef = React.useRef<boolean>(freeze);
+  const arrowLayerRef = React.useRef<L.LayerGroup | null>(null);
+
   React.useEffect(() => {
     freezeRef.current = freeze;
   }, [freeze]);
 
-  // flechas layer group (ref estable)
-  const arrowLayerRef = React.useRef<L.LayerGroup | null>(null);
-
-  // =========
-  // FETCH PIPES
-  // =========
   React.useEffect(() => {
     if (!visible) return;
-
-    // si estamos editando, no enganchamos listeners ni hacemos fetch (mantener data)
     if (freeze) return;
 
     let cancelled = false;
@@ -277,39 +495,82 @@ export default function PipesLayer({
         if (freezeRef.current) return;
 
         setData(json);
-        const n = Array.isArray(json?.features) ? json.features.length : 0;
-        onCount?.(n);
-        onConnectivityStats?.(computeConnectivityStats(json));
       } catch (e: any) {
         if (cancelled) return;
         if (freezeRef.current) return;
+
         setError(e?.message ?? String(e));
       }
     };
 
     const debouncedLoad = () => {
       if (!useBBox) return;
+
       if (t) clearTimeout(t);
       t = setTimeout(load, debounceMs);
     };
 
     load();
+
     map.on("moveend", debouncedLoad);
     map.on("zoomend", debouncedLoad);
 
     return () => {
       cancelled = true;
+
       map.off("moveend", debouncedLoad);
       map.off("zoomend", debouncedLoad);
+
       if (t) clearTimeout(t);
     };
-  }, [visible, useBBox, debounceMs, map, onCount, onConnectivityStats, freeze]);
+  }, [visible, useBBox, debounceMs, map, freeze]);
 
-  // =========
-  // ARROWS (SIM)
-  // =========
+  const visibleData = React.useMemo(() => {
+    if (!data) return data;
+
+    const allFeatures = Array.isArray(data?.features) ? data.features : [];
+
+    const activeFeatures = allFeatures.filter((f: any) => {
+      const active = f?.properties?.active;
+      return active !== false;
+    });
+
+    if (!showOnlySimulated || !sim?.pipes) {
+      return {
+        ...data,
+        features: activeFeatures,
+      };
+    }
+
+    const simulatedFeatures = activeFeatures.filter((f: any) => {
+      const id = featureId(f);
+      if (!id) return false;
+
+      const sp = sim.pipes?.[id];
+      if (!sp) return false;
+
+      // Si algún día querés ver bloqueadas también, sacá esta línea.
+      if (sp.blocked) return false;
+
+      return true;
+    });
+
+    return {
+      ...data,
+      features: simulatedFeatures,
+    };
+  }, [data, sim, showOnlySimulated]);
+
   React.useEffect(() => {
-    // limpiar capa anterior
+    if (!visibleData) return;
+
+    const n = Array.isArray(visibleData?.features) ? visibleData.features.length : 0;
+
+    onCount?.(n);
+    onConnectivityStats?.(computeConnectivityStats(visibleData));
+  }, [visibleData, onCount, onConnectivityStats]);
+
+  React.useEffect(() => {
     if (arrowLayerRef.current) {
       arrowLayerRef.current.remove();
       arrowLayerRef.current = null;
@@ -318,7 +579,7 @@ export default function PipesLayer({
     if (!showArrows) return;
     if (!visible) return;
     if (!sim?.pipes) return;
-    if (!data?.features || !Array.isArray(data.features)) return;
+    if (!visibleData?.features || !Array.isArray(visibleData.features)) return;
 
     const grp = L.layerGroup();
     arrowLayerRef.current = grp;
@@ -333,29 +594,39 @@ export default function PipesLayer({
 
     function midpoint(coords: any[]): [number, number] | null {
       if (!Array.isArray(coords) || coords.length < 2) return null;
+
       const midIdx = Math.floor(coords.length / 2);
       const a = coords[midIdx - 1] ?? coords[0];
       const b = coords[midIdx] ?? coords[coords.length - 1];
+
       if (!a || !b) return null;
+
       return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     }
 
     function bearingDeg(a: [number, number], b: [number, number]) {
       const toRad = (x: number) => (x * Math.PI) / 180;
       const toDeg = (x: number) => (x * 180) / Math.PI;
+
       const lon1 = toRad(a[0]);
       const lat1 = toRad(a[1]);
       const lon2 = toRad(b[0]);
       const lat2 = toRad(b[1]);
+
       const dLon = lon2 - lon1;
+
       const y = Math.sin(dLon) * Math.cos(lat2);
-      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      const x =
+        Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
       let brng = toDeg(Math.atan2(y, x));
       brng = (brng + 360) % 360;
+
       return brng;
     }
 
-    for (const f of data.features) {
+    for (const f of visibleData.features) {
       const id = featureId(f);
       if (!id) continue;
 
@@ -369,8 +640,10 @@ export default function PipesLayer({
       if (!geom) continue;
 
       let coords: any[] | null = null;
+
       if (geom.type === "LineString") coords = geom.coordinates;
       else if (geom.type === "MultiLineString") coords = geom.coordinates?.[0] ?? null;
+
       if (!coords || coords.length < 2) continue;
 
       const coordsDir = ps.dir === -1 ? [...coords].reverse() : coords;
@@ -381,6 +654,7 @@ export default function PipesLayer({
       const mi = Math.floor(coordsDir.length / 2);
       const p1 = coordsDir[Math.max(0, mi - 1)];
       const p2 = coordsDir[Math.min(coordsDir.length - 1, mi)];
+
       if (!p1 || !p2) continue;
 
       const brng = bearingDeg([p1[0], p1[1]], [p2[0], p2[1]]);
@@ -394,6 +668,7 @@ export default function PipesLayer({
       m.on("add", () => {
         const el = (m as any)._icon as HTMLElement | undefined;
         if (!el) return;
+
         el.style.transformOrigin = "center";
         el.style.transform += ` rotate(${brng}deg)`;
         el.style.opacity = "0.95";
@@ -409,37 +684,37 @@ export default function PipesLayer({
         arrowLayerRef.current = null;
       }
     };
-  }, [map, visible, showArrows, sim, data]);
+  }, [map, visible, showArrows, sim, visibleData]);
 
-  // =========
-  // SAFE early returns (DESPUÉS de hooks)
-  // =========
   if (!visible) return null;
+
   if (error) {
     console.warn("PipesLayer error:", error);
-    if (!data) return null;
+    if (!visibleData) return null;
   }
-  if (!data) return null;
 
-  // =========
-  // Default style (incluye SIM + conexión)
-  // =========
+  if (!visibleData) return null;
+
   const defaultStyle: (feature: any) => L.PathOptions = (feature) => {
     const s = (feature?.properties as any)?.style ?? {};
     const id = featureId(feature);
+
     const isSel = selectedId != null && id != null && String(id) === String(selectedId);
 
     const conn = getConnHint(feature);
     const unconnected = !conn.connected;
 
-    let color = s.color ?? "#38bdf8";
-    let weight = s.weight ?? 3;
-    let opacity = s.opacity ?? 0.86;
-    let dashArray: string | undefined = undefined;
+    const role = inferPipeRole(feature);
+    const diam = getDiameterMm(feature, sim);
+
+    let color = s.color ?? role.color;
+    let weight = diameterWeight(diam);
+    let opacity = s.opacity ?? 0.9;
+    let dashArray: string | undefined = role.dashArray;
 
     if (highlightUnconnected && unconnected) {
       color = "#f59e0b";
-      weight = Math.max(Number(weight) || 3, 5);
+      weight = Math.max(weight, 5);
       opacity = 0.98;
       dashArray = "8 7";
     }
@@ -447,16 +722,20 @@ export default function PipesLayer({
     if (simStyle && id && sim?.pipes && sim.pipes[id]) {
       const ps = sim.pipes[id];
       const absQ = typeof ps.abs_q_lps === "number" ? ps.abs_q_lps : Math.abs(ps.q_lps ?? 0);
-      weight = weightFromAbsQ(absQ);
+
+      weight = Math.max(weight, weightFromAbsQ(absQ));
 
       if (ps.blocked) {
         color = "#ef4444";
         opacity = 0.82;
         dashArray = "3 8";
-      } else if (absQ >= 0.001) {
-        color = "#22c55e";
+      } else if (colorByPressure && sim?.nodes) {
+        const pr = getPipePressureStats(sim, id);
+        color = pressureColor(pr?.min_bar ?? pr?.avg_bar);
         opacity = 1;
-        dashArray = undefined;
+      } else if (absQ >= 0.001) {
+        color = role.color;
+        opacity = 1;
       } else {
         opacity = 0.5;
       }
@@ -464,7 +743,7 @@ export default function PipesLayer({
 
     if (isSel) {
       color = "rgba(255,255,255,0.96)";
-      weight = Math.max(7, Number(weight) || 7);
+      weight = Math.max(8, Number(weight) || 8);
       opacity = 1.0;
     }
 
@@ -486,11 +765,22 @@ export default function PipesLayer({
     const conn = getConnHint(feature);
     const unconnected = !conn.connected;
 
+    const p = feature?.properties ?? {};
+    const lengthM = p.length_m ?? ps?.length_m ?? null;
+    const diam = getDiameterMm(feature, sim);
+    const role = inferPipeRole(feature);
+
+    const pressure = getPipePressureStats(sim, id);
+
     const statusStyle = unconnected
       ? "background:#f59e0b;color:#111827"
       : "background:#16a34a;color:#ffffff";
 
+    const pressureBadgeColor = pressureColor(pressure?.min_bar ?? pressure?.avg_bar);
+    const pressureText = pressureLabel(pressure?.min_bar ?? pressure?.avg_bar);
+
     const lines: string[] = [];
+
     if (label) lines.push(`<b>${escapeHtml(label)}</b>`);
     if (id) lines.push(`<div style="opacity:.72;font-size:11px">id: ${escapeHtml(id)}</div>`);
 
@@ -500,31 +790,89 @@ export default function PipesLayer({
       }</div>`
     );
 
+    lines.push(
+      `<div style="margin-top:6px;font-size:12px">
+        <b>Tipo</b>: ${escapeHtml(role.label)}
+      </div>`
+    );
+
     if (conn.connected) {
       lines.push(
-        `<div style="margin-top:5px;font-size:11px;opacity:.78">Origen: <b>${escapeHtml(
-          shortId(conn.from_node)
-        )}</b> · Destino: <b>${escapeHtml(shortId(conn.to_node))}</b></div>`
+        `<div style="margin-top:5px;font-size:11px;opacity:.78">
+          Origen: <b>${escapeHtml(shortId(conn.from_node))}</b> ·
+          Destino: <b>${escapeHtml(shortId(conn.to_node))}</b>
+        </div>`
       );
     } else {
       lines.push(
-        `<div style="margin-top:5px;color:#b45309;font-size:12px;font-weight:700">Falta origen o destino. No entra en simulación.</div>`
+        `<div style="margin-top:5px;color:#b45309;font-size:12px;font-weight:700">
+          Falta origen o destino. No entra en simulación.
+        </div>`
       );
     }
+
+    lines.push(
+      `<div style="margin-top:6px;font-size:12px">
+        <b>Longitud</b>: ${fmt(lengthM, 1)} m ·
+        <b>Ø</b>: ${diam == null ? "N/D" : `${fmt(diam, 0)} mm`}
+      </div>`
+    );
 
     if (ps) {
       const q = ps.q_lps ?? 0;
       const dh = ps.dH_m ?? null;
-      lines.push(`<div style="margin-top:5px"><b>Q</b>: ${fmt(q)} L/s (${ps.dir === 1 ? "from→to" : "to→from"})</div>`);
-      lines.push(`<div><b>ΔH</b>: ${dh == null ? "N/D" : fmt(dh)} m</div>`);
-      if (ps.blocked) lines.push(`<div style="color:#991b1b;font-weight:800">BLOQUEADO</div>`);
+
+      lines.push(`<hr style="border:0;border-top:1px solid rgba(255,255,255,.18);margin:8px 0" />`);
+
+      lines.push(
+        `<div style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;background:${pressureBadgeColor};color:#08111f">
+          ${pressureText}
+        </div>`
+      );
+
+      if (pressure) {
+        lines.push(
+          `<div style="margin-top:6px;font-size:12px">
+            <b>Presión tramo</b>: mín ${fmt(pressure.min_bar)} bar · prom ${fmt(pressure.avg_bar)} bar
+          </div>`
+        );
+
+        lines.push(
+          `<div style="font-size:12px">
+            <b>U</b>: cota ${fmt(pressure.u_elev_m, 0)} m · ${fmt(pressure.u_bar)} bar
+          </div>`
+        );
+
+        lines.push(
+          `<div style="font-size:12px">
+            <b>V</b>: cota ${fmt(pressure.v_elev_m, 0)} m · ${fmt(pressure.v_bar)} bar
+          </div>`
+        );
+      }
+
+      lines.push(
+        `<div style="margin-top:6px">
+          <b>Q visual</b>: ${fmt(q, 3)} L/s (${ps.dir === 1 ? "u→v" : "v→u"})
+        </div>`
+      );
+
+      lines.push(`<div><b>ΔH</b>: ${dh == null ? "N/D" : fmt(dh, 2)} m</div>`);
+
+      if (ps.blocked) {
+        lines.push(`<div style="color:#991b1b;font-weight:800">BLOQUEADO</div>`);
+      }
     } else if (sim && id) {
-      lines.push(`<div style="opacity:.72;margin-top:5px">Sin datos de simulación</div>`);
+      lines.push(`<div style="opacity:.72;margin-top:5px">Sin datos de simulación para esta cañería</div>`);
     }
 
-    const html = `<div style="min-width:230px">${lines.join("")}</div>`;
+    const html = `<div style="min-width:280px;color:#fff">${lines.join("")}</div>`;
+
     try {
-      (layer as any).bindTooltip(html, { sticky: true, direction: "top" });
+      (layer as any).bindTooltip(html, {
+        sticky: true,
+        direction: "top",
+        opacity: 0.96,
+      });
     } catch {}
   }
 
@@ -540,7 +888,8 @@ export default function PipesLayer({
       </style>
 
       <GeoJSON
-        data={data}
+        key={`pipes-${selectedId ?? "none"}-${sim ? "sim" : "nosim"}-${showOnlySimulated ? "onlysim" : "all"}-${visibleData?.features?.length ?? 0}`}
+        data={visibleData}
         style={styleFn ?? defaultStyle}
         onEachFeature={(feature, layer) => {
           const id = featureId(feature);
@@ -559,7 +908,21 @@ export default function PipesLayer({
                 const layerType = (layer as any)?.constructor?.name ?? typeof layer;
                 const hasPm = !!(layer as any)?.pm;
                 const conn = getConnHint(feature);
-                console.log("[PIPE CLICK]", { id, label, conn, geometryType: gtype, layerType, hasPm });
+                const pressure = getPipePressureStats(sim, id);
+                const role = inferPipeRole(feature);
+                const diam = getDiameterMm(feature, sim);
+
+                console.log("[PIPE CLICK]", {
+                  id,
+                  label,
+                  conn,
+                  pressure,
+                  role,
+                  diam,
+                  geometryType: gtype,
+                  layerType,
+                  hasPm,
+                });
               } catch {}
             }
 
