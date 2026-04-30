@@ -67,16 +67,16 @@ type Props = {
   simStyle?: boolean;
 
   /**
-   * Se mantiene el nombre para no romper otros componentes.
-   * Ya NO dibuja flechas/triangulitos: ahora dibuja flujo animado.
+   * Se mantiene el nombre para no romper MapView.
+   * Ya no dibuja flechas/triangulitos.
+   * Ahora dibuja flujo animado simple.
    */
   showArrows?: boolean;
 
   colorByPressure?: boolean;
 
   /**
-   * Si está activo y hay simulación, solo dibuja las cañerías que existen en sim.pipes.
-   * Ideal para que al tocar SIM desaparezca todo lo que no entró en la simulación.
+   * Si está activo y hay simulación, solo dibuja cañerías que existen en sim.pipes.
    */
   showOnlySimulated?: boolean;
 };
@@ -84,6 +84,7 @@ type Props = {
 /* ============================================================
    Helpers base
 ============================================================ */
+
 function pickLabel(feature: any): string | null {
   const candidates = [
     feature?.properties?.props?.Layer,
@@ -104,6 +105,7 @@ function featureId(feature: any): string | null {
   if (feature?.id != null) return String(feature.id);
   if (feature?.properties?.id != null) return String(feature.properties.id);
   if (feature?.properties?.pipe_id != null) return String(feature.properties.pipe_id);
+
   return null;
 }
 
@@ -119,7 +121,16 @@ function normalizeConnValue(v: any): string | null {
   const s = String(v).trim();
   if (!s) return null;
 
-  const bad = new Set(["null", "undefined", "none", "nan", "sin conectar", "unconnected", "-"]);
+  const bad = new Set([
+    "null",
+    "undefined",
+    "none",
+    "nan",
+    "sin conectar",
+    "unconnected",
+    "-",
+  ]);
+
   if (bad.has(s.toLowerCase())) return null;
 
   return s;
@@ -250,6 +261,10 @@ function shortId(s: string | null | undefined) {
   return s.length > 12 ? `${s.slice(0, 8)}…` : s;
 }
 
+/* ============================================================
+   Presión
+============================================================ */
+
 function pressureColor(bar: number | null | undefined) {
   if (bar == null || !isFinite(Number(bar))) return "#94a3b8";
 
@@ -334,6 +349,10 @@ function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: st
   };
 }
 
+/* ============================================================
+   Propiedades / tipo de cañería
+============================================================ */
+
 function getProp(feature: any, ...keys: string[]) {
   const p = feature?.properties ?? {};
   const props = p?.props ?? {};
@@ -391,13 +410,6 @@ function inferPipeRole(feature: any) {
   const layerTxt = normalizeText(label);
   const flowTxt = normalizeText(flowFunc);
 
-  /*
-    Regla importante:
-    - El diámetro NO define el tipo.
-    - Ø200 puede ser distribución.
-    - Solo pintamos azul si dice claramente IMPULSIÓN o si flow_func viene como IMPULSION.
-    - ACUEDUCTO / TRONCAL pueden ser distribución principal, no necesariamente impulsión.
-  */
   const explicitImpulsion =
     /IMPULS|IMPULSION/.test(flowTxt) || /IMPULS|IMPULSION/.test(layerTxt);
 
@@ -444,8 +456,15 @@ function inferPipeRole(feature: any) {
 }
 
 /* ============================================================
-   Helpers flujo animado
+   Flujo animado simple
 ============================================================ */
+
+function safeNum(v: any): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
 function reverseLineGeometry(feature: any) {
   const geom = feature?.geometry;
   if (!geom) return feature;
@@ -475,19 +494,17 @@ function reverseLineGeometry(feature: any) {
   return feature;
 }
 
-function safeNum(v: any): number | null {
-  if (v == null) return null;
-  const n = Number(v);
-  return isFinite(n) ? n : null;
-}
-
 /**
- * Define si hay que invertir la geometría para que el flujo visual vaya:
+ * Dirección visual:
  * - Impulsión: menor cota -> mayor cota.
- * - Distribución / ramal: mayor cota -> menor cota.
- * - Sin cotas: dirección de la simulación.
+ * - Distribución/ramal: mayor cota -> menor cota.
+ * - Sin cotas: usa dirección hidráulica del backend.
  */
-function shouldReverseForVisualFlow(feature: any, ps: any, sim: SimRunResponse | null | undefined) {
+function shouldReverseForVisualFlow(
+  feature: any,
+  ps: any,
+  sim: SimRunResponse | null | undefined
+) {
   const conn = getConnHint(feature);
   const role = inferPipeRole(feature);
 
@@ -497,11 +514,6 @@ function shouldReverseForVisualFlow(feature: any, ps: any, sim: SimRunResponse |
   const uElev = u ? safeNum(sim?.nodes?.[u]?.elev_m) : null;
   const vElev = v ? safeNum(sim?.nodes?.[v]?.elev_m) : null;
 
-  /*
-    La geometría normalmente está en sentido from_node -> to_node.
-    El backend de simulación usa u -> v.
-    Si from/to coincide con u/v, sabemos si la geometría está en sentido u->v o v->u.
-  */
   let geometryIsUtoV: boolean | null = null;
 
   if (u && v && conn.from_node && conn.to_node) {
@@ -509,10 +521,6 @@ function shouldReverseForVisualFlow(feature: any, ps: any, sim: SimRunResponse |
     if (conn.from_node === v && conn.to_node === u) geometryIsUtoV = false;
   }
 
-  /*
-    Si no podemos saberlo, asumimos que la geometría está en sentido u -> v.
-    Es el caso más habitual cuando las conexiones están bien cargadas.
-  */
   if (geometryIsUtoV == null) {
     geometryIsUtoV = true;
   }
@@ -521,43 +529,21 @@ function shouldReverseForVisualFlow(feature: any, ps: any, sim: SimRunResponse |
 
   if (uElev != null && vElev != null && uElev !== vElev) {
     if (role.key === "impulsion") {
-      /*
-        Impulsión: subir.
-        Menor cota -> mayor cota.
-      */
       desiredIsUtoV = uElev < vElev;
     } else {
-      /*
-        Distribución / ramal: bajar hacia zonas más bajas.
-        Mayor cota -> menor cota.
-      */
       desiredIsUtoV = uElev > vElev;
     }
   } else {
-    /*
-      Fallback: si no hay cotas, respetamos la dirección hidráulica del backend.
-    */
     desiredIsUtoV = ps?.dir !== -1;
   }
 
   return geometryIsUtoV !== desiredIsUtoV;
 }
 
-function flowColorByRole(roleKey: string) {
-  if (roleKey === "impulsion") return "#38bdf8";
-  if (roleKey === "ramal") return "#5eead4";
-  return "#4ade80";
-}
-
-function flowDashByRole(roleKey: string) {
-  if (roleKey === "impulsion") return "16 22";
-  if (roleKey === "ramal") return "7 16";
-  return "10 18";
-}
-
 /* ============================================================
    COMPONENT
 ============================================================ */
+
 export default function PipesLayer({
   visible = true,
   useBBox = true,
@@ -580,18 +566,25 @@ export default function PipesLayer({
 
   const [data, setData] = React.useState<any>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [mapZoom, setMapZoom] = React.useState(() => map.getZoom());
 
   const freezeRef = React.useRef<boolean>(freeze);
-
-  /*
-    Antes era arrowLayerRef y dibujaba triangulitos.
-    Ahora es una capa de flujo animado sin flechas.
-  */
   const flowLayerRef = React.useRef<L.LayerGroup | null>(null);
 
   React.useEffect(() => {
     freezeRef.current = freeze;
   }, [freeze]);
+
+  React.useEffect(() => {
+    const updateZoom = () => setMapZoom(map.getZoom());
+
+    updateZoom();
+    map.on("zoomend", updateZoom);
+
+    return () => {
+      map.off("zoomend", updateZoom);
+    };
+  }, [map]);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -670,8 +663,6 @@ export default function PipesLayer({
 
       const sp = sim.pipes?.[id];
       if (!sp) return false;
-
-      // Si algún día querés ver bloqueadas también, sacá esta línea.
       if (sp.blocked) return false;
 
       return true;
@@ -693,8 +684,11 @@ export default function PipesLayer({
   }, [visibleData, onCount, onConnectivityStats]);
 
   /*
-    Flujo visual animado.
-    Reemplaza los triangulitos blancos por trazos que se mueven sobre la cañería.
+    Flujo visual simple:
+    - No se dibuja de lejos.
+    - No usa brillo ni flechas.
+    - Es una línea blanca fina, lenta y discreta.
+    - La animación se hace por JS porque Leaflet/SVG no siempre aplica CSS animation.
   */
   React.useEffect(() => {
     if (flowLayerRef.current) {
@@ -707,56 +701,127 @@ export default function PipesLayer({
     if (!sim?.pipes) return;
     if (!visibleData?.features || !Array.isArray(visibleData.features)) return;
 
+    /*
+      Bajé el umbral para que aparezca antes.
+      Si lo querés más cerca, subí a 16.4.
+      Si lo querés más lejos, bajá a 14.8.
+    */
+    if (mapZoom < 15.7) return;
+
+    const flowItems = visibleData.features
+      .map((f: any) => {
+        const id = featureId(f);
+        if (!id) return null;
+
+        const ps = sim.pipes?.[id];
+        if (!ps) return null;
+
+        const absQ =
+          typeof ps.abs_q_lps === "number"
+            ? ps.abs_q_lps
+            : Math.abs(ps.q_lps ?? 0);
+
+        if (ps.blocked || absQ < 0.02) return null;
+
+        const geom = f.geometry;
+        if (!geom) return null;
+        if (geom.type !== "LineString" && geom.type !== "MultiLineString") return null;
+
+        return {
+          feature: f,
+          pipeSim: ps,
+          absQ,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.absQ - a.absQ)
+      .slice(0, 160);
+
+    if (!flowItems.length) return;
+
     const grp = L.layerGroup();
     flowLayerRef.current = grp;
     grp.addTo(map);
 
-    for (const f of visibleData.features) {
-      const id = featureId(f);
-      if (!id) continue;
+    const flowLayers: any[] = [];
+    const flowPaths: SVGPathElement[] = [];
 
-      const ps = sim.pipes[id];
-      if (!ps) continue;
+    for (const item of flowItems as any[]) {
+      const f = item.feature;
+      const ps = item.pipeSim;
+      const absQ = item.absQ;
 
-      const absQ = typeof ps.abs_q_lps === "number" ? ps.abs_q_lps : Math.abs(ps.q_lps ?? 0);
-      if (ps.blocked || absQ < 0.001) continue;
+      const visualFeature = shouldReverseForVisualFlow(f, ps, sim)
+        ? reverseLineGeometry(f)
+        : f;
 
-      const geom = f.geometry;
-      if (!geom) continue;
-      if (geom.type !== "LineString" && geom.type !== "MultiLineString") continue;
-
-      const role = inferPipeRole(f);
-      const visualFeature = shouldReverseForVisualFlow(f, ps, sim) ? reverseLineGeometry(f) : f;
-
-      const flowColor = flowColorByRole(role.key);
-      const flowWeight = Math.max(4, weightFromAbsQ(absQ) + 1.2);
+      const flowWeight = clamp(weightFromAbsQ(absQ) * 0.24, 1.2, 2.8);
 
       const layer = L.geoJSON(visualFeature, {
         interactive: false,
         style: {
-          color: flowColor,
+          color: "#ffffff",
           weight: flowWeight,
-          opacity: 0.9,
-          dashArray: flowDashByRole(role.key),
+          opacity: 0.42,
+          dashArray: "4 22",
           lineCap: "round",
           lineJoin: "round",
-          className:
-            role.key === "impulsion"
-              ? "pipe-flow-water pipe-flow-water--impulsion"
-              : "pipe-flow-water pipe-flow-water--distribucion",
         } as L.PathOptions,
       });
 
       layer.addTo(grp);
+      flowLayers.push(layer);
     }
 
+    /*
+      Leaflet crea los SVG después de agregarlos al mapa.
+      Por eso esperamos un frame antes de buscar los path.
+    */
+    const raf = window.requestAnimationFrame(() => {
+      for (const layer of flowLayers) {
+        layer.eachLayer((subLayer: any) => {
+          const el = subLayer.getElement?.() as SVGPathElement | null;
+          if (!el) return;
+
+          el.classList.add("pipe-flow-water");
+          el.style.strokeDasharray = "4 22";
+          el.style.strokeDashoffset = "0";
+          el.style.transition = "none";
+          el.style.pointerEvents = "none";
+
+          flowPaths.push(el);
+        });
+      }
+    });
+
+    /*
+      Movimiento simple.
+      No usa partículas, sombras ni muchas capas.
+    */
+    let offset = 0;
+
+    const timer = window.setInterval(() => {
+      offset -= 0.8;
+
+      if (offset < -26) {
+        offset = 0;
+      }
+
+      for (const path of flowPaths) {
+        path.style.strokeDashoffset = String(offset);
+      }
+    }, 120);
+
     return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearInterval(timer);
+
       if (flowLayerRef.current) {
         flowLayerRef.current.remove();
         flowLayerRef.current = null;
       }
     };
-  }, [map, visible, showArrows, sim, visibleData]);
+  }, [map, visible, showArrows, sim, visibleData, mapZoom]);
 
   if (!visible) return null;
 
@@ -784,18 +849,30 @@ export default function PipesLayer({
     let opacity = s.opacity ?? 0.9;
     let dashArray: string | undefined = role.dashArray;
 
-    if (highlightUnconnected && unconnected) {
+    /*
+      Modo normal:
+      - tipo de cañería por color
+      - sin conectar en naranja
+    */
+    if (!sim && highlightUnconnected && unconnected) {
       color = "#f59e0b";
       weight = Math.max(weight, 5);
       opacity = 0.98;
       dashArray = "8 7";
     }
 
+    /*
+      Modo simulación:
+      - color principal = presión
+      - línea animada blanca = movimiento, solo de cerca
+      - no usamos dash del tipo de cañería para evitar mezcla visual
+    */
     if (simStyle && id && sim?.pipes && sim.pipes[id]) {
       const ps = sim.pipes[id];
       const absQ = typeof ps.abs_q_lps === "number" ? ps.abs_q_lps : Math.abs(ps.q_lps ?? 0);
 
       weight = Math.max(weight, weightFromAbsQ(absQ));
+      dashArray = undefined;
 
       if (ps.blocked) {
         color = "#ef4444";
@@ -804,19 +881,32 @@ export default function PipesLayer({
       } else if (colorByPressure && sim?.nodes) {
         const pr = getPipePressureStats(sim, id);
         color = pressureColor(pr?.min_bar ?? pr?.avg_bar);
-        opacity = 1;
+        opacity = 0.9;
       } else if (absQ >= 0.001) {
-        color = role.color;
-        opacity = 1;
+        color = "#22c55e";
+        opacity = 0.88;
       } else {
-        opacity = 0.5;
+        color = "#94a3b8";
+        opacity = 0.35;
       }
+    }
+
+    /*
+      Si hay simulación pero esta cañería no entró,
+      la apagamos visualmente salvo que showOnlySimulated la haya filtrado.
+    */
+    if (sim && id && !sim.pipes?.[id]) {
+      color = "#64748b";
+      opacity = 0.16;
+      dashArray = undefined;
+      weight = Math.max(2, weight * 0.6);
     }
 
     if (isSel) {
       color = "rgba(255,255,255,0.96)";
       weight = Math.max(8, Number(weight) || 8);
       opacity = 1.0;
+      dashArray = undefined;
     }
 
     return {
@@ -857,9 +947,9 @@ export default function PipesLayer({
     if (id) lines.push(`<div style="opacity:.72;font-size:11px">id: ${escapeHtml(id)}</div>`);
 
     lines.push(
-      `<div style="margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;${statusStyle}">${
-        unconnected ? "SIN CONECTAR" : "CONECTADA"
-      }</div>`
+      `<div style="margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;${statusStyle}">
+        ${unconnected ? "SIN CONECTAR" : "CONECTADA"}
+      </div>`
     );
 
     lines.push(
@@ -954,27 +1044,7 @@ export default function PipesLayer({
         {`
           .pipe-flow-water {
             pointer-events: none;
-            stroke-dashoffset: 0;
-            animation: pipe-flow-water-move 1.15s linear infinite;
-            filter: drop-shadow(0 0 5px rgba(255,255,255,0.48));
-          }
-
-          .pipe-flow-water--impulsion {
-            animation-duration: 0.95s;
-          }
-
-          .pipe-flow-water--distribucion {
-            animation-duration: 1.35s;
-          }
-
-          @keyframes pipe-flow-water-move {
-            from {
-              stroke-dashoffset: 0;
-            }
-
-            to {
-              stroke-dashoffset: -44;
-            }
+            mix-blend-mode: normal;
           }
         `}
       </style>
