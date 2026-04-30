@@ -1,6 +1,7 @@
 # app/main.py
 import os
 import logging
+
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -47,17 +48,19 @@ from app.routes.dirac_admin.pumps import router as admin_pumps_router
 from app.routes.dirac_admin.valves import router as admin_valves_router
 from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 
-# ✅ NUEVO: Manifold signals (caudal/presión) movido a routes
-# (asegúrate que exista este archivo: app/routes/components/manifold_signals.py con "router = APIRouter(...)")
+# ===== Componentes =====
 from app.routes.components.manifold_signals import router as manifold_signals_router
+from app.routes.components.network_analyzers import router as network_analyzers_router
 
 # ===== Mapa =====
-from app.routes.mapa.mapasagua import router as mapasagua_router
-from app.routes.mapa.simulacion import router as mapasagua_sim_router
-from app.routes.mapa.nodes import router as mapa_nodes_router  # ✅ NUEVO
+# Este router agrupador incluye:
+# - /mapa/mapasagua/...
+# - /mapa/sim/...
+# - /mapa/pipes/{pipe_id}/connect
+# - /mapa/nodes/...
+# - /mapa/contours/...
+from app.routes.mapa import router as mapa_router
 
-
-from app.routes.components.network_analyzers import router as network_analyzers_router
 
 # ===== Logging =====
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -65,6 +68,7 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
 )
+
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 
@@ -124,10 +128,21 @@ def health_db():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("select 1")
             cur.fetchone()
-        return {"ok": True, "db": "up"}
+
+        return {
+            "ok": True,
+            "db": "up",
+        }
+
     except Exception:
         logging.exception("DB health check failed")
-        return JSONResponse({"ok": False, "db": "down"}, status_code=503)
+        return JSONResponse(
+            {
+                "ok": False,
+                "db": "down",
+            },
+            status_code=503,
+        )
 
 
 # ===== Rutas (operación base) =====
@@ -159,18 +174,17 @@ app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
 
-# ✅ NUEVO: rutas para señales del manifold (caudal/presión)
+# ===== Componentes =====
 app.include_router(manifold_signals_router)
+app.include_router(network_analyzers_router)
 
 # ===== Mapa =====
-app.include_router(mapasagua_router, prefix="/mapa", tags=["mapa"])
-app.include_router(mapasagua_sim_router, prefix="/mapa", tags=["mapa"])
-app.include_router(mapa_nodes_router, prefix="/mapa", tags=["mapa"])  # ✅ NUEVO
+app.include_router(mapa_router, prefix="/mapa", tags=["mapa"])
 
 # ===== Telegram test =====
 app.include_router(telegram_test_router)
 
-app.include_router(network_analyzers_router)
+
 # ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():

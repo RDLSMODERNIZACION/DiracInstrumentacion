@@ -26,6 +26,9 @@ import PipeGeometryEditor from "./PipeGeometryEditor";
 // ✅ Connect drawer
 import PipeConnectDrawer from "./PipeConnectDrawer";
 
+// ✅ Curvas visuales / topografía
+import ContourVisualLayer from "./ContourVisualLayer";
+
 // ✅ Create / Delete
 import { createPipe, deletePipe, fetchNodes } from "../services/mapasagua";
 
@@ -442,6 +445,9 @@ export function MapView(props: {
   // creación por dibujo
   const [creatingPipe, setCreatingPipe] = React.useState(false);
 
+  // curvas / topografía visual
+  const [showContours, setShowContours] = React.useState(false);
+
   // forzar recarga de pipes
   const [pipesReloadKey, setPipesReloadKey] = React.useState(0);
 
@@ -524,6 +530,27 @@ export function MapView(props: {
           {creatingPipe ? "Cancelar dibujo" : "+ Cañería"}
         </button>
 
+        {/* Botón flotante curvas */}
+        <button
+          onClick={() => setShowContours((v) => !v)}
+          style={{
+            position: "absolute",
+            right: 16,
+            top: 64,
+            zIndex: 1000,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: showContours ? "rgba(14,165,233,0.95)" : "rgba(15,23,42,0.75)",
+            color: "#fff",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+          title="Mostrar curvas de nivel / topografía"
+        >
+          {showContours ? "Curvas: ON" : "Curvas"}
+        </button>
+
         {/* Botón flotante SIM */}
         <button
           onClick={() => {
@@ -533,7 +560,7 @@ export function MapView(props: {
           style={{
             position: "absolute",
             right: 16,
-            top: 64,
+            top: 112,
             zIndex: 1000,
             padding: "10px 12px",
             borderRadius: 12,
@@ -553,7 +580,7 @@ export function MapView(props: {
             style={{
               position: "absolute",
               right: 16,
-              top: 114,
+              top: 162,
               zIndex: 1000,
               background: "rgba(220,38,38,0.92)",
               color: "#fff",
@@ -569,7 +596,7 @@ export function MapView(props: {
         )}
 
         {showPipes && pipeConnectivityStats && (
-          <div className="pipeConnOverlay" style={{ top: simErr ? 158 : 114 }}>
+          <div className="pipeConnOverlay" style={{ top: simErr ? 216 : 162 }}>
             <div className="pipeConnOverlay__title">Conectividad de cañerías</div>
             <div className="pipeConnOverlay__row">
               <span className="pipeConnOverlay__dot pipeConnOverlay__dot--ok" />
@@ -591,7 +618,11 @@ export function MapView(props: {
         >
           <ZoomWatcher onZoom={setZoom} />
           <ZoomControl position="bottomright" />
+
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+          {/* Capa visual de curvas/topografía */}
+          <ContourVisualLayer visible={showContours} opacity={0.68} />
 
           {/* mientras haya un modal abierto, NO limpiamos por click en mapa */}
           <MapClickClear onClear={clearPipeSelection} enabled={!editingPipeId && !editingGeomOpen && !connectOpen} />
