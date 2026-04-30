@@ -471,3 +471,241 @@ body,
   background: rgba(37, 99, 235, 1);
   border-color: rgba(37, 99, 235, 1);
 }
+
+/* =========================
+   Estado de conexión de cañerías
+========================= */
+.pipeConnOverlay {
+  position: absolute;
+  right: 16px;
+  z-index: 1000;
+  min-width: 190px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 12px;
+}
+.pipeConnOverlay__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 900;
+  opacity: 0.78;
+  margin-bottom: 6px;
+}
+.pipeConnOverlay__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.45;
+}
+.pipeConnOverlay__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
+}
+.pipeConnOverlay__dot--ok { background: #22c55e; }
+.pipeConnOverlay__dot--warn { background: #f59e0b; }
+
+.pipePopup__statusRow {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pipePopup__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+.pipePopup__badge--ok {
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #bbf7d0;
+}
+.pipePopup__badge--warn {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  color: #fde68a;
+}
+.pipePopup__connText {
+  color: rgba(255,255,255,0.68);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Drawer conectar cañería: CSS real, sin depender de Tailwind */
+.pipeConnectDrawer {
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 2200;
+  width: min(420px, 96vw);
+  height: 100vh;
+  color: #0f172a;
+  background: #ffffff;
+  border-left: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: -24px 0 55px rgba(0, 0, 0, 0.26);
+  display: flex;
+  flex-direction: column;
+}
+.pipeConnectDrawer__header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+}
+.pipeConnectDrawer__title {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+}
+.pipeConnectDrawer__pipeId {
+  margin-top: 3px;
+  max-width: 260px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-all;
+}
+.pipeConnectDrawer__close,
+.pipeConnectDrawer__miniBtn {
+  appearance: none;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.pipeConnectDrawer__close:hover,
+.pipeConnectDrawer__miniBtn:hover {
+  background: #f8fafc;
+}
+.pipeConnectDrawer__close:disabled,
+.pipeConnectDrawer__miniBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pipeConnectDrawer__body {
+  padding: 14px 16px 18px;
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+}
+.pipeConnectDrawer__state {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.pipeConnectDrawer__state--ok {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #bbf7d0;
+}
+.pipeConnectDrawer__state--warn {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.pipeConnectDrawer__stateDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 3px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px rgba(0,0,0,0.05);
+}
+.pipeConnectDrawer__field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #334155;
+}
+.pipeConnectDrawer__input,
+.pipeConnectDrawer__select {
+  width: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 12px;
+  padding: 10px 11px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  outline: none;
+}
+.pipeConnectDrawer__input:focus,
+.pipeConnectDrawer__select:focus {
+  border-color: rgba(37, 99, 235, 0.65);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.pipeConnectDrawer__tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pipeConnectDrawer__warnBox,
+.pipeConnectDrawer__error,
+.pipeConnectDrawer__tip {
+  border-radius: 12px;
+  padding: 10px 11px;
+  font-size: 12px;
+  line-height: 1.38;
+}
+.pipeConnectDrawer__warnBox {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.pipeConnectDrawer__error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  font-weight: 800;
+}
+.pipeConnectDrawer__tip {
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+.pipeConnectDrawer__save {
+  appearance: none;
+  border: 0;
+  border-radius: 13px;
+  padding: 11px 12px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.22);
+}
+.pipeConnectDrawer__save:hover {
+  background: #111827;
+}
+.pipeConnectDrawer__save:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+}

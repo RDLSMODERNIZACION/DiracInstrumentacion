@@ -35,6 +35,12 @@ export type SimRunResponse = {
   meta?: Record<string, any>;
 };
 
+export type PipeConnectivityStats = {
+  total: number;
+  connected: number;
+  unconnected: number;
+};
+
 type Props = {
   visible?: boolean;
   useBBox?: boolean;
@@ -42,6 +48,7 @@ type Props = {
 
   onSelect?: (pipeId: string, layer: L.Layer, label?: string | null, feature?: any) => void;
   onCount?: (n: number) => void;
+  onConnectivityStats?: (stats: PipeConnectivityStats) => void;
 
   selectedId?: string | null;
   styleFn?: (feature: any) => L.PathOptions;
@@ -55,7 +62,7 @@ type Props = {
   /** estado de simulación para pintar caudales/sentido */
   sim?: SimRunResponse | null;
 
-  /** resalta pipes sin conectar como punteado (si el GeoJSON trae from/to en properties o props) */
+  /** resalta pipes sin conectar como punteado */
   highlightUnconnected?: boolean;
 
   /** aplica estilo de simulación (grosor por caudal) si no pasás styleFn */
@@ -66,35 +73,122 @@ type Props = {
 };
 
 function pickLabel(feature: any): string | null {
-  const a = feature?.properties?.props?.Layer;
-  if (typeof a === "string" && a.trim()) return a.trim();
+  const candidates = [
+    feature?.properties?.props?.Layer,
+    feature?.properties?.props?.layer,
+    feature?.properties?.Layer,
+    feature?.properties?.name,
+    feature?.properties?.label,
+  ];
 
-  const b = feature?.properties?.props?.layer;
-  if (typeof b === "string" && b.trim()) return b.trim();
-
-  const c = feature?.properties?.Layer;
-  if (typeof c === "string" && c.trim()) return c.trim();
-
-  const d = feature?.properties?.name;
-  if (typeof d === "string" && d.trim()) return d.trim();
-
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
   return null;
 }
 
 function featureId(feature: any): string | null {
   if (feature?.id != null) return String(feature.id);
   if (feature?.properties?.id != null) return String(feature.properties.id);
+  if (feature?.properties?.pipe_id != null) return String(feature.properties.pipe_id);
   return null;
 }
 
-function getConnHint(feature: any): { from_node?: string | null; to_node?: string | null } {
+function normalizeConnValue(v: any): string | null {
+  if (v == null) return null;
+
+  if (typeof v === "object") {
+    if (v.id != null) return normalizeConnValue(v.id);
+    if (v.node_id != null) return normalizeConnValue(v.node_id);
+    return null;
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const bad = new Set(["null", "undefined", "none", "nan", "sin conectar", "unconnected", "-"]);
+  if (bad.has(s.toLowerCase())) return null;
+
+  return s;
+}
+
+function pickFirstConn(...values: any[]) {
+  for (const v of values) {
+    const n = normalizeConnValue(v);
+    if (n) return n;
+  }
+  return null;
+}
+
+function getConnHint(feature: any): { from_node: string | null; to_node: string | null; connected: boolean } {
   const p = feature?.properties ?? {};
   const props = p?.props ?? {};
-  const from_node =
-    (p.from_node ?? p.fromNode ?? props.from_node ?? props.fromNode ?? null) as string | null;
-  const to_node =
-    (p.to_node ?? p.toNode ?? props.to_node ?? props.toNode ?? null) as string | null;
-  return { from_node, to_node };
+
+  const from_node = pickFirstConn(
+    p.from_node,
+    p.fromNode,
+    p.from_node_id,
+    p.fromNodeId,
+    p.source_node,
+    p.sourceNode,
+    p.source,
+    p.start_node,
+    p.startNode,
+    p.u,
+    props.from_node,
+    props.fromNode,
+    props.from_node_id,
+    props.fromNodeId,
+    props.source_node,
+    props.sourceNode,
+    props.source,
+    props.start_node,
+    props.startNode,
+    props.u
+  );
+
+  const to_node = pickFirstConn(
+    p.to_node,
+    p.toNode,
+    p.to_node_id,
+    p.toNodeId,
+    p.target_node,
+    p.targetNode,
+    p.target,
+    p.end_node,
+    p.endNode,
+    p.v,
+    props.to_node,
+    props.toNode,
+    props.to_node_id,
+    props.toNodeId,
+    props.target_node,
+    props.targetNode,
+    props.target,
+    props.end_node,
+    props.endNode,
+    props.v
+  );
+
+  return {
+    from_node,
+    to_node,
+    connected: Boolean(from_node && to_node && from_node !== to_node),
+  };
+}
+
+function computeConnectivityStats(data: any): PipeConnectivityStats {
+  const features = Array.isArray(data?.features) ? data.features : [];
+  let connected = 0;
+  let unconnected = 0;
+
+  for (const f of features) {
+    const conn = getConnHint(f);
+    if (conn.connected) connected += 1;
+    else unconnected += 1;
+  }
+
+  return { total: features.length, connected, unconnected };
 }
 
 function clamp(n: number, a: number, b: number) {
@@ -119,6 +213,10 @@ function escapeHtml(s: string) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+function shortId(s: string | null) {
+  if (!s) return "—";
+  return s.length > 12 ? `${s.slice(0, 8)}…` : s;
+}
 
 export default function PipesLayer({
   visible = true,
@@ -126,6 +224,7 @@ export default function PipesLayer({
   debounceMs = 300,
   onSelect,
   onCount,
+  onConnectivityStats,
   selectedId = null,
   styleFn,
   freeze = false,
@@ -180,6 +279,7 @@ export default function PipesLayer({
         setData(json);
         const n = Array.isArray(json?.features) ? json.features.length : 0;
         onCount?.(n);
+        onConnectivityStats?.(computeConnectivityStats(json));
       } catch (e: any) {
         if (cancelled) return;
         if (freezeRef.current) return;
@@ -203,7 +303,7 @@ export default function PipesLayer({
       map.off("zoomend", debouncedLoad);
       if (t) clearTimeout(t);
     };
-  }, [visible, useBBox, debounceMs, map, onCount, freeze]);
+  }, [visible, useBBox, debounceMs, map, onCount, onConnectivityStats, freeze]);
 
   // =========
   // ARROWS (SIM)
@@ -226,7 +326,7 @@ export default function PipesLayer({
 
     const arrowIcon = L.divIcon({
       className: "pipe-arrow-icon",
-      html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid rgba(0,0,0,0.65);"></div>`,
+      html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid rgba(255,255,255,0.88);filter:drop-shadow(0 2px 4px rgba(0,0,0,.55));"></div>`,
       iconSize: [14, 14],
       iconAnchor: [7, 7],
     });
@@ -296,7 +396,7 @@ export default function PipesLayer({
         if (!el) return;
         el.style.transformOrigin = "center";
         el.style.transform += ` rotate(${brng}deg)`;
-        el.style.opacity = "0.9";
+        el.style.opacity = "0.95";
         el.style.pointerEvents = "none";
       });
 
@@ -322,24 +422,26 @@ export default function PipesLayer({
   if (!data) return null;
 
   // =========
-  // Default style (incluye SIM)
+  // Default style (incluye SIM + conexión)
   // =========
   const defaultStyle: (feature: any) => L.PathOptions = (feature) => {
     const s = (feature?.properties as any)?.style ?? {};
     const id = featureId(feature);
     const isSel = selectedId != null && id != null && String(id) === String(selectedId);
 
-    let color = s.color ?? "#2563eb";
+    const conn = getConnHint(feature);
+    const unconnected = !conn.connected;
+
+    let color = s.color ?? "#38bdf8";
     let weight = s.weight ?? 3;
-    let opacity = s.opacity ?? 0.85;
+    let opacity = s.opacity ?? 0.86;
     let dashArray: string | undefined = undefined;
 
-    const { from_node, to_node } = getConnHint(feature);
-    const unconnected = !from_node || !to_node;
-
     if (highlightUnconnected && unconnected) {
-      dashArray = "6 6";
-      opacity = Math.min(opacity, 0.55);
+      color = "#f59e0b";
+      weight = Math.max(Number(weight) || 3, 5);
+      opacity = 0.98;
+      dashArray = "8 7";
     }
 
     if (simStyle && id && sim?.pipes && sim.pipes[id]) {
@@ -348,16 +450,21 @@ export default function PipesLayer({
       weight = weightFromAbsQ(absQ);
 
       if (ps.blocked) {
-        opacity = 0.35;
-        dashArray = dashArray ?? "2 8";
+        color = "#ef4444";
+        opacity = 0.82;
+        dashArray = "3 8";
+      } else if (absQ >= 0.001) {
+        color = "#22c55e";
+        opacity = 1;
+        dashArray = undefined;
       } else {
-        opacity = Math.max(opacity, 0.9);
+        opacity = 0.5;
       }
     }
 
     if (isSel) {
-      color = "rgba(255,255,255,0.95)";
-      weight = Math.max(6, weight);
+      color = "rgba(255,255,255,0.96)";
+      weight = Math.max(7, Number(weight) || 7);
       opacity = 1.0;
     }
 
@@ -376,25 +483,46 @@ export default function PipesLayer({
     const label = pickLabel(feature);
     const ps = id && sim?.pipes ? sim.pipes[id] : null;
 
-    const { from_node, to_node } = getConnHint(feature);
-    const unconnected = !from_node || !to_node;
+    const conn = getConnHint(feature);
+    const unconnected = !conn.connected;
+
+    const statusStyle = unconnected
+      ? "background:#f59e0b;color:#111827"
+      : "background:#16a34a;color:#ffffff";
 
     const lines: string[] = [];
     if (label) lines.push(`<b>${escapeHtml(label)}</b>`);
-    if (id) lines.push(`<div style="opacity:.7;font-size:11px">id: ${escapeHtml(id)}</div>`);
-    if (unconnected) lines.push(`<div style="color:#b45309;font-weight:600">SIN CONECTAR</div>`);
+    if (id) lines.push(`<div style="opacity:.72;font-size:11px">id: ${escapeHtml(id)}</div>`);
+
+    lines.push(
+      `<div style="margin-top:6px;display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;${statusStyle}">${
+        unconnected ? "SIN CONECTAR" : "CONECTADA"
+      }</div>`
+    );
+
+    if (conn.connected) {
+      lines.push(
+        `<div style="margin-top:5px;font-size:11px;opacity:.78">Origen: <b>${escapeHtml(
+          shortId(conn.from_node)
+        )}</b> · Destino: <b>${escapeHtml(shortId(conn.to_node))}</b></div>`
+      );
+    } else {
+      lines.push(
+        `<div style="margin-top:5px;color:#b45309;font-size:12px;font-weight:700">Falta origen o destino. No entra en simulación.</div>`
+      );
+    }
 
     if (ps) {
       const q = ps.q_lps ?? 0;
       const dh = ps.dH_m ?? null;
-      lines.push(`<div><b>Q</b>: ${fmt(q)} L/s (${ps.dir === 1 ? "from→to" : "to→from"})</div>`);
+      lines.push(`<div style="margin-top:5px"><b>Q</b>: ${fmt(q)} L/s (${ps.dir === 1 ? "from→to" : "to→from"})</div>`);
       lines.push(`<div><b>ΔH</b>: ${dh == null ? "N/D" : fmt(dh)} m</div>`);
-      if (ps.blocked) lines.push(`<div style="color:#991b1b;font-weight:600">BLOQUEADO</div>`);
+      if (ps.blocked) lines.push(`<div style="color:#991b1b;font-weight:800">BLOQUEADO</div>`);
     } else if (sim && id) {
-      lines.push(`<div style="opacity:.7">Sin datos de simulación</div>`);
+      lines.push(`<div style="opacity:.72;margin-top:5px">Sin datos de simulación</div>`);
     }
 
-    const html = `<div style="min-width:220px">${lines.join("")}</div>`;
+    const html = `<div style="min-width:230px">${lines.join("")}</div>`;
     try {
       (layer as any).bindTooltip(html, { sticky: true, direction: "top" });
     } catch {}

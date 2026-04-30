@@ -19,7 +19,7 @@ import { focusPointIcon, locationMarkerIcon } from "../lib/mapIcons";
 import { FlyTo } from "./FlyTo";
 
 // ✅ Pipes (backend + editor)
-import PipesLayer, { type SimRunResponse } from "./PipesLayer";
+import PipesLayer, { type PipeConnectivityStats, type SimRunResponse } from "./PipesLayer";
 import PipeEditDrawer from "./PipeEditDrawer";
 import PipeGeometryEditor from "./PipeGeometryEditor";
 
@@ -27,7 +27,7 @@ import PipeGeometryEditor from "./PipeGeometryEditor";
 import PipeConnectDrawer from "./PipeConnectDrawer";
 
 // ✅ Create / Delete
-import { createPipe, deletePipe } from "../services/mapasagua";
+import { createPipe, deletePipe, fetchNodes } from "../services/mapasagua";
 
 // ✅ Sim API
 import { runSim } from "../features/mapa/services/simApi";
@@ -259,20 +259,99 @@ type NodeLite = { id: string; kind?: string; label?: string };
 
 async function fetchNodesLiteSafe(): Promise<NodeLite[]> {
   try {
-    const res = await fetch(`/mapa/nodes`, { headers: { "Content-Type": "application/json" } });
-    if (!res.ok) return [];
-    const j = await res.json();
-    const items = Array.isArray(j) ? j : Array.isArray(j?.items) ? j.items : [];
+    const items = await fetchNodes(5000);
     return items
       .map((x: any) => ({
-        id: String(x?.id),
+        id: String(x?.id ?? ""),
         kind: x?.kind ? String(x.kind) : undefined,
         label: x?.label ? String(x.label) : undefined,
       }))
-      .filter((x: any) => !!x.id);
-  } catch {
+      .filter((x: NodeLite) => !!x.id);
+  } catch (e: any) {
+    console.warn("No se pudieron cargar nodos para conectar cañerías:", e?.message ?? e);
     return [];
   }
+}
+
+type PipeConnHint = { from_node: string | null; to_node: string | null; connected: boolean };
+
+function normalizeConnValue(v: any): string | null {
+  if (v == null) return null;
+  if (typeof v === "object") {
+    if (v.id != null) return normalizeConnValue(v.id);
+    if (v.node_id != null) return normalizeConnValue(v.node_id);
+    return null;
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+  if (["null", "undefined", "none", "nan", "sin conectar", "unconnected", "-"].includes(s.toLowerCase())) return null;
+  return s;
+}
+
+function pickFirstConn(...values: any[]) {
+  for (const v of values) {
+    const n = normalizeConnValue(v);
+    if (n) return n;
+  }
+  return null;
+}
+
+function pipeConnHintFromFeature(feature: any): PipeConnHint {
+  const p = feature?.properties ?? {};
+  const props = p?.props ?? {};
+
+  const from_node = pickFirstConn(
+    p.from_node,
+    p.fromNode,
+    p.from_node_id,
+    p.fromNodeId,
+    p.source_node,
+    p.sourceNode,
+    p.source,
+    p.start_node,
+    p.startNode,
+    p.u,
+    props.from_node,
+    props.fromNode,
+    props.from_node_id,
+    props.fromNodeId,
+    props.source_node,
+    props.sourceNode,
+    props.source,
+    props.start_node,
+    props.startNode,
+    props.u
+  );
+
+  const to_node = pickFirstConn(
+    p.to_node,
+    p.toNode,
+    p.to_node_id,
+    p.toNodeId,
+    p.target_node,
+    p.targetNode,
+    p.target,
+    p.end_node,
+    p.endNode,
+    p.v,
+    props.to_node,
+    props.toNode,
+    props.to_node_id,
+    props.toNodeId,
+    props.target_node,
+    props.targetNode,
+    props.target,
+    props.end_node,
+    props.endNode,
+    props.v
+  );
+
+  return {
+    from_node,
+    to_node,
+    connected: Boolean(from_node && to_node && from_node !== to_node),
+  };
 }
 
 /* ===========================
@@ -375,6 +454,7 @@ export function MapView(props: {
   const [connectOpen, setConnectOpen] = React.useState(false);
   const [nodesLite, setNodesLite] = React.useState<NodeLite[]>([]);
   const [nodesBusy, setNodesBusy] = React.useState(false);
+  const [pipeConnectivityStats, setPipeConnectivityStats] = React.useState<PipeConnectivityStats | null>(null);
 
   function clearPipeSelection() {
     setSelectedPipeId(null);
@@ -419,13 +499,7 @@ export function MapView(props: {
   }
 
   // from/to iniciales si el GeoJSON los trae
-  const connHint = React.useMemo(() => {
-    const p = selectedPipeFeature?.properties ?? {};
-    const props = p?.props ?? {};
-    const from_node = (p.from_node ?? props.from_node ?? null) as string | null;
-    const to_node = (p.to_node ?? props.to_node ?? null) as string | null;
-    return { from_node, to_node };
-  }, [selectedPipeFeature]);
+  const connHint = React.useMemo(() => pipeConnHintFromFeature(selectedPipeFeature), [selectedPipeFeature]);
 
   return (
     <>
@@ -494,6 +568,20 @@ export function MapView(props: {
           </div>
         )}
 
+        {showPipes && pipeConnectivityStats && (
+          <div className="pipeConnOverlay" style={{ top: simErr ? 158 : 114 }}>
+            <div className="pipeConnOverlay__title">Conectividad de cañerías</div>
+            <div className="pipeConnOverlay__row">
+              <span className="pipeConnOverlay__dot pipeConnOverlay__dot--ok" />
+              <span>{pipeConnectivityStats.connected} conectadas</span>
+            </div>
+            <div className="pipeConnOverlay__row">
+              <span className="pipeConnOverlay__dot pipeConnOverlay__dot--warn" />
+              <span>{pipeConnectivityStats.unconnected} sin conectar</span>
+            </div>
+          </div>
+        )}
+
         <MapContainer
           className={mapGrey ? "mapGrey" : undefined}
           center={CENTER}
@@ -542,6 +630,7 @@ export function MapView(props: {
               selectedId={selectedPipeId}
               freeze={editingGeomOpen}
               sim={sim}
+              onConnectivityStats={setPipeConnectivityStats}
               onSelect={(id, layer, label, feature) => {
                 setSelectedPipeId(id);
                 setSelectedPipeLabel(label ?? null);
@@ -572,6 +661,19 @@ export function MapView(props: {
               <div className="pipePopup">
                 <div className="pipePopup__title" title={selectedPipeLabel ?? ""}>
                   {selectedPipeLabel ?? "Cañería"}
+                </div>
+
+                <div className="pipePopup__statusRow">
+                  <span className={connHint.connected ? "pipePopup__badge pipePopup__badge--ok" : "pipePopup__badge pipePopup__badge--warn"}>
+                    {connHint.connected ? "Conectada" : "Sin conectar"}
+                  </span>
+                  {connHint.connected ? (
+                    <span className="pipePopup__connText">
+                      {connHint.from_node?.slice(0, 8)} → {connHint.to_node?.slice(0, 8)}
+                    </span>
+                  ) : (
+                    <span className="pipePopup__connText">Falta origen/destino</span>
+                  )}
                 </div>
 
                 <div className="pipePopup__actions">
@@ -611,9 +713,9 @@ export function MapView(props: {
                       await ensureNodes();
                       setConnectOpen(true);
                     }}
-                    title={nodesBusy ? "Cargando nodos..." : "Conectar a nodos (manual)"}
+                    title={nodesBusy ? "Cargando nodos..." : connHint.connected ? "Modificar conexión" : "Conectar a nodos (manual)"}
                   >
-                    {nodesBusy ? "Nodos..." : "Conectar"}
+                    {nodesBusy ? "Nodos..." : connHint.connected ? "Conexión" : "Conectar"}
                   </button>
 
                   <button
@@ -763,7 +865,18 @@ export function MapView(props: {
         nodes={nodesLite}
         initialFrom={connHint.from_node}
         initialTo={connHint.to_node}
-        onConnected={() => {
+        onConnected={(from, to) => {
+          setSelectedPipeFeature((prev: any) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              properties: {
+                ...(prev.properties ?? {}),
+                from_node: from,
+                to_node: to,
+              },
+            };
+          });
           setPipesReloadKey((k) => k + 1);
           if (sim) runSimulation();
         }}

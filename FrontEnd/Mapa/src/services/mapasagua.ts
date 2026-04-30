@@ -1,5 +1,6 @@
 // src/services/mapasagua.ts
-const API_BASE = import.meta.env.VITE_API_BASE ?? "https://diracinstrumentacion.onrender.com";
+const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE || "https://diracinstrumentacion.onrender.com";
 
 /* =========================
    Tipos
@@ -54,17 +55,46 @@ export type NodeCreateInput = {
 export type NodeUpdateInput = Partial<NodeCreateInput>;
 
 /* =========================
-   Fetch helper (sin logs)
+   Fetch helper
 ========================= */
-async function fetchJSON(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
+export class ApiError extends Error {
+  status: number;
+  body: string;
+  url: string;
+
+  constructor(status: number, body: string, url: string) {
+    super(`HTTP ${status}${body ? `: ${body}` : ""}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+    this.url = url;
+  }
+}
+
+function jsonHeaders(init?: RequestInit) {
+  return {
+    "Content-Type": "application/json",
+    ...(init?.headers || {}),
+  } as HeadersInit;
+}
+
+async function fetchJSON<T = any>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: jsonHeaders(init),
+  });
 
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}${txt ? `: ${txt}` : ""}`);
+    throw new ApiError(res.status, txt, url);
   }
 
-  return res.json();
+  if (res.status === 204) return null as T;
+  return (await res.json()) as T;
+}
+
+function isMissingEndpoint(e: any) {
+  return e?.status === 404 || e?.status === 405;
 }
 
 /* =========================
@@ -95,15 +125,15 @@ export async function fetchPipesAll() {
 ========================= */
 export async function fetchPipesExtent(): Promise<PipesExtent> {
   const url = `${API_BASE}/mapa/mapasagua/pipes/extent`;
-  const json = await fetchJSON(url);
-  return json as PipesExtent;
+  const json = await fetchJSON<PipesExtent>(url);
+  return json;
 }
 
 /* =========================
    GET PIPE POR ID
 ========================= */
 export async function fetchPipeById(id: string) {
-  const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
+  const url = `${API_BASE}/mapa/mapasagua/pipes/${encodeURIComponent(id)}`;
   return fetchJSON(url);
 }
 
@@ -111,20 +141,61 @@ export async function fetchPipeById(id: string) {
    PATCH PIPE (editar propiedades)
 ========================= */
 export async function patchPipe(id: string, payload: Record<string, any>) {
-  const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
+  const url = `${API_BASE}/mapa/mapasagua/pipes/${encodeURIComponent(id)}`;
 
   return fetchJSON(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+/* =========================
+   CONECTAR PIPE A NODOS
+   - intenta endpoint específico de conexión
+   - fallback a patch genérico si el backend todavía no tiene /connect
+========================= */
+export async function connectPipe(pipeId: string, from_node: string, to_node: string) {
+  const id = encodeURIComponent(pipeId);
+  const payload = { from_node, to_node };
+  const init: RequestInit = {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  };
+
+  const endpoints = [
+    `${API_BASE}/mapa/pipes/${id}/connect`,
+    `${API_BASE}/mapa/mapasagua/pipes/${id}/connect`,
+  ];
+
+  let lastEndpointError: any = null;
+
+  for (const url of endpoints) {
+    try {
+      return await fetchJSON<{ ok?: boolean; pipe?: any }>(url, init);
+    } catch (e: any) {
+      lastEndpointError = e;
+      if (!isMissingEndpoint(e)) throw e;
+    }
+  }
+
+  // Fallback 1: algunos backends aceptan from_node/to_node directo en PATCH.
+  try {
+    return await patchPipe(pipeId, payload);
+  } catch (directPatchError: any) {
+    // Fallback 2: si el endpoint sólo permite actualizar properties.
+    try {
+      return await patchPipe(pipeId, { properties: payload });
+    } catch {
+      throw directPatchError || lastEndpointError;
+    }
+  }
 }
 
 /* =========================
    DELETE PIPE (borrado REAL)
 ========================= */
 export async function deletePipe(id: string) {
-  const url = `${API_BASE}/mapa/mapasagua/pipes/${id}`;
+  const url = `${API_BASE}/mapa/mapasagua/pipes/${encodeURIComponent(id)}`;
   return fetchJSON(url, { method: "DELETE" });
 }
 
@@ -132,11 +203,10 @@ export async function deletePipe(id: string) {
    PATCH PIPE GEOMETRY (recorrido)
 ========================= */
 export async function patchPipeGeometry(id: string, geometry: GeoJSONGeometry) {
-  const url = `${API_BASE}/mapa/mapasagua/pipes/${id}/geometry`;
+  const url = `${API_BASE}/mapa/mapasagua/pipes/${encodeURIComponent(id)}/geometry`;
 
   return fetchJSON(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(geometry),
   });
 }
@@ -160,7 +230,6 @@ export async function createPipe(input: {
 
   return fetchJSON(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
 }
@@ -169,10 +238,10 @@ export async function createPipe(input: {
    NODES API (manual)
    Backend: /mapa/nodes
 ========================= */
-export async function fetchNodes(limit = 2000): Promise<NodeDTO[]> {
+export async function fetchNodes(limit = 5000): Promise<NodeDTO[]> {
   const url = `${API_BASE}/mapa/nodes?limit=${encodeURIComponent(String(limit))}`;
-  const json = (await fetchJSON(url)) as NodesListResponse | NodeDTO[];
-  const items = Array.isArray(json) ? (json as NodeDTO[]) : (json as NodesListResponse).items ?? [];
+  const json = await fetchJSON<NodesListResponse | NodeDTO[]>(url);
+  const items = Array.isArray(json) ? json : json?.items ?? [];
   return items;
 }
 
@@ -180,21 +249,19 @@ export async function createNode(input: NodeCreateInput): Promise<NodeDTO> {
   const url = `${API_BASE}/mapa/nodes`;
   return fetchJSON(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
 }
 
 export async function updateNode(nodeId: string, patch: NodeUpdateInput): Promise<NodeDTO> {
-  const url = `${API_BASE}/mapa/nodes/${nodeId}`;
+  const url = `${API_BASE}/mapa/nodes/${encodeURIComponent(nodeId)}`;
   return fetchJSON(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
 }
 
 export async function deleteNode(nodeId: string): Promise<{ ok: boolean; node_id: string }> {
-  const url = `${API_BASE}/mapa/nodes/${nodeId}`;
+  const url = `${API_BASE}/mapa/nodes/${encodeURIComponent(nodeId)}`;
   return fetchJSON(url, { method: "DELETE" });
 }

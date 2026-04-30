@@ -52,7 +52,8 @@ export type SimRunResponse = {
   };
 };
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? "";
+const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE || "https://diracinstrumentacion.onrender.com";
 
 /** fetch helper */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -60,10 +61,12 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
+
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(txt || `HTTP ${res.status}`);
   }
+
   return (await res.json()) as T;
 }
 
@@ -74,8 +77,10 @@ export function runSim(options: SimOptions = {}) {
   });
 }
 
+// Nota: el drawer ahora usa connectPipe desde src/services/mapasagua.ts,
+// porque ahí queda unificada la base del backend y los fallbacks.
 export function connectPipe(pipeId: string, from_node: string, to_node: string) {
-  return api<{ ok: boolean }>(`/mapa/pipes/${pipeId}/connect`, {
+  return api<{ ok: boolean }>(`/mapa/pipes/${encodeURIComponent(pipeId)}/connect`, {
     method: "PATCH",
     body: JSON.stringify({ from_node, to_node }),
   });
@@ -83,7 +88,7 @@ export function connectPipe(pipeId: string, from_node: string, to_node: string) 
 
 // Nota: tu backend actual puede no usar este endpoint; queda listo si lo agregás.
 export function setValve(nodeId: string, is_open: boolean) {
-  return api<{ ok: boolean }>(`/mapa/valves/${nodeId}`, {
+  return api<{ ok: boolean }>(`/mapa/valves/${encodeURIComponent(nodeId)}`, {
     method: "PATCH",
     body: JSON.stringify({ is_open }),
   });
