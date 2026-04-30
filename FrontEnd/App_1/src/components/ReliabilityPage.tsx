@@ -1,16 +1,119 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { scopedUrl, getApiHeaders } from "@/lib/config";
 
-type OperationSummary = {
-  active_tank_events: number;
-  total_tank_events: number;
-  pumps_running: number;
-  pumps_stopped: number;
-  total_starts: number;
-  total_stops: number;
+type ViewMode = "pumps" | "tanks";
+type SortDir = "asc" | "desc";
+type KpiTone = "slate" | "red" | "orange" | "emerald" | "blue";
+
+type Props = {
+  locationId?: number | string;
+  selectedPumpIds?: number[] | string[] | "all";
+  selectedTankIds?: number[] | string[] | "all";
+  thresholdLow?: number;
 };
 
-type TankCriticalEvent = {
+type PumpDailyRow = {
+  day_ts: string;
+  pump_id: number;
+  pump_name: string;
+  location_id: number | null;
+  location_name: string | null;
+  starts_count: number;
+  stops_count: number;
+  running_seconds: number;
+  stopped_seconds: number;
+  availability_pct: number | null;
+  total_state_events: number;
+  first_event_at?: string | null;
+  last_event_at?: string | null;
+  estado_operativo: string;
+  problem_score: number;
+};
+
+type TankDailyRow = {
+  day_ts: string;
+  tank_id: number;
+  tank_name: string;
+  location_id: number | null;
+  location_name: string | null;
+  total_events: number;
+  active_events: number;
+  normalized_events: number;
+  low_events: number;
+  low_critical_events: number;
+  high_events: number;
+  high_critical_events: number;
+  min_detected_value: number | null;
+  max_detected_value: number | null;
+  avg_detected_value: number | null;
+  total_duration_seconds: number;
+  estado_operativo: string;
+};
+
+type PumpRankingRow = {
+  pump_id: number;
+  pump_name: string;
+  location_id: number | null;
+  location_name: string | null;
+  starts_count: number;
+  stops_count: number;
+  running_seconds: number;
+  stopped_seconds: number;
+  availability_pct: number | null;
+  total_state_events: number;
+  first_event_at?: string | null;
+  last_event_at?: string | null;
+  problem_score: number;
+  estado_operativo: string;
+};
+
+type TankRankingRow = {
+  tank_id: number;
+  tank_name: string;
+  location_id: number | null;
+  location_name: string | null;
+  total_events: number;
+  active_events: number;
+  normalized_events: number;
+  low_events: number;
+  low_critical_events: number;
+  high_events: number;
+  high_critical_events: number;
+  min_detected_value: number | null;
+  max_detected_value: number | null;
+  avg_detected_value: number | null;
+  total_duration_seconds: number;
+  problem_score: number;
+  estado_operativo: string;
+};
+
+type PumpDayEvent = {
+  id: number;
+  pump_id: number;
+  pump_name: string;
+  location_id: number | null;
+  location_name: string | null;
+  state: string;
+  state_label: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  duration_label: string | null;
+  source?: string | null;
+};
+
+type TankDayEvent = {
   id: number;
   tank_id: number;
   tank_name: string;
@@ -26,412 +129,1252 @@ type TankCriticalEvent = {
   duration_label: string | null;
   status: string;
   status_label: string;
-  created_at: string;
 };
 
-type PumpOperation = {
-  pump_id: number;
-  pump_name: string;
-  location_id: number | null;
-  location_name: string | null;
-  current_state: string;
-  current_state_label: string;
-  online: boolean;
-  starts_count: number;
-  stops_count: number;
-  running_time_label: string;
-  stopped_time_label: string;
-  availability_pct: number | null;
-  last_started_at: string | null;
-  last_stopped_at: string | null;
-  last_activity_at: string | null;
-  last_activity_label: string;
+type DayEvent = PumpDayEvent | TankDayEvent;
+
+type ChartRow = {
+  day_ts: string;
+  day_label?: string;
+
+  total_starts?: number;
+  total_stops?: number;
+  avg_availability_pct?: number | null;
+  total_problem_score?: number;
+
+  total_events?: number;
+  active_events?: number;
+  low_events?: number;
+  low_critical_events?: number;
+  high_events?: number;
+  high_critical_events?: number;
+  total_duration_seconds?: number;
 };
 
-type ApiSummaryResponse = {
-  ok: boolean;
-  summary: OperationSummary;
-};
+function currentMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
-type ApiListResponse<T> = {
-  ok: boolean;
-  items: T[];
-};
+function prevMonth(value: string) {
+  const [y, m] = value.split("-").map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
-function formatDateTime(value?: string | null) {
+function nextMonth(value: string) {
+  const [y, m] = value.split("-").map(Number);
+  const d = new Date(y, m, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function toNum(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function fmtInt(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return Math.round(n).toLocaleString("es-AR");
+}
+
+function fmtNum(value: unknown, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return n.toLocaleString("es-AR", { maximumFractionDigits: digits });
+}
+
+function fmtPct(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%`;
+}
+
+function fmtDuration(seconds: unknown) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s <= 0) return "-";
+
+  if (s < 60) return `${Math.round(s)} seg`;
+
+  const minutes = s / 60;
+  if (minutes < 60) {
+    return `${minutes.toLocaleString("es-AR", {
+      maximumFractionDigits: 1,
+    })} min`;
+  }
+
+  const hours = s / 3600;
+  return `${hours.toLocaleString("es-AR", {
+    maximumFractionDigits: 1,
+  })} h`;
+}
+
+function dayLabel(day: string) {
+  if (!day) return "-";
+  const parts = day.split("-");
+  if (parts.length !== 3) return day;
+  return `${parts[2]}/${parts[1]}`;
+}
+
+function safeLocationId(value: Props["locationId"]) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    value === "all"
+  ) {
+    return undefined;
+  }
+
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function normalizeIdSet(
+  value: Props["selectedPumpIds"] | Props["selectedTankIds"]
+) {
+  if (value === "all" || !Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  const ids = value.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  return ids.length > 0 ? new Set(ids) : null;
+}
+
+function buildUrl(
+  path: string,
+  params: Record<string, string | number | undefined | null>
+) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== "" &&
+      value !== "all"
+    ) {
+      query.set(key, String(value));
+    }
+  });
+
+  const base = scopedUrl(path);
+  const qs = query.toString();
+
+  if (!qs) return base;
+  return `${base}${base.includes("?") ? "&" : "?"}${qs}`;
+}
+
+async function fetchJson<T>(
+  path: string,
+  params: Record<string, string | number | undefined | null> = {}
+): Promise<T> {
+  const res = await fetch(buildUrl(path, params), {
+    method: "GET",
+    headers: getApiHeaders(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Error ${res.status}: ${text || res.statusText}`);
+  }
+
+  return res.json();
+}
+
+function localTime(value?: string | null) {
   if (!value) return "-";
 
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "-";
 
   return new Intl.DateTimeFormat("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
+    timeZone: "America/Argentina/Buenos_Aires",
     hour: "2-digit",
     minute: "2-digit",
   }).format(d);
 }
 
-function n(value: number | null | undefined, suffix = "") {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "-";
-  }
+function localDateTime(value?: string | null) {
+  if (!value) return "-";
 
-  return `${Number(value).toLocaleString("es-AR", {
-    maximumFractionDigits: 2,
-  })}${suffix}`;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
 }
 
-function statusClass(value?: string | null) {
-  const v = String(value || "").toLowerCase();
+function localHHMM(value?: string | null) {
+  if (!value) return "";
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(d)
+    .replace(".", ":");
+}
+
+function statusStyle(status?: string) {
+  const s = String(status || "").toLowerCase();
 
   if (
-    v.includes("active") ||
-    v.includes("activo") ||
-    v.includes("low") ||
-    v.includes("high") ||
-    v.includes("crit")
+    s.includes("severo") ||
+    s.includes("activo") ||
+    s.includes("vacio") ||
+    s.includes("vacío") ||
+    s.includes("rebalse") ||
+    s.includes("muy")
   ) {
     return "border-red-200 bg-red-50 text-red-700";
   }
 
   if (
-    v.includes("run") ||
-    v.includes("encendida") ||
-    v.includes("normalizado") ||
-    v.includes("normalized")
+    s.includes("baja") ||
+    s.includes("prolongado") ||
+    s.includes("inestable")
   ) {
+    return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+
+  if (s.includes("revisar") || s.includes("muchos")) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function eventStyle(value?: string) {
+  const s = String(value || "").toLowerCase();
+
+  if (
+    s.includes("low_low") ||
+    s.includes("high_high") ||
+    s.includes("crítico") ||
+    s.includes("critico")
+  ) {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (s.includes("low") || s.includes("bajo")) {
+    return "border-blue-200 bg-blue-50 text-blue-700";
+  }
+
+  if (s.includes("high") || s.includes("alto")) {
+    return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+
+  if (s.includes("run") || s.includes("encendida")) {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
 
-  if (v.includes("stop") || v.includes("apagada")) {
+  if (s.includes("stop") || s.includes("apagada")) {
     return "border-slate-200 bg-slate-100 text-slate-700";
   }
 
-  return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-slate-200 bg-white text-slate-700";
 }
 
-function normalizeLabel(value?: string | null) {
-  return String(value || "-")
-    .replaceAll("Ã­", "í")
-    .replaceAll("Ã³", "ó")
-    .replaceAll("Ã¡", "á")
-    .replaceAll("Ã©", "é")
-    .replaceAll("Ãº", "ú")
-    .replaceAll("Ã±", "ñ")
-    .replaceAll("Ã", "Á")
-    .replaceAll("Ã‰", "É")
-    .replaceAll("Ã", "Í")
-    .replaceAll("Ã“", "Ó")
-    .replaceAll("Ãš", "Ú")
-    .replaceAll("Ã‘", "Ñ");
-}
+function CustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
 
-function Kpi({
-  title,
-  value,
-  help,
-  danger = false,
-}: {
-  title: string;
-  value: string | number;
-  help?: string;
-  danger?: boolean;
-}) {
   return (
-    <div
-      className={`rounded-2xl border bg-white p-5 shadow-sm ${
-        danger ? "border-red-200" : "border-slate-200"
-      }`}
-    >
-      <div className="text-sm font-medium text-slate-500">{title}</div>
-      <div
-        className={`mt-2 text-4xl font-bold ${
-          danger ? "text-red-700" : "text-slate-900"
-        }`}
-      >
-        {value}
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-xl">
+      <div className="mb-2 font-semibold text-slate-900">{label}</div>
+      <div className="space-y-1">
+        {payload.map((p: any) => (
+          <div key={p.dataKey} className="flex justify-between gap-4">
+            <span className="text-slate-500">{p.name || p.dataKey}</span>
+            <span className="font-semibold text-slate-900">
+              {typeof p.value === "number"
+                ? p.value.toLocaleString("es-AR", {
+                    maximumFractionDigits: 2,
+                  })
+                : p.value}
+            </span>
+          </div>
+        ))}
       </div>
-      {help ? <div className="mt-1 text-sm text-slate-500">{help}</div> : null}
     </div>
   );
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(scopedUrl(path), {
-    method: "GET",
-    headers: getApiHeaders(),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} cargando ${path}`);
-  }
-
-  return res.json();
-}
-
-export default function OperacionConfiabilidadMockup() {
-  const [summary, setSummary] = useState<OperationSummary | null>(null);
-  const [tankEvents, setTankEvents] = useState<TankCriticalEvent[]>([]);
-  const [pumps, setPumps] = useState<PumpOperation[]>([]);
-  const [locationId, setLocationId] = useState<string>("all");
-  const [onlyActiveTankEvents, setOnlyActiveTankEvents] = useState(false);
-  const [onlyRunningPumps, setOnlyRunningPumps] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-
-  async function loadData({ silent = false }: { silent?: boolean } = {}) {
-    try {
-      if (silent) setRefreshing(true);
-      else setLoading(true);
-
-      setError(null);
-
-      const [summaryData, tankData, pumpData] = await Promise.all([
-        fetchJson<ApiSummaryResponse>("/kpi/operation-reliability/summary"),
-        fetchJson<ApiListResponse<TankCriticalEvent>>(
-          "/kpi/operation-reliability/tank-events?limit=100"
-        ),
-        fetchJson<ApiListResponse<PumpOperation>>(
-          "/kpi/operation-reliability/pumps"
-        ),
-      ]);
-
-      setSummary(summaryData.summary);
-      setTankEvents(tankData.items || []);
-      setPumps(pumpData.items || []);
-      setLastRefresh(new Date());
-    } catch (e: any) {
-      setError(e?.message || "No se pudieron cargar los datos.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
-
-  useEffect(() => {
-    loadData();
-
-    const timer = window.setInterval(() => {
-      loadData({ silent: true });
-    }, 60_000);
-
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const locations = useMemo(() => {
-    const map = new Map<number, string>();
-
-    for (const p of pumps) {
-      if (p.location_id !== null && p.location_name) {
-        map.set(p.location_id, p.location_name);
-      }
-    }
-
-    for (const e of tankEvents) {
-      if (e.location_id !== null && e.location_name) {
-        map.set(e.location_id, e.location_name);
-      }
-    }
-
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [pumps, tankEvents]);
-
-  const filteredTankEvents = useMemo(() => {
-    return tankEvents.filter((e) => {
-      if (locationId !== "all" && String(e.location_id) !== locationId) {
-        return false;
-      }
-
-      if (onlyActiveTankEvents && e.status !== "active") {
-        return false;
-      }
-
-      return true;
-    });
-  }, [tankEvents, locationId, onlyActiveTankEvents]);
-
-  const filteredPumps = useMemo(() => {
-    return pumps.filter((p) => {
-      if (locationId !== "all" && String(p.location_id) !== locationId) {
-        return false;
-      }
-
-      if (onlyRunningPumps && p.current_state !== "run") {
-        return false;
-      }
-
-      return true;
-    });
-  }, [pumps, locationId, onlyRunningPumps]);
-
-  const activeEventsCount = summary?.active_tank_events ?? 0;
+function KpiCard({
+  label,
+  value,
+  help,
+  tone = "slate",
+}: {
+  label: string;
+  value: string;
+  help?: string;
+  tone?: KpiTone;
+}) {
+  const tones: Record<KpiTone, string> = {
+    slate: "border-slate-200 bg-white text-slate-900",
+    red: "border-red-200 bg-red-50 text-red-800",
+    orange: "border-orange-200 bg-orange-50 text-orange-800",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    blue: "border-blue-200 bg-blue-50 text-blue-800",
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Operación y confiabilidad
-              </h1>
-              <p className="mt-2 text-sm text-slate-600">
-                Eventos críticos de tanques y detalle operativo de bombas.
-              </p>
-            </div>
+    <div className={`rounded-3xl border p-5 shadow-sm ${tones[tone]}`}>
+      <div className="text-xs font-medium uppercase tracking-wide opacity-70">
+        {label}
+      </div>
+      <div className="mt-2 text-3xl font-black tracking-tight">{value}</div>
+      {help ? <div className="mt-1 text-xs opacity-70">{help}</div> : null}
+    </div>
+  );
+}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <select
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm outline-none"
+export default function ReliabilityPage({
+  locationId = "all",
+  selectedPumpIds = "all",
+  selectedTankIds = "all",
+}: Props) {
+  const [view, setView] = useState<ViewMode>("pumps");
+  const [month, setMonth] = useState(currentMonth());
+
+  const [pumpDaily, setPumpDaily] = useState<PumpDailyRow[]>([]);
+  const [tankDaily, setTankDaily] = useState<TankDailyRow[]>([]);
+  const [pumpTable, setPumpTable] = useState<PumpRankingRow[]>([]);
+  const [tankTable, setTankTable] = useState<TankRankingRow[]>([]);
+
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [dayEvents, setDayEvents] = useState<DayEvent[]>([]);
+
+  const [sortKey, setSortKey] = useState("problem_score");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const [loading, setLoading] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [error, setError] = useState("");
+  const [eventError, setEventError] = useState("");
+
+  const [eventSearch, setEventSearch] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState("all");
+  const [eventStatusFilter, setEventStatusFilter] = useState("all");
+  const [eventHourFrom, setEventHourFrom] = useState("");
+  const [eventHourTo, setEventHourTo] = useState("");
+  const [minDurationMinutes, setMinDurationMinutes] = useState("");
+
+  const locParam = safeLocationId(locationId);
+
+  const selectedPumpSet = useMemo(
+    () => normalizeIdSet(selectedPumpIds),
+    [selectedPumpIds]
+  );
+
+  const selectedTankSet = useMemo(
+    () => normalizeIdSet(selectedTankIds),
+    [selectedTankIds]
+  );
+
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const [pd, pr, td, tr] = await Promise.all([
+          fetchJson<{ ok: boolean; items: PumpDailyRow[] }>(
+            "/kpi/operation-reliability/pump-daily",
+            {
+              month,
+              location_id: locParam,
+            }
+          ),
+          fetchJson<{ ok: boolean; items: PumpRankingRow[] }>(
+            "/kpi/operation-reliability/pump-ranking",
+            {
+              month,
+              location_id: locParam,
+              limit: 100,
+            }
+          ),
+          fetchJson<{ ok: boolean; items: TankDailyRow[] }>(
+            "/kpi/operation-reliability/tank-daily",
+            {
+              month,
+              location_id: locParam,
+            }
+          ),
+          fetchJson<{ ok: boolean; items: TankRankingRow[] }>(
+            "/kpi/operation-reliability/tank-ranking",
+            {
+              month,
+              location_id: locParam,
+              limit: 100,
+            }
+          ),
+        ]);
+
+        if (!alive) return;
+
+        setPumpDaily(Array.isArray(pd.items) ? pd.items : []);
+        setPumpTable(Array.isArray(pr.items) ? pr.items : []);
+        setTankDaily(Array.isArray(td.items) ? td.items : []);
+        setTankTable(Array.isArray(tr.items) ? tr.items : []);
+
+        setSelectedDay(null);
+        setDayEvents([]);
+        setEventError("");
+      } catch (e: any) {
+        if (!alive) return;
+        setError(e?.message || "No se pudieron cargar los datos.");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    load();
+
+    return () => {
+      alive = false;
+    };
+  }, [month, locParam]);
+
+  async function loadDayEvents(day: string) {
+    setLoadingEvents(true);
+    setEventError("");
+    setDayEvents([]);
+
+    try {
+      const endpoint =
+        view === "pumps"
+          ? "/kpi/operation-reliability/pump-day-events"
+          : "/kpi/operation-reliability/tank-day-events";
+
+      const data = await fetchJson<{ ok: boolean; items: DayEvent[] }>(
+        endpoint,
+        {
+          day,
+          location_id: locParam,
+        }
+      );
+
+      setDayEvents(Array.isArray(data.items) ? data.items : []);
+    } catch (e: any) {
+      setEventError(e?.message || "No se pudo cargar el historial del día.");
+    } finally {
+      setLoadingEvents(false);
+    }
+  }
+
+  function resetEventFilters() {
+    setEventSearch("");
+    setEventTypeFilter("all");
+    setEventStatusFilter("all");
+    setEventHourFrom("");
+    setEventHourTo("");
+    setMinDurationMinutes("");
+  }
+
+  function selectDay(day: string) {
+    setSelectedDay(day);
+    setDayEvents([]);
+    resetEventFilters();
+    loadDayEvents(day);
+  }
+
+  function clearSelectedDay() {
+    setSelectedDay(null);
+    setDayEvents([]);
+    setEventError("");
+    resetEventFilters();
+  }
+
+  function changeView(next: ViewMode) {
+    setView(next);
+    setSelectedDay(null);
+    setDayEvents([]);
+    setEventError("");
+    resetEventFilters();
+    setSortKey("problem_score");
+    setSortDir("desc");
+  }
+
+  function handleBarClick(data: any) {
+    const day = data?.payload?.day_ts || data?.day_ts;
+    if (day) selectDay(String(day));
+  }
+
+  const filteredPumpDaily = useMemo(() => {
+    if (!selectedPumpSet) return pumpDaily;
+    return pumpDaily.filter((r) => selectedPumpSet.has(Number(r.pump_id)));
+  }, [pumpDaily, selectedPumpSet]);
+
+  const filteredTankDaily = useMemo(() => {
+    if (!selectedTankSet) return tankDaily;
+    return tankDaily.filter((r) => selectedTankSet.has(Number(r.tank_id)));
+  }, [tankDaily, selectedTankSet]);
+
+  const filteredPumpTable = useMemo(() => {
+    if (!selectedPumpSet) return pumpTable;
+    return pumpTable.filter((r) => selectedPumpSet.has(Number(r.pump_id)));
+  }, [pumpTable, selectedPumpSet]);
+
+  const filteredTankTable = useMemo(() => {
+    if (!selectedTankSet) return tankTable;
+    return tankTable.filter((r) => selectedTankSet.has(Number(r.tank_id)));
+  }, [tankTable, selectedTankSet]);
+
+  const pumpChart = useMemo((): ChartRow[] => {
+    const map = new Map<
+      string,
+      ChartRow & { availability_sum: number; availability_count: number }
+    >();
+
+    for (const r of filteredPumpDaily) {
+      const key = r.day_ts;
+      const curr =
+        map.get(key) ||
+        ({
+          day_ts: key,
+          total_starts: 0,
+          total_stops: 0,
+          total_problem_score: 0,
+          avg_availability_pct: null,
+          availability_sum: 0,
+          availability_count: 0,
+        } as ChartRow & {
+          availability_sum: number;
+          availability_count: number;
+        });
+
+      curr.total_starts = toNum(curr.total_starts) + toNum(r.starts_count);
+      curr.total_stops = toNum(curr.total_stops) + toNum(r.stops_count);
+      curr.total_problem_score =
+        toNum(curr.total_problem_score) + toNum(r.problem_score);
+
+      if (r.availability_pct !== null && r.availability_pct !== undefined) {
+        curr.availability_sum += toNum(r.availability_pct);
+        curr.availability_count += 1;
+        curr.avg_availability_pct = Number(
+          (curr.availability_sum / curr.availability_count).toFixed(2)
+        );
+      }
+
+      map.set(key, curr);
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => a.day_ts.localeCompare(b.day_ts))
+      .map(({ availability_sum, availability_count, ...r }) => r);
+  }, [filteredPumpDaily]);
+
+  const tankChart = useMemo((): ChartRow[] => {
+    const map = new Map<string, ChartRow>();
+
+    for (const r of filteredTankDaily) {
+      const key = r.day_ts;
+      const curr =
+        map.get(key) ||
+        ({
+          day_ts: key,
+          total_events: 0,
+          active_events: 0,
+          low_events: 0,
+          low_critical_events: 0,
+          high_events: 0,
+          high_critical_events: 0,
+          total_duration_seconds: 0,
+        } as ChartRow);
+
+      curr.total_events = toNum(curr.total_events) + toNum(r.total_events);
+      curr.active_events = toNum(curr.active_events) + toNum(r.active_events);
+      curr.low_events = toNum(curr.low_events) + toNum(r.low_events);
+      curr.low_critical_events =
+        toNum(curr.low_critical_events) + toNum(r.low_critical_events);
+      curr.high_events = toNum(curr.high_events) + toNum(r.high_events);
+      curr.high_critical_events =
+        toNum(curr.high_critical_events) + toNum(r.high_critical_events);
+      curr.total_duration_seconds =
+        toNum(curr.total_duration_seconds) + toNum(r.total_duration_seconds);
+
+      map.set(key, curr);
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.day_ts.localeCompare(b.day_ts)
+    );
+  }, [filteredTankDaily]);
+
+  const chartData = view === "pumps" ? pumpChart : tankChart;
+
+  const selectedDayDailyRows = useMemo(() => {
+    if (!selectedDay) return [];
+
+    return view === "pumps"
+      ? filteredPumpDaily.filter((r) => r.day_ts === selectedDay)
+      : filteredTankDaily.filter((r) => r.day_ts === selectedDay);
+  }, [selectedDay, view, filteredPumpDaily, filteredTankDaily]);
+
+  const filteredDayEvents = useMemo(() => {
+    const search = eventSearch.trim().toLowerCase();
+    const minSeconds = toNum(minDurationMinutes, 0) * 60;
+
+    return dayEvents.filter((event: any) => {
+      if (view === "pumps") {
+        if (selectedPumpSet && !selectedPumpSet.has(Number(event.pump_id))) {
+          return false;
+        }
+
+        if (eventTypeFilter !== "all" && event.state !== eventTypeFilter) {
+          return false;
+        }
+      } else {
+        if (selectedTankSet && !selectedTankSet.has(Number(event.tank_id))) {
+          return false;
+        }
+
+        if (
+          eventTypeFilter !== "all" &&
+          event.event_type !== eventTypeFilter
+        ) {
+          return false;
+        }
+
+        if (
+          eventStatusFilter !== "all" &&
+          event.status !== eventStatusFilter
+        ) {
+          return false;
+        }
+      }
+
+      if (eventHourFrom || eventHourTo) {
+        const hhmm = localHHMM(event.started_at);
+
+        if (eventHourFrom && hhmm && hhmm < eventHourFrom) {
+          return false;
+        }
+
+        if (eventHourTo && hhmm && hhmm > eventHourTo) {
+          return false;
+        }
+      }
+
+      if (minSeconds > 0 && toNum(event.duration_seconds) < minSeconds) {
+        return false;
+      }
+
+      if (search) {
+        const text =
+          view === "pumps"
+            ? `${event.pump_name || ""} ${event.location_name || ""} ${
+                event.state_label || ""
+              }`
+            : `${event.tank_name || ""} ${event.location_name || ""} ${
+                event.event_label || ""
+              } ${event.status_label || ""}`;
+
+        if (!text.toLowerCase().includes(search)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    dayEvents,
+    eventHourFrom,
+    eventHourTo,
+    eventSearch,
+    eventStatusFilter,
+    eventTypeFilter,
+    minDurationMinutes,
+    selectedPumpSet,
+    selectedTankSet,
+    view,
+  ]);
+
+  const sortedTable = useMemo(() => {
+    const rows =
+      view === "pumps" ? [...filteredPumpTable] : [...filteredTankTable];
+
+    rows.sort((a: any, b: any) => {
+      const av = toNum(a[sortKey], -999999);
+      const bv = toNum(b[sortKey], -999999);
+
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+
+    return rows;
+  }, [view, filteredPumpTable, filteredTankTable, sortKey, sortDir]);
+
+  const summary = useMemo(() => {
+    if (view === "pumps") {
+      const starts = filteredPumpDaily.reduce(
+        (acc, r) => acc + toNum(r.starts_count),
+        0
+      );
+      const stops = filteredPumpDaily.reduce(
+        (acc, r) => acc + toNum(r.stops_count),
+        0
+      );
+      const affected = filteredPumpTable.filter(
+        (r) => r.estado_operativo !== "normal"
+      ).length;
+      const availabilityRows = filteredPumpDaily.filter(
+        (r) => r.availability_pct !== null
+      );
+      const avgAvailability =
+        availabilityRows.length > 0
+          ? availabilityRows.reduce(
+              (acc, r) => acc + toNum(r.availability_pct),
+              0
+            ) / availabilityRows.length
+          : null;
+
+      return {
+        a: fmtInt(starts),
+        b: fmtInt(stops),
+        c: avgAvailability === null ? "-" : fmtPct(avgAvailability),
+        d: fmtInt(affected),
+        toneA: starts >= 80 ? "red" : starts >= 30 ? "orange" : "blue",
+        toneB: "slate",
+        toneC:
+          avgAvailability !== null && avgAvailability < 40
+            ? "orange"
+            : "emerald",
+        toneD: affected > 0 ? "orange" : "emerald",
+      };
+    }
+
+    const events = filteredTankDaily.reduce(
+      (acc, r) => acc + toNum(r.total_events),
+      0
+    );
+    const critical = filteredTankDaily.reduce(
+      (acc, r) =>
+        acc + toNum(r.low_critical_events) + toNum(r.high_critical_events),
+      0
+    );
+    const active = filteredTankDaily.reduce(
+      (acc, r) => acc + toNum(r.active_events),
+      0
+    );
+    const duration = filteredTankDaily.reduce(
+      (acc, r) => acc + toNum(r.total_duration_seconds),
+      0
+    );
+
+    return {
+      a: fmtInt(events),
+      b: fmtInt(critical),
+      c: fmtInt(active),
+      d: fmtDuration(duration),
+      toneA: events >= 50 ? "red" : events >= 20 ? "orange" : "blue",
+      toneB: critical > 0 ? "orange" : "emerald",
+      toneC: active > 0 ? "red" : "emerald",
+      toneD: "slate",
+    };
+  }, [view, filteredPumpDaily, filteredPumpTable, filteredTankDaily]);
+
+  function toggleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  const hasTableData = sortedTable.length > 0;
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Operación y confiabilidad
+            </div>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950">
+              Seguimiento mensual de {view === "pumps" ? "bombas" : "tanques"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Gráfico mensual, tabla ordenable e historial horario al seleccionar un día.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => changeView("pumps")}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  view === "pumps"
+                    ? "bg-slate-950 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white"
+                }`}
               >
-                <option value="all">Todas las ubicaciones</option>
-                {locations.map(([id, name]) => (
-                  <option key={id} value={String(id)}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+                Bombas
+              </button>
 
               <button
                 type="button"
-                onClick={() => loadData({ silent: true })}
-                className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:opacity-60"
-                disabled={refreshing}
+                onClick={() => changeView("tanks")}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  view === "tanks"
+                    ? "bg-slate-950 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white"
+                }`}
               >
-                {refreshing ? "Actualizando..." : "Actualizar"}
+                Tanques
               </button>
             </div>
-          </div>
 
-          <div className="mt-4 text-xs text-slate-500">
-            {lastRefresh
-              ? `Última actualización: ${formatDateTime(lastRefresh.toISOString())}`
-              : "Esperando datos..."}
-          </div>
-        </header>
+            <button
+              type="button"
+              onClick={() => {
+                setMonth(prevMonth(month));
+                clearSelectedDay();
+              }}
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              ← Mes anterior
+            </button>
 
-        {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => {
+                setMonth(e.target.value);
+                clearSelectedDay();
+              }}
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm outline-none"
+            />
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <Kpi
-            title="Eventos activos"
-            value={summary?.active_tank_events ?? "-"}
-            help="Tanques"
-            danger={activeEventsCount > 0}
-          />
-          <Kpi
-            title="Eventos históricos"
-            value={summary?.total_tank_events ?? "-"}
-            help="Mínimos y máximos"
-          />
-          <Kpi
-            title="Bombas encendidas"
-            value={summary?.pumps_running ?? "-"}
-            help="Estado actual"
-          />
-          <Kpi
-            title="Bombas apagadas"
-            value={summary?.pumps_stopped ?? "-"}
-            help="Estado actual"
-          />
-          <Kpi
-            title="Encendidos"
-            value={summary?.total_starts ?? "-"}
-            help="Últimos 30 días"
-          />
-          <Kpi
-            title="Apagados"
-            value={summary?.total_stops ?? "-"}
-            help="Últimos 30 días"
-          />
+            <button
+              type="button"
+              onClick={() => {
+                setMonth(nextMonth(month));
+                clearSelectedDay();
+              }}
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Mes siguiente →
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
+          <span className="rounded-full bg-slate-100 px-3 py-1">
+            Ubicación: {locationId === "all" ? "Todas" : locationId}
+          </span>
+          <span className="rounded-full bg-slate-100 px-3 py-1">
+            Mes: {month}
+          </span>
+          <span className="rounded-full bg-slate-100 px-3 py-1">
+            Selectores superiores aplicados
+          </span>
+        </div>
+      </section>
+
+      {error ? (
+        <section className="rounded-3xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+          {error}
         </section>
+      ) : null}
 
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {view === "pumps" ? (
+          <>
+            <KpiCard
+              label="Arranques"
+              value={summary.a}
+              help="Total del mes filtrado"
+              tone={summary.toneA as KpiTone}
+            />
+            <KpiCard
+              label="Paradas"
+              value={summary.b}
+              help="Eventos de apagado"
+              tone={summary.toneB as KpiTone}
+            />
+            <KpiCard
+              label="Disponibilidad prom."
+              value={summary.c}
+              help="Promedio de días con datos"
+              tone={summary.toneC as KpiTone}
+            />
+            <KpiCard
+              label="Bombas a revisar"
+              value={summary.d}
+              help="Estados distintos de normal"
+              tone={summary.toneD as KpiTone}
+            />
+          </>
+        ) : (
+          <>
+            <KpiCard
+              label="Eventos"
+              value={summary.a}
+              help="Total del mes filtrado"
+              tone={summary.toneA as KpiTone}
+            />
+            <KpiCard
+              label="Críticos"
+              value={summary.b}
+              help="Low-low + high-high"
+              tone={summary.toneB as KpiTone}
+            />
+            <KpiCard
+              label="Activos"
+              value={summary.c}
+              help="Eventos todavía activos"
+              tone={summary.toneC as KpiTone}
+            />
+            <KpiCard
+              label="Duración acum."
+              value={summary.d}
+              help="Tiempo total de eventos"
+              tone={summary.toneD as KpiTone}
+            />
+          </>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h3 className="text-lg font-black text-slate-950">
+              {view === "pumps"
+                ? "Arranques, paradas y disponibilidad por día"
+                : "Eventos de tanques por día"}
+            </h3>
+            <p className="text-sm text-slate-500">
+              Tocá una barra para ver el historial horario del día en la sección inferior.
+            </p>
+          </div>
+
+          {selectedDay ? (
+            <button
+              type="button"
+              onClick={clearSelectedDay}
+              className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+            >
+              Ver tabla mensual
+            </button>
+          ) : null}
+        </div>
+
+        <div className="h-[380px]">
+          {loading ? (
+            <div className="flex h-full items-center justify-center rounded-2xl bg-slate-50 text-sm text-slate-500">
+              Cargando datos...
+            </div>
+          ) : chartData.length === 0 ? (
+            <div className="flex h-full items-center justify-center rounded-2xl bg-slate-50 text-sm text-slate-500">
+              No hay datos para este mes o filtro.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={chartData.map((r) => ({
+                  ...r,
+                  day_label: dayLabel(r.day_ts),
+                }))}
+                margin={{ top: 12, right: 18, left: -8, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day_label" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+
+                {view === "pumps" ? (
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[0, 100]}
+                    tick={{ fontSize: 12 }}
+                  />
+                ) : null}
+
+                <Tooltip content={<CustomTooltip />} />
+                <Legend />
+
+                {view === "pumps" ? (
+                  <>
+                    <Bar
+                      yAxisId="left"
+                      name="Arranques"
+                      dataKey="total_starts"
+                      fill="#2563eb"
+                      radius={[8, 8, 0, 0]}
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                    <Bar
+                      yAxisId="left"
+                      name="Paradas"
+                      dataKey="total_stops"
+                      fill="#94a3b8"
+                      radius={[8, 8, 0, 0]}
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                    <Line
+                      yAxisId="right"
+                      name="Disponibilidad %"
+                      type="monotone"
+                      dataKey="avg_availability_pct"
+                      stroke="#16a34a"
+                      strokeWidth={3}
+                      dot={{ r: 4 }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Bar
+                      name="Bajo"
+                      dataKey="low_events"
+                      stackId="events"
+                      fill="#60a5fa"
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                    <Bar
+                      name="Bajo crítico"
+                      dataKey="low_critical_events"
+                      stackId="events"
+                      fill="#1d4ed8"
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                    <Bar
+                      name="Alto"
+                      dataKey="high_events"
+                      stackId="events"
+                      fill="#fb923c"
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                    <Bar
+                      name="Alto crítico"
+                      dataKey="high_critical_events"
+                      stackId="events"
+                      fill="#dc2626"
+                      radius={[8, 8, 0, 0]}
+                      cursor="pointer"
+                      onClick={handleBarClick}
+                    />
+                  </>
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
+
+      {!selectedDay ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="text-2xl font-semibold">Tanques</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Historial de eventos críticos: mínimos y máximos configurados.
+              <h3 className="text-lg font-black text-slate-950">
+                Tabla mensual ordenable de{" "}
+                {view === "pumps" ? "bombas" : "tanques"}
+              </h3>
+              <p className="text-sm text-slate-500">
+                Tocá una columna para ordenar por disponibilidad, arranques,
+                eventos, duración o score.
               </p>
             </div>
-
-            <label className="flex items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={onlyActiveTankEvents}
-                onChange={(e) => setOnlyActiveTankEvents(e.target.checked)}
-              />
-              Solo activos
-            </label>
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">Evento</th>
-                  <th className="px-4 py-3 text-left font-medium">Tanque</th>
-                  <th className="px-4 py-3 text-left font-medium">Ubicación</th>
-                  <th className="px-4 py-3 text-right font-medium">Límite</th>
-                  <th className="px-4 py-3 text-right font-medium">Valor</th>
-                  <th className="px-4 py-3 text-right font-medium">Inicio</th>
-                  <th className="px-4 py-3 text-right font-medium">Duración</th>
-                  <th className="px-4 py-3 text-right font-medium">Estado</th>
+                  <th className="px-4 py-3 text-left font-bold">Equipo</th>
+                  <th className="px-4 py-3 text-left font-bold">Ubicación</th>
+
+                  {view === "pumps" ? (
+                    <>
+                      <th
+                        onClick={() => toggleSort("starts_count")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Arranques
+                      </th>
+                      <th
+                        onClick={() => toggleSort("stops_count")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Paradas
+                      </th>
+                      <th
+                        onClick={() => toggleSort("availability_pct")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Disponibilidad
+                      </th>
+                      <th
+                        onClick={() => toggleSort("running_seconds")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        T. encendida
+                      </th>
+                      <th
+                        onClick={() => toggleSort("stopped_seconds")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        T. apagada
+                      </th>
+                      <th
+                        onClick={() => toggleSort("problem_score")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Score
+                      </th>
+                    </>
+                  ) : (
+                    <>
+                      <th
+                        onClick={() => toggleSort("total_events")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Eventos
+                      </th>
+                      <th
+                        onClick={() => toggleSort("low_critical_events")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Bajo crítico
+                      </th>
+                      <th
+                        onClick={() => toggleSort("high_critical_events")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Alto crítico
+                      </th>
+                      <th
+                        onClick={() => toggleSort("min_detected_value")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Valor mín.
+                      </th>
+                      <th
+                        onClick={() => toggleSort("max_detected_value")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Valor máx.
+                      </th>
+                      <th
+                        onClick={() => toggleSort("total_duration_seconds")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Duración
+                      </th>
+                      <th
+                        onClick={() => toggleSort("problem_score")}
+                        className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
+                      >
+                        Score
+                      </th>
+                    </>
+                  )}
+
+                  <th className="px-4 py-3 text-right font-bold">Estado</th>
                 </tr>
               </thead>
 
               <tbody>
-                {loading ? (
+                {!hasTableData ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
-                      Cargando eventos...
-                    </td>
-                  </tr>
-                ) : filteredTankEvents.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
-                      No hay eventos críticos para mostrar.
+                    <td
+                      colSpan={view === "pumps" ? 9 : 10}
+                      className="px-4 py-10 text-center text-slate-500"
+                    >
+                      No hay datos para mostrar.
                     </td>
                   </tr>
                 ) : (
-                  filteredTankEvents.map((event) => (
-                    <tr key={event.id} className="border-t border-slate-200">
-                      <td className="px-4 py-4 font-medium">
-                        {normalizeLabel(event.event_label)}
+                  sortedTable.map((r: any) => (
+                    <tr
+                      key={`${view}-${
+                        view === "pumps" ? r.pump_id : r.tank_id
+                      }`}
+                      className="border-t border-slate-200 hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-4 font-bold text-slate-900">
+                        {view === "pumps" ? r.pump_name : r.tank_name}
                       </td>
-                      <td className="px-4 py-4">{event.tank_name}</td>
-                      <td className="px-4 py-4">{event.location_name || "-"}</td>
-                      <td className="px-4 py-4 text-right">
-                        {n(event.configured_limit, "%")}
+                      <td className="px-4 py-4 text-slate-600">
+                        {r.location_name || "-"}
                       </td>
-                      <td className="px-4 py-4 text-right font-semibold">
-                        {n(event.detected_value, "%")}
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        {formatDateTime(event.started_at)}
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        {event.status === "active"
-                          ? "Activo"
-                          : event.duration_label || "-"}
-                      </td>
+
+                      {view === "pumps" ? (
+                        <>
+                          <td className="px-4 py-4 text-right">
+                            {fmtInt(r.starts_count)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtInt(r.stops_count)}
+                          </td>
+                          <td className="px-4 py-4 text-right font-semibold">
+                            {fmtPct(r.availability_pct)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtDuration(r.running_seconds)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtDuration(r.stopped_seconds)}
+                          </td>
+                          <td className="px-4 py-4 text-right font-black">
+                            {fmtInt(r.problem_score)}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-4 text-right">
+                            {fmtInt(r.total_events)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtInt(r.low_critical_events)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtInt(r.high_critical_events)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtNum(r.min_detected_value, 2)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtNum(r.max_detected_value, 2)}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {fmtDuration(r.total_duration_seconds)}
+                          </td>
+                          <td className="px-4 py-4 text-right font-black">
+                            {fmtInt(r.problem_score)}
+                          </td>
+                        </>
+                      )}
+
                       <td className="px-4 py-4 text-right">
                         <span
-                          className={`rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
-                            event.status
+                          className={`rounded-full border px-3 py-1 text-xs font-bold ${statusStyle(
+                            r.estado_operativo
                           )}`}
                         >
-                          {normalizeLabel(event.status_label)}
+                          {r.estado_operativo}
                         </span>
                       </td>
                     </tr>
@@ -441,103 +1384,407 @@ export default function OperacionConfiabilidadMockup() {
             </table>
           </div>
         </section>
-
+      ) : (
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="text-2xl font-semibold">Bombas</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Resumen de encendidos, apagados y tiempos acumulados de los últimos 30 días.
+              <h3 className="text-lg font-black text-slate-950">
+                Historial horario del {dayLabel(selectedDay)}
+              </h3>
+              <p className="text-sm text-slate-500">
+                {view === "pumps"
+                  ? "Encendidos, apagados, horarios y duración de cada estado."
+                  : "Eventos de nivel, valores detectados, horarios y duración."}
               </p>
             </div>
 
-            <label className="flex items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={onlyRunningPumps}
-                onChange={(e) => setOnlyRunningPumps(e.target.checked)}
-              />
-              Solo encendidas
-            </label>
+            <button
+              type="button"
+              onClick={clearSelectedDay}
+              className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Volver a tabla mensual
+            </button>
           </div>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <input
+              value={eventSearch}
+              onChange={(e) => setEventSearch(e.target.value)}
+              placeholder="Buscar equipo o ubicación"
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+            />
+
+            <select
+              value={eventTypeFilter}
+              onChange={(e) => setEventTypeFilter(e.target.value)}
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+            >
+              <option value="all">Todos los tipos</option>
+              {view === "pumps" ? (
+                <>
+                  <option value="run">Encendida</option>
+                  <option value="stop">Apagada</option>
+                </>
+              ) : (
+                <>
+                  <option value="low">Nivel bajo</option>
+                  <option value="low_low">Nivel bajo crítico</option>
+                  <option value="high">Nivel alto</option>
+                  <option value="high_high">Nivel alto crítico</option>
+                </>
+              )}
+            </select>
+
+            {view === "tanks" ? (
+              <select
+                value={eventStatusFilter}
+                onChange={(e) => setEventStatusFilter(e.target.value)}
+                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+              >
+                <option value="all">Todos los estados</option>
+                <option value="active">Activo</option>
+                <option value="normalized">Normalizado</option>
+              </select>
+            ) : (
+              <div className="hidden xl:block" />
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="time"
+                value={eventHourFrom}
+                onChange={(e) => setEventHourFrom(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                title="Desde"
+              />
+              <input
+                type="time"
+                value={eventHourTo}
+                onChange={(e) => setEventHourTo(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                title="Hasta"
+              />
+            </div>
+
+            <input
+              type="number"
+              min={0}
+              value={minDurationMinutes}
+              onChange={(e) => setMinDurationMinutes(e.target.value)}
+              placeholder="Duración mín. min"
+              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+            />
+          </div>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {view === "pumps" ? (
+              <>
+                <KpiCard
+                  label="Eventos del día"
+                  value={fmtInt(filteredDayEvents.length)}
+                  help="Encendidos y apagados filtrados"
+                  tone="blue"
+                />
+                <KpiCard
+                  label="Encendidos"
+                  value={fmtInt(
+                    filteredDayEvents.filter((e: any) => e.state === "run")
+                      .length
+                  )}
+                  help="Estados run"
+                  tone="emerald"
+                />
+                <KpiCard
+                  label="Apagados"
+                  value={fmtInt(
+                    filteredDayEvents.filter((e: any) => e.state === "stop")
+                      .length
+                  )}
+                  help="Estados stop"
+                  tone="slate"
+                />
+                <KpiCard
+                  label="Duración acum."
+                  value={fmtDuration(
+                    filteredDayEvents.reduce(
+                      (acc: number, e: any) =>
+                        acc + toNum(e.duration_seconds),
+                      0
+                    )
+                  )}
+                  help="Tiempo total filtrado"
+                  tone="orange"
+                />
+              </>
+            ) : (
+              <>
+                <KpiCard
+                  label="Eventos del día"
+                  value={fmtInt(filteredDayEvents.length)}
+                  help="Eventos filtrados"
+                  tone="blue"
+                />
+                <KpiCard
+                  label="Críticos"
+                  value={fmtInt(
+                    filteredDayEvents.filter((e: any) =>
+                      ["low_low", "high_high"].includes(e.event_type)
+                    ).length
+                  )}
+                  help="Bajo crítico + alto crítico"
+                  tone="orange"
+                />
+                <KpiCard
+                  label="Activos"
+                  value={fmtInt(
+                    filteredDayEvents.filter((e: any) => e.status === "active")
+                      .length
+                  )}
+                  help="Sin normalizar"
+                  tone="red"
+                />
+                <KpiCard
+                  label="Duración acum."
+                  value={fmtDuration(
+                    filteredDayEvents.reduce(
+                      (acc: number, e: any) =>
+                        acc + toNum(e.duration_seconds),
+                      0
+                    )
+                  )}
+                  help="Tiempo total filtrado"
+                  tone="slate"
+                />
+              </>
+            )}
+          </div>
+
+          {eventError ? (
+            <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {eventError}
+            </div>
+          ) : null}
 
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">Bomba</th>
-                  <th className="px-4 py-3 text-left font-medium">Ubicación</th>
-                  <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  <th className="px-4 py-3 text-right font-medium">Encendidos</th>
-                  <th className="px-4 py-3 text-right font-medium">Apagados</th>
-                  <th className="px-4 py-3 text-right font-medium">
-                    Tiempo encendida
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium">
-                    Tiempo frenada
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium">
-                    Disponibilidad
-                  </th>
-                  <th className="px-4 py-3 text-right font-medium">
-                    Último evento
-                  </th>
+                  <th className="px-4 py-3 text-left font-bold">Hora</th>
+                  <th className="px-4 py-3 text-left font-bold">Equipo</th>
+                  <th className="px-4 py-3 text-left font-bold">Ubicación</th>
+                  <th className="px-4 py-3 text-left font-bold">Evento</th>
+
+                  {view === "tanks" ? (
+                    <>
+                      <th className="px-4 py-3 text-right font-bold">
+                        Valor / límite
+                      </th>
+                      <th className="px-4 py-3 text-right font-bold">
+                        Estado
+                      </th>
+                    </>
+                  ) : null}
+
+                  <th className="px-4 py-3 text-right font-bold">Fin</th>
+                  <th className="px-4 py-3 text-right font-bold">Duración</th>
                 </tr>
               </thead>
 
               <tbody>
-                {loading ? (
+                {loadingEvents ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
-                      Cargando bombas...
+                    <td
+                      colSpan={view === "tanks" ? 8 : 6}
+                      className="px-4 py-10 text-center text-slate-500"
+                    >
+                      Cargando historial...
                     </td>
                   </tr>
-                ) : filteredPumps.length === 0 ? (
+                ) : filteredDayEvents.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
-                      No hay bombas para mostrar.
+                    <td
+                      colSpan={view === "tanks" ? 8 : 6}
+                      className="px-4 py-10 text-center text-slate-500"
+                    >
+                      No hay eventos para los filtros aplicados.
                     </td>
                   </tr>
                 ) : (
-                  filteredPumps.map((pump) => (
-                    <tr key={pump.pump_id} className="border-t border-slate-200">
-                      <td className="px-4 py-4 font-medium text-slate-900">
-                        {pump.pump_name}
-                      </td>
-                      <td className="px-4 py-4">{pump.location_name || "-"}</td>
-                      <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
-                            pump.current_state
-                          )}`}
+                  filteredDayEvents
+                    .slice()
+                    .sort(
+                      (a: any, b: any) =>
+                        new Date(a.started_at).getTime() -
+                        new Date(b.started_at).getTime()
+                    )
+                    .map((event: any) => {
+                      const label =
+                        view === "pumps"
+                          ? event.state_label
+                          : event.event_label;
+
+                      const equipment =
+                        view === "pumps"
+                          ? event.pump_name
+                          : event.tank_name;
+
+                      const rawType =
+                        view === "pumps" ? event.state : event.event_type;
+
+                      return (
+                        <tr
+                          key={`${view}-event-${event.id}`}
+                          className="border-t border-slate-200 hover:bg-slate-50"
                         >
-                          {normalizeLabel(pump.current_state_label)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-right">{pump.starts_count}</td>
-                      <td className="px-4 py-4 text-right">{pump.stops_count}</td>
-                      <td className="px-4 py-4 text-right">
-                        {pump.running_time_label}
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        {pump.stopped_time_label}
-                      </td>
-                      <td className="px-4 py-4 text-right font-semibold">
-                        {pump.availability_pct === null
-                          ? "-"
-                          : n(pump.availability_pct, "%")}
-                      </td>
-                      <td className="px-4 py-4 text-right text-slate-600">
-                        {normalizeLabel(pump.last_activity_label)}
-                      </td>
-                    </tr>
-                  ))
+                          <td className="px-4 py-4 font-bold text-slate-900">
+                            {localTime(event.started_at)}
+                          </td>
+
+                          <td className="px-4 py-4 font-semibold text-slate-900">
+                            {equipment || "-"}
+                          </td>
+
+                          <td className="px-4 py-4 text-slate-600">
+                            {event.location_name || "-"}
+                          </td>
+
+                          <td className="px-4 py-4">
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs font-bold ${eventStyle(
+                                rawType || label
+                              )}`}
+                            >
+                              {label || "-"}
+                            </span>
+                          </td>
+
+                          {view === "tanks" ? (
+                            <>
+                              <td className="px-4 py-4 text-right">
+                                <span className="font-bold text-slate-900">
+                                  {fmtNum(event.detected_value, 2)}
+                                </span>
+                                <span className="text-slate-400">
+                                  {" "}
+                                  / {fmtNum(event.configured_limit, 2)}
+                                </span>
+                              </td>
+
+                              <td className="px-4 py-4 text-right">
+                                <span
+                                  className={`rounded-full border px-3 py-1 text-xs font-bold ${statusStyle(
+                                    event.status_label || event.status
+                                  )}`}
+                                >
+                                  {event.status_label || "-"}
+                                </span>
+                              </td>
+                            </>
+                          ) : null}
+
+                          <td className="px-4 py-4 text-right text-slate-600">
+                            {event.ended_at
+                              ? localDateTime(event.ended_at)
+                              : "Activo"}
+                          </td>
+
+                          <td className="px-4 py-4 text-right font-semibold">
+                            {event.duration_label ||
+                              fmtDuration(event.duration_seconds)}
+                          </td>
+                        </tr>
+                      );
+                    })
                 )}
               </tbody>
             </table>
           </div>
+
+          {selectedDayDailyRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+              <h4 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-500">
+                Resumen agregado del día
+              </h4>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {selectedDayDailyRows
+                  .slice()
+                  .sort((a: any, b: any) =>
+                    view === "pumps"
+                      ? toNum(b.problem_score) - toNum(a.problem_score)
+                      : toNum(b.total_events) - toNum(a.total_events)
+                  )
+                  .slice(0, 8)
+                  .map((row: any) => (
+                    <div
+                      key={`${selectedDay}-summary-${
+                        view === "pumps" ? row.pump_id : row.tank_id
+                      }`}
+                      className="rounded-2xl border border-slate-200 bg-white p-4"
+                    >
+                      <div className="font-bold text-slate-900">
+                        {view === "pumps" ? row.pump_name : row.tank_name}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {row.location_name || "Sin ubicación"}
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                        {view === "pumps" ? (
+                          <>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Arranques</div>
+                              <div className="font-black">
+                                {fmtInt(row.starts_count)}
+                              </div>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Disp.</div>
+                              <div className="font-black">
+                                {fmtPct(row.availability_pct)}
+                              </div>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Score</div>
+                              <div className="font-black">
+                                {fmtInt(row.problem_score)}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Eventos</div>
+                              <div className="font-black">
+                                {fmtInt(row.total_events)}
+                              </div>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Críticos</div>
+                              <div className="font-black">
+                                {fmtInt(
+                                  toNum(row.low_critical_events) +
+                                    toNum(row.high_critical_events)
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-xl bg-slate-50 p-2">
+                              <div className="text-slate-500">Duración</div>
+                              <div className="font-black">
+                                {fmtDuration(row.total_duration_seconds)}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
         </section>
-      </div>
+      )}
     </div>
   );
 }

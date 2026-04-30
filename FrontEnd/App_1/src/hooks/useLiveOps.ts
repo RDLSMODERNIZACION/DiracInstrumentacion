@@ -1,64 +1,96 @@
 // src/hooks/useLiveOps.ts
 //
-// Hook LIVE de Operación: devuelve series sincronizadas para
-//  - Bombas: cantidad de bombas ON (perfil continuo, carry-forward en backend)
-//  - Tanques: nivel promedio del scope (LOCF opcional)
-// Soporta períodos largos con bucket y polling.
+// Hook PRO de Operación.
+// Optimizado para que los gráficos aparezcan primero:
+// 1) Carga inmediata: level-1m + on-1m
+// 2) Segundo plano: summary-24h + eventos + timeline opcional
 //
-// ✅ Update (24h fijo):
-// - Bucket por defecto = 5min (y backend bombas fuerza 5min).
-// - Polling adaptativo: si la pestaña está oculta, baja frecuencia.
-// - Abort real por request (evita solaparse y acumular latencia).
-// - Dedupe ya lo hace graphs.ts, pero acá además evitamos overlap de cargas.
-// - Sanitiza arrays para deps estables.
-//
-// ✅ Debug mejorado:
-// - Logs de parámetros efectivos (scope, filtros, bucket, agg).
-// - Logs de conteos: max/avg/unique de is_on.
-// - Detecta valores imposibles (ej. > cap).
-// - Clamp opcional (siempre activo) para asegurar conteo consistente.
-//
+// Mantiene compatibilidad con el front:
+// - tankTs.timestamps
+// - tankTs.level_percent
+// - pumpTs.timestamps
+// - pumpTs.is_on
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchPumpsLive,
-  fetchTanksLive,
-  type PumpsLiveResp,
-  type TanksLiveResp,
-  type PumpsLiveArgs,
-  type TanksLiveArgs,
+  fetchOperationPumpSummary24h,
+  fetchOperationPumpsOn1m,
+  fetchOperationPumpTimeline1m,
+  fetchOperationPumpEvents,
+  fetchOperationTankSummary24h,
+  fetchOperationTankLevel1m,
+  fetchOperationTankEvents,
+
+  type PumpOperationSummaryResp,
+  type PumpOperationOn1mResp,
+  type PumpOperationTimelineResp,
+  type PumpOperationEventsResp,
+
+  type TankOperationSummaryResp,
+  type TankOperationLevelResp,
+  type TankOperationEventsResp,
 } from "@/api/graphs";
 
-export type TankTs = { timestamps?: number[]; level_percent?: Array<number | null> };
-export type PumpTs = { timestamps?: number[]; is_on?: Array<number | null> };
+export type TankTs = {
+  timestamps?: number[];
+  level_percent?: Array<number | null>;
+  level_min?: Array<number | null>;
+  level_max?: Array<number | null>;
+};
+
+export type PumpTs = {
+  timestamps?: number[];
+  is_on?: Array<number | null>;
+  pumps_off?: Array<number | null>;
+  pumps_online?: Array<number | null>;
+  pumps_offline?: Array<number | null>;
+};
 
 type Args = {
   locationId?: number | "all";
   companyId?: number;
+
   pumpIds?: number[];
   tankIds?: number[];
-  periodHours?: number; // default 24
-  bucket?: "1min" | "5min" | "15min" | "1h" | "1d"; // si no viene: auto (ver abajo)
-  pumpAggMode?: "avg" | "max"; // default "max" (conteo ON por bucket)
-  pumpRoundCounts?: boolean; // default true
-  tankAgg?: "avg" | "last"; // default "avg"
-  tankCarry?: boolean; // default true
-  connectedOnly?: boolean; // default true
-  pollMs?: number; // default 15000
-  pollMsHidden?: number; // default 60000 (cuando la pestaña está oculta)
 
-  /** ✅ safety: limita is_on al máximo posible (selección o total) */
-  clampCounts?: boolean; // default true
+  periodHours?: number;
+  bucket?: "1min" | "5min" | "15min" | "1h" | "1d";
+
+  pollMs?: number;
+  pollMsHidden?: number;
+
+  loadPumpTimeline?: boolean;
+  loadPumpEvents?: boolean;
+  loadTankEvents?: boolean;
+
+  limitTimeline?: number;
+  limitEvents?: number;
 };
 
-type LiveOps = {
+export type LiveOps = {
   tankTs: TankTs | null;
   pumpTs: PumpTs | null;
+
+  tanksSummary: TankOperationSummaryResp | null;
+  pumpsSummary: PumpOperationSummaryResp | null;
+
+  tankLevel: TankOperationLevelResp | null;
+  pumpsOn: PumpOperationOn1mResp | null;
+
+  pumpTimeline: PumpOperationTimelineResp | null;
+  pumpEvents: PumpOperationEventsResp | null;
+  tankEvents: TankOperationEventsResp | null;
+
   pumpsTotal?: number;
   pumpsConnected?: number;
   tanksTotal?: number;
   tanksConnected?: number;
-  window?: { start: number; end: number }; // epoch ms (alineado a minuto)
+
+  window?: {
+    start: number;
+    end: number;
+  };
+
   meta?: {
     bucket: NonNullable<Args["bucket"]>;
     lastOkAt?: number;
@@ -67,12 +99,59 @@ type LiveOps = {
   };
 };
 
-// =======================
-// Debug helpers
-// =======================
-
 function hasWindow() {
   return typeof window !== "undefined";
+}
+
+function floorToMinute(ms: number) {
+  const d = new Date(ms);
+  d.setSeconds(0, 0);
+  return d.getTime();
+}
+
+function stableCsv(nums?: number[]) {
+  if (!nums || !nums.length) return "";
+
+  return [...nums]
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b)
+    .join(",");
+}
+
+function pickAutoBucket(hours: number): NonNullable<Args["bucket"]> {
+  if (hours >= 24 * 30) return "1d";
+  if (hours > 48) return "1h";
+  if (hours > 24) return "15min";
+  return "5min";
+}
+
+function toNumOrNull(v: any): number | null {
+  if (v === null || v === undefined || v === "") return null;
+
+  const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toMs(v: any): number | null {
+  if (v === null || v === undefined || v === "") return null;
+
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return null;
+    return v > 2_000_000_000 ? v : v * 1000;
+  }
+
+  if (typeof v === "string") {
+    const n = Number(v);
+
+    if (Number.isFinite(n)) {
+      return n > 2_000_000_000 ? n : n * 1000;
+    }
+
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
+  }
+
+  return null;
 }
 
 const LIVEOPS_DEBUG =
@@ -83,327 +162,365 @@ function dlog(...args: any[]) {
   if (LIVEOPS_DEBUG) console.debug("[useLiveOps]", ...args);
 }
 
-function dwarn(...args: any[]) {
-  if (LIVEOPS_DEBUG) console.warn("[useLiveOps]", ...args);
-}
-
-function perfNow() {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-// ===== utilitarios de tiempo =====
-function floorToMinute(ms: number) {
-  const d = new Date(ms);
-  d.setSeconds(0, 0);
-  return d.getTime();
-}
-
-function stableCsv(nums?: number[]) {
-  if (!nums || !nums.length) return "";
-  const copy = [...nums].filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
-  return copy.join(",");
-}
-
-/** ✅ 24h -> 5min por defecto (mejor performance + UX) */
-function pickAutoBucket(hours: number): NonNullable<Args["bucket"]> {
-  if (hours >= 24 * 30) return "1d";
-  if (hours > 48) return "1h";
-  if (hours > 24) return "15min";
-  return "5min";
-}
-
-function toNumOrNull(v: any): number | null {
-  if (v == null) return null;
-  const n = typeof v === "string" ? Number(v) : v;
-  return Number.isFinite(n) ? Number(n) : null;
-}
-
-function clamp01ToCap(v: number | null, cap?: number) {
-  if (v == null) return null;
-  if (cap == null) return Math.max(0, v);
-  return Math.max(0, Math.min(v, cap));
-}
-
-function stats(values: Array<number | null>) {
-  const xs = values.map((v) => (v == null ? NaN : Number(v))).filter((n) => Number.isFinite(n)) as number[];
-  const max = xs.length ? Math.max(...xs) : 0;
-  const min = xs.length ? Math.min(...xs) : 0;
-  const avg = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
-  const uniq = Array.from(new Set(xs)).slice(0, 20);
-  return { count: xs.length, min, max, avg, uniq };
-}
-
 export function useLiveOps({
   locationId,
   companyId,
+
   pumpIds,
   tankIds,
+
   periodHours = 24,
   bucket,
-  pumpAggMode = "max", // ✅ mejor default para “conteo ON”
-  pumpRoundCounts = true, // ✅ mejor default para conteos
-  tankAgg = "avg",
-  tankCarry = true,
-  connectedOnly = true,
-  pollMs = 15_000,
-  pollMsHidden = 60_000,
-  clampCounts = true,
+
+  pollMs = 60_000,
+  pollMsHidden = 120_000,
+
+  // Optimización: por defecto no traemos timeline-1m porque era el request más pesado.
+  // Si en algún momento querés detalle de nombres por minuto, pasá loadPumpTimeline: true.
+  loadPumpTimeline = false,
+
+  loadPumpEvents = true,
+  loadTankEvents = true,
+
+  limitTimeline = 0,
+  limitEvents = 150,
 }: Args = {}): LiveOps {
-  const [p, setP] = useState<PumpsLiveResp | null>(null);
-  const [t, setT] = useState<TanksLiveResp | null>(null);
+  const [tankLevel, setTankLevel] =
+    useState<TankOperationLevelResp | null>(null);
+
+  const [tanksSummary, setTanksSummary] =
+    useState<TankOperationSummaryResp | null>(null);
+
+  const [tankEvents, setTankEvents] =
+    useState<TankOperationEventsResp | null>(null);
+
+  const [pumpsOn, setPumpsOn] =
+    useState<PumpOperationOn1mResp | null>(null);
+
+  const [pumpsSummary, setPumpsSummary] =
+    useState<PumpOperationSummaryResp | null>(null);
+
+  const [pumpTimeline, setPumpTimeline] =
+    useState<PumpOperationTimelineResp | null>(null);
+
+  const [pumpEvents, setPumpEvents] =
+    useState<PumpOperationEventsResp | null>(null);
+
   const [win, setWin] = useState<{ start: number; end: number }>();
   const [lastOkAt, setLastOkAt] = useState<number>();
   const [lastErr, setLastErr] = useState<string>();
   const [isLoading, setIsLoading] = useState(false);
 
-  const effBucket: NonNullable<Args["bucket"]> = bucket ?? pickAutoBucket(periodHours);
+  const effBucket: NonNullable<Args["bucket"]> =
+    bucket ?? pickAutoBucket(periodHours);
+
   const locId = typeof locationId === "number" ? locationId : undefined;
 
   const pumpIdsKey = useMemo(() => stableCsv(pumpIds), [pumpIds]);
   const tankIdsKey = useMemo(() => stableCsv(tankIds), [tankIds]);
 
-  // control de concurrencia
   const seqRef = useRef(0);
-  const inFlightRef = useRef<AbortController | null>(null);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
-    if (!hasWindow()) {
-      dlog("no window detected (SSR/test), skipping live polling");
-      return;
-    }
+    if (!hasWindow()) return;
 
     let alive = true;
-    const seq = ++seqRef.current;
+    let timer: number | undefined;
 
     const runLoad = async () => {
-      // Evitar overlap: cancelamos request anterior si todavía está en vuelo
-      if (inFlightRef.current) inFlightRef.current.abort();
+      if (loadingRef.current) return;
 
-      const ac = new AbortController();
-      inFlightRef.current = ac;
+      const seq = ++seqRef.current;
 
+      loadingRef.current = true;
       setIsLoading(true);
 
-      const t0 = perfNow();
       try {
         const end = floorToMinute(Date.now());
         const start = end - periodHours * 3600_000;
+
         setWin({ start, end });
 
         const common = {
           from: new Date(start).toISOString(),
           to: new Date(end).toISOString(),
-          companyId, // camelCase -> graphs.ts lo mapea a company_id
+          companyId,
+          locationId: locId,
         };
 
-        const pumpsArgs: PumpsLiveArgs = {
+        const pumpScope = {
           ...common,
-          locationId: locId,
           pumpIds: pumpIds && pumpIds.length ? pumpIds : undefined,
-          bucket: effBucket,
-          aggMode: pumpAggMode,
-          roundCounts: pumpRoundCounts,
-          connectedOnly,
         };
 
-        const tanksArgs: TanksLiveArgs = {
+        const tankScope = {
           ...common,
-          locationId: locId,
           tankIds: tankIds && tankIds.length ? tankIds : undefined,
-          agg: tankAgg,
-          carry: tankCarry,
-          bucket: effBucket,
-          connectedOnly,
         };
 
         dlog("poll start", {
           seq,
-          scope: { locId, companyId },
-          filters: { pumpIds: pumpIds?.length ? pumpIds : "all", tankIds: tankIds?.length ? tankIds : "all" },
-          window: { start, end },
+          locationId: locId,
+          companyId,
+          pumpIds,
+          tankIds,
+          periodHours,
           effBucket,
-          pumpAggMode,
-          pumpRoundCounts,
-          tankAgg,
-          tankCarry,
-          connectedOnly,
+          loadPumpTimeline,
+          loadPumpEvents,
+          loadTankEvents,
         });
 
-        const [pRes, tRes] = await Promise.all([
-          // @ts-ignore
-          fetchPumpsLive({ ...pumpsArgs, signal: ac.signal } as any),
-          // @ts-ignore
-          fetchTanksLive({ ...tanksArgs, signal: ac.signal } as any),
+        // 1) PRIMERO: datos mínimos para pintar gráficos rápido.
+        const [tankLevelRes, pumpsOnRes] = await Promise.all([
+          fetchOperationTankLevel1m({
+            ...tankScope,
+            bucket: effBucket,
+            aggregate: true,
+            limit: 300000,
+          }),
+
+          fetchOperationPumpsOn1m({
+            ...pumpScope,
+          }),
         ]);
 
         if (!alive || seq !== seqRef.current) {
-          dlog("discarding response (stale seq)", { seq, currentSeq: seqRef.current });
+          loadingRef.current = false;
           return;
         }
 
-        // ===== LOGS IMPORTANTES (bombas) =====
-        const rawIsOn = Array.isArray((pRes as any)?.is_on) ? ((pRes as any).is_on as any[]) : [];
-        const rawNums = rawIsOn.map(toNumOrNull);
+        setTankLevel(tankLevelRes);
+        setPumpsOn(pumpsOnRes);
 
-        const cap =
-          (pumpIds && pumpIds.length ? pumpIds.length : undefined) ??
-          (typeof (pRes as any)?.pumps_total === "number" ? (pRes as any).pumps_total : undefined);
-
-        const rawStats = stats(rawNums);
-
-        dlog("pumps raw", {
-          seq,
-          pumps_total: (pRes as any)?.pumps_total,
-          pumps_connected: (pRes as any)?.pumps_connected,
-          cap,
-          points: (pRes as any)?.timestamps?.length ?? rawNums.length,
-          rawStats,
-          sampleLast12: rawNums.slice(-12),
-        });
-
-        if (cap != null && rawStats.max > cap) {
-          dwarn("pumps raw EXCEDE cap (posible bug de backend/filtros)", {
-            seq,
-            cap,
-            maxRaw: rawStats.max,
-            uniq: rawStats.uniq,
-            pumpIds: pumpIds?.length ? pumpIds : "all",
-            locId,
-          });
-        }
-
-        // set states
-        setP(pRes);
-        setT(tRes);
         setLastOkAt(Date.now());
         setLastErr(undefined);
 
-        const dt = perfNow() - t0;
-        dlog("poll success", {
-          seq,
-          ms: Math.round(dt),
-          pumpsPoints: (pRes as any)?.timestamps?.length ?? 0,
-          tanksPoints: (tRes as any)?.timestamps?.length ?? 0,
-          pumpsTotal: (pRes as any)?.pumps_total,
-          tanksTotal: (tRes as any)?.tanks_total,
-          bucketEffective: (pRes as any)?.bucket ?? effBucket,
+        // Liberamos acá para que el front pueda renderizar gráficos
+        // sin esperar summary-24h ni eventos.
+        loadingRef.current = false;
+        setIsLoading(false);
+
+        dlog("charts loaded", {
+          tankLevelPoints:
+            tankLevelRes?.items?.length ??
+            tankLevelRes?.timestamps?.length ??
+            0,
+          pumpOnPoints:
+            pumpsOnRes?.items?.length ??
+            pumpsOnRes?.timestamps?.length ??
+            0,
         });
+
+        // 2) DESPUÉS: resumen, eventos y timeline opcional en segundo plano.
+        void (async () => {
+          try {
+            const [
+              tankSummaryRes,
+              pumpSummaryRes,
+              tankEventsRes,
+              pumpTimelineRes,
+              pumpEventsRes,
+            ] = await Promise.all([
+              fetchOperationTankSummary24h({
+                companyId,
+                locationId: locId,
+                tankIds: tankIds && tankIds.length ? tankIds : undefined,
+                limit: 500,
+              }),
+
+              fetchOperationPumpSummary24h({
+                companyId,
+                locationId: locId,
+                pumpIds: pumpIds && pumpIds.length ? pumpIds : undefined,
+                limit: 500,
+              }),
+
+              loadTankEvents
+                ? fetchOperationTankEvents({
+                    ...tankScope,
+                    limit: limitEvents,
+                  })
+                : Promise.resolve(null),
+
+              loadPumpTimeline
+                ? fetchOperationPumpTimeline1m({
+                    ...pumpScope,
+                    limit: limitTimeline,
+                  })
+                : Promise.resolve(null),
+
+              loadPumpEvents
+                ? fetchOperationPumpEvents({
+                    ...pumpScope,
+                    limit: limitEvents,
+                  })
+                : Promise.resolve(null),
+            ]);
+
+            if (!alive || seq !== seqRef.current) return;
+
+            setTanksSummary(tankSummaryRes);
+            setPumpsSummary(pumpSummaryRes);
+
+            setTankEvents(tankEventsRes);
+            setPumpTimeline(pumpTimelineRes);
+            setPumpEvents(pumpEventsRes);
+
+            dlog("background loaded", {
+              pumpTimelineRows: pumpTimelineRes?.items?.length ?? 0,
+              pumpEvents: pumpEventsRes?.items?.length ?? 0,
+              tankEvents: tankEventsRes?.items?.length ?? 0,
+            });
+          } catch (err: any) {
+            if (!alive || seq !== seqRef.current) return;
+
+            console.error("[useLiveOps] background fetch error:", err);
+          }
+        })();
       } catch (err: any) {
-        if (err?.name === "AbortError") {
-          dlog("poll aborted", { seq });
+        console.error("[useLiveOps] chart fetch error:", err);
+
+        if (!alive || seq !== seqRef.current) {
+          loadingRef.current = false;
           return;
         }
-        console.error("[useLiveOps] fetch error:", err);
+
         setLastErr(String(err?.message ?? err));
-        dlog("poll error", { error: String(err) });
       } finally {
-        if (inFlightRef.current === ac) inFlightRef.current = null;
-        if (alive) setIsLoading(false);
+        loadingRef.current = false;
+
+        if (alive && seq === seqRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 
-    // polling adaptativo: si está hidden, reducimos frecuencia
-    const tick = () => {
-      runLoad();
+    const schedule = () => {
       const ms = document.hidden ? pollMsHidden : pollMs;
-      return window.setTimeout(tick, ms);
+
+      timer = window.setTimeout(async () => {
+        await runLoad();
+
+        if (alive) {
+          schedule();
+        }
+      }, ms);
     };
 
     runLoad();
-    const h = window.setTimeout(tick, document.hidden ? pollMsHidden : pollMs);
+    schedule();
 
     const onVis = () => {
       if (!document.hidden) {
-        dlog("visibility -> visible, refreshing");
         runLoad();
       }
     };
+
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
       alive = false;
+      loadingRef.current = false;
+
       document.removeEventListener("visibilitychange", onVis);
-      window.clearTimeout(h);
-      inFlightRef.current?.abort();
-      inFlightRef.current = null;
-      dlog("cleanup", { seq });
+
+      if (timer) {
+        window.clearTimeout(timer);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    // scope
     locId,
     companyId,
     pumpIdsKey,
     tankIdsKey,
-    // ventana/precisión
     periodHours,
     effBucket,
-    pumpAggMode,
-    pumpRoundCounts,
-    tankAgg,
-    tankCarry,
-    connectedOnly,
     pollMs,
     pollMsHidden,
+    loadPumpTimeline,
+    loadPumpEvents,
+    loadTankEvents,
+    limitTimeline,
+    limitEvents,
   ]);
 
-  const pumpTs = useMemo<PumpTs | null>(() => {
-    if (!p) return null;
-
-    const raw = Array.isArray(p.is_on) ? p.is_on : [];
-    const rawNums = raw.map(toNumOrNull);
-
-    const cap =
-      (pumpIds && pumpIds.length ? pumpIds.length : undefined) ??
-      (typeof p.pumps_total === "number" ? p.pumps_total : undefined);
-
-    const outNums =
-      clampCounts && cap != null
-        ? rawNums.map((v) => clamp01ToCap(v, cap))
-        : rawNums.map((v) => (v == null ? null : Math.max(0, v)));
-
-    if (LIVEOPS_DEBUG) {
-      const st = stats(outNums);
-      console.debug("[useLiveOps] pumpTs out", {
-        cap,
-        points: outNums.length,
-        st,
-        sampleLast12: outNums.slice(-12),
-      });
-    }
-
-    // ⚠️ mantenemos timestamps tal cual para no desalinear charts
-    return { timestamps: p.timestamps, is_on: outNums };
-  }, [p, pumpIdsKey, clampCounts]);
-
   const tankTs = useMemo<TankTs | null>(() => {
-    if (!t) return null;
+    if (!tankLevel) return null;
 
-    // (logs opcionales tanques)
-    if (LIVEOPS_DEBUG) {
-      const raw = Array.isArray(t.level_percent) ? t.level_percent : [];
-      const nums = raw.map(toNumOrNull);
-      const st = stats(nums);
-      console.debug("[useLiveOps] tankTs", {
-        points: nums.length,
-        tanks_total: t.tanks_total,
-        tanks_connected: t.tanks_connected,
-        st,
-        sampleLast12: nums.slice(-12),
-      });
+    if (Array.isArray(tankLevel.timestamps)) {
+      return {
+        timestamps: tankLevel.timestamps
+          .map(toMs)
+          .filter((v): v is number => v !== null),
+        level_percent: tankLevel.level_avg ?? [],
+        level_min: tankLevel.level_min ?? [],
+        level_max: tankLevel.level_max ?? [],
+      };
     }
 
-    return { timestamps: t.timestamps, level_percent: t.level_percent };
-  }, [t]);
+    const items = tankLevel.items ?? [];
+
+    return {
+      timestamps: items
+        .map((r: any) => toMs(r.ts_ms ?? r.minute_ts ?? r.ts))
+        .filter((v): v is number => v !== null),
+      level_percent: items.map((r: any) => toNumOrNull(r.level_avg)),
+      level_min: items.map((r: any) => toNumOrNull(r.level_min)),
+      level_max: items.map((r: any) => toNumOrNull(r.level_max)),
+    };
+  }, [tankLevel]);
+
+  const pumpTs = useMemo<PumpTs | null>(() => {
+    if (!pumpsOn) return null;
+
+    if (Array.isArray(pumpsOn.timestamps)) {
+      return {
+        timestamps: pumpsOn.timestamps
+          .map(toMs)
+          .filter((v): v is number => v !== null),
+        is_on: pumpsOn.pumps_on ?? [],
+        pumps_off: pumpsOn.pumps_off ?? [],
+        pumps_online: pumpsOn.pumps_online ?? [],
+        pumps_offline: pumpsOn.pumps_offline ?? [],
+      };
+    }
+
+    const items = pumpsOn.items ?? [];
+
+    return {
+      timestamps: items
+        .map((r: any) => toMs(r.ts_ms ?? r.minute_ts ?? r.ts))
+        .filter((v): v is number => v !== null),
+      is_on: items.map((r: any) => toNumOrNull(r.pumps_on)),
+      pumps_off: items.map((r: any) => toNumOrNull(r.pumps_off)),
+      pumps_online: items.map((r: any) => toNumOrNull(r.pumps_online)),
+      pumps_offline: items.map((r: any) => toNumOrNull(r.pumps_offline)),
+    };
+  }, [pumpsOn]);
 
   return {
     tankTs,
     pumpTs,
-    pumpsTotal: p?.pumps_total,
-    pumpsConnected: p?.pumps_connected,
-    tanksTotal: t?.tanks_total,
-    tanksConnected: t?.tanks_connected,
+
+    tanksSummary,
+    pumpsSummary,
+
+    tankLevel,
+    pumpsOn,
+
+    pumpTimeline,
+    pumpEvents,
+    tankEvents,
+
+    pumpsTotal: pumpsSummary?.summary?.pumps_total,
+    pumpsConnected: pumpsSummary?.summary?.pumps_online,
+    tanksTotal: tanksSummary?.summary?.tanks_total,
+    tanksConnected: tanksSummary?.summary?.tanks_online,
+
     window: win,
+
     meta: {
       bucket: effBucket,
       lastOkAt,

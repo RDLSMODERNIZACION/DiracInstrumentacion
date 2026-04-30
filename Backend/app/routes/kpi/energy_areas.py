@@ -12,6 +12,8 @@ router = APIRouter(
     tags=["energy_areas", "kpi", "energy"],
 )
 
+LOCAL_TZ = "America/Argentina/Buenos_Aires"
+
 
 def month_bounds_utc(month: str):
     try:
@@ -79,8 +81,14 @@ def _base_hourly_cte_sql(has_q_1h_avg: bool, has_q_1h_max: bool) -> str:
         base_hourly as (
             select
                 h.hour_ts,
-                date(h.hour_ts) as day_ts,
-                extract(hour from h.hour_ts)::int as hour_of_day,
+
+                -- Día operativo en Argentina.
+                -- Esto evita que la barra diaria arranque corrida por UTC.
+                (h.hour_ts at time zone '{LOCAL_TZ}')::date as day_ts,
+
+                -- Hora local Argentina para perfiles horarios.
+                extract(hour from h.hour_ts at time zone '{LOCAL_TZ}')::int as hour_of_day,
+
                 sum(h.kwh_est) as kwh_est,
                 sum(h.kw_avg) as kw_avg,
                 sum(h.kw_max) as kw_max,
@@ -96,7 +104,8 @@ def _base_hourly_cte_sql(has_q_1h_avg: bool, has_q_1h_max: bool) -> str:
             where l.area_id = %(area_id)s
               and h.hour_ts >= %(from_ts)s
               and h.hour_ts < %(to_ts)s
-            group by h.hour_ts
+            group by
+                h.hour_ts
         )
     """
 
@@ -410,6 +419,7 @@ def get_energy_area_history(
                 {"area_id": area_id},
             )
             area = cur.fetchone()
+
             if not area:
                 raise HTTPException(status_code=404, detail="Energy area not found")
 
@@ -418,9 +428,12 @@ def get_energy_area_history(
 
             if granularity == "minute":
                 cur.execute(
-                    """
+                    f"""
                     select
-                        date_trunc('minute', r.ts) as ts,
+                        date_trunc(
+                            'minute',
+                            r.ts at time zone '{LOCAL_TZ}'
+                        ) as ts,
                         sum(r.p_kw) as kw_avg,
                         sum(r.max_p_kw) as kw_max,
                         null::numeric as pf_avg,
@@ -434,8 +447,8 @@ def get_energy_area_history(
                     where l.area_id = %(area_id)s
                       and r.ts >= %(from_ts)s
                       and r.ts <= %(to_ts)s
-                    group by date_trunc('minute', r.ts)
-                    order by date_trunc('minute', r.ts) asc
+                    group by date_trunc('minute', r.ts at time zone '{LOCAL_TZ}')
+                    order by date_trunc('minute', r.ts at time zone '{LOCAL_TZ}') asc
                     limit %(limit)s
                     """,
                     {
