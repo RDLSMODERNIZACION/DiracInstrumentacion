@@ -21,6 +21,7 @@ import PipeEditDrawer from "./PipeEditDrawer";
 import PipeGeometryEditor from "./PipeGeometryEditor";
 import PipeConnectDrawer from "./PipeConnectDrawer";
 import NodeConnectDrawer from "./NodeConnectDrawer";
+import IntersectionConnectTool from "./IntersectionConnectTool";
 import ContourVisualLayer from "./ContourVisualLayer";
 import PressureNodesLayer from "./PressureNodesLayer";
 import MapFloatingControls from "./MapFloatingControls";
@@ -149,6 +150,8 @@ export function MapView(props: {
   const [nodeConnectPickMode, setNodeConnectPickMode] =
     React.useState<"from" | "to">("from");
 
+  const [intersectionConnectOpen, setIntersectionConnectOpen] = React.useState(false);
+
   const connHint = React.useMemo(
     () => pipeConnHintFromFeature(selectedPipeFeature),
     [selectedPipeFeature]
@@ -163,6 +166,15 @@ export function MapView(props: {
     setEditingPipeId(null);
     setEditingGeomOpen(false);
     setConnectOpen(false);
+  }
+
+  function closeEditionTools() {
+    setCreatingPipe(false);
+    setEditingPipeId(null);
+    setEditingGeomOpen(false);
+    setConnectOpen(false);
+    setNodeConnectOpen(false);
+    setIntersectionConnectOpen(false);
   }
 
   async function ensureNodes() {
@@ -202,9 +214,25 @@ export function MapView(props: {
     setEditingPipeId(null);
     setEditingGeomOpen(false);
     setConnectOpen(false);
+    setIntersectionConnectOpen(false);
     setNodeConnectOpen(true);
 
     await ensureNodes();
+  }
+
+  function openIntersectionConnector() {
+    if (sim) {
+      alert("Apagá la simulación para conectar cruces. Después de conectar, corré la simulación de nuevo.");
+      return;
+    }
+
+    clearPipeSelection();
+    setCreatingPipe(false);
+    setEditingPipeId(null);
+    setEditingGeomOpen(false);
+    setConnectOpen(false);
+    setNodeConnectOpen(false);
+    setIntersectionConnectOpen((v) => !v);
   }
 
   async function runSimulation(modeToRun: SimMode = simMode) {
@@ -240,6 +268,7 @@ export function MapView(props: {
 
   function toggleCreatingPipe() {
     setNodeConnectOpen(false);
+    setIntersectionConnectOpen(false);
     setConnectOpen(false);
     setCreatingPipe((v) => !v);
   }
@@ -283,12 +312,37 @@ export function MapView(props: {
             if (sim) {
               setSim(null);
             } else {
+              closeEditionTools();
               runSimulation();
             }
           }}
           showLegend={showLegend}
           setShowLegend={setShowLegend}
         />
+
+        <button
+          onClick={openIntersectionConnector}
+          style={{
+            position: "absolute",
+            right: 198,
+            top: 16,
+            zIndex: 1000,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.22)",
+            background: intersectionConnectOpen
+              ? "rgba(239,68,68,0.96)"
+              : "rgba(15,23,42,0.82)",
+            color: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+            boxShadow: "0 12px 25px rgba(0,0,0,0.24)",
+            whiteSpace: "nowrap",
+          }}
+          title="Crear un nodo en una intersección y partir las cañerías cercanas"
+        >
+          {intersectionConnectOpen ? "Cancelar cruce" : "Conectar cruce"}
+        </button>
 
         {simErr && (
           <div
@@ -354,7 +408,30 @@ export function MapView(props: {
 
           <MapClickClear
             onClear={clearPipeSelection}
-            enabled={!editingPipeId && !editingGeomOpen && !connectOpen && !nodeConnectOpen}
+            enabled={
+              !editingPipeId &&
+              !editingGeomOpen &&
+              !connectOpen &&
+              !nodeConnectOpen &&
+              !intersectionConnectOpen
+            }
+          />
+
+          <IntersectionConnectTool
+            active={intersectionConnectOpen}
+            defaultToleranceM={2}
+            onCancel={() => {
+              setIntersectionConnectOpen(false);
+            }}
+            onCreated={() => {
+              setIntersectionConnectOpen(false);
+              clearPipeSelection();
+              setPipesReloadKey((k) => k + 1);
+
+              if (sim) {
+                setSim(null);
+              }
+            }}
           />
 
           <NodeConnectPickerLayer
@@ -406,6 +483,8 @@ export function MapView(props: {
               showOnlySimulated={!!sim}
               onConnectivityStats={setPipeConnectivityStats}
               onSelect={(id, layer, label, feature) => {
+                if (intersectionConnectOpen) return;
+
                 setSelectedPipeId(id);
                 setSelectedPipeLabel(label ?? null);
                 setSelectedPipeLayer(layer);
@@ -414,6 +493,7 @@ export function MapView(props: {
                 setEditingPipeId(null);
                 setEditingGeomOpen(false);
                 setConnectOpen(false);
+                setNodeConnectOpen(false);
 
                 try {
                   const anyLayer: any = layer as any;
@@ -443,7 +523,8 @@ export function MapView(props: {
             !editingPipeId &&
             !editingGeomOpen &&
             !connectOpen &&
-            !nodeConnectOpen && (
+            !nodeConnectOpen &&
+            !intersectionConnectOpen && (
               <PipePopup
                 selectedPipeId={selectedPipeId}
                 selectedPipeLabel={selectedPipeLabel}
@@ -455,12 +536,20 @@ export function MapView(props: {
                   setSelectedPipePos(null);
                   setEditingGeomOpen(false);
                   setConnectOpen(false);
+                  setNodeConnectOpen(false);
                   setEditingPipeId(selectedPipeId);
                 }}
                 onEditGeometry={() => {
+                  if (sim) {
+                    alert("Apagá la simulación para editar el recorrido.");
+                    return;
+                  }
+
                   setSelectedPipePos(null);
                   setEditingPipeId(null);
                   setConnectOpen(false);
+                  setNodeConnectOpen(false);
+                  setIntersectionConnectOpen(false);
                   setEditingGeomOpen(true);
                 }}
                 onConnect={async () => {
@@ -471,6 +560,7 @@ export function MapView(props: {
                     return;
                   }
 
+                  setIntersectionConnectOpen(false);
                   await ensureNodes();
                   setConnectOpen(true);
                 }}
@@ -633,6 +723,7 @@ export function MapView(props: {
         open={editingGeomOpen}
         pipeId={selectedPipeId}
         pipeLayer={selectedPipeLayer}
+        pipeFeature={selectedPipeFeature}
         onClose={() => setEditingGeomOpen(false)}
         onSaved={() => {
           setPipesReloadKey((k) => k + 1);

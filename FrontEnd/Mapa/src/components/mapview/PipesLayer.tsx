@@ -65,7 +65,13 @@ type Props = {
 
   highlightUnconnected?: boolean;
   simStyle?: boolean;
+
+  /**
+   * Se mantiene el nombre para no romper otros componentes.
+   * Ya NO dibuja flechas/triangulitos: ahora dibuja flujo animado.
+   */
   showArrows?: boolean;
+
   colorByPressure?: boolean;
 
   /**
@@ -76,7 +82,7 @@ type Props = {
 };
 
 /* ============================================================
-   Helpers
+   Helpers base
 ============================================================ */
 function pickLabel(feature: any): string | null {
   const candidates = [
@@ -231,7 +237,7 @@ function fmt(n: number | null | undefined, digits = 2) {
 }
 
 function escapeHtml(s: string) {
-  return s
+  return String(s)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -393,8 +399,7 @@ function inferPipeRole(feature: any) {
     - ACUEDUCTO / TRONCAL pueden ser distribución principal, no necesariamente impulsión.
   */
   const explicitImpulsion =
-    /IMPULS|IMPULSION/.test(flowTxt) ||
-    /IMPULS|IMPULSION/.test(layerTxt);
+    /IMPULS|IMPULSION/.test(flowTxt) || /IMPULS|IMPULSION/.test(layerTxt);
 
   if (explicitImpulsion) {
     return {
@@ -439,6 +444,118 @@ function inferPipeRole(feature: any) {
 }
 
 /* ============================================================
+   Helpers flujo animado
+============================================================ */
+function reverseLineGeometry(feature: any) {
+  const geom = feature?.geometry;
+  if (!geom) return feature;
+
+  if (geom.type === "LineString") {
+    return {
+      ...feature,
+      geometry: {
+        ...geom,
+        coordinates: [...(geom.coordinates ?? [])].reverse(),
+      },
+    };
+  }
+
+  if (geom.type === "MultiLineString") {
+    return {
+      ...feature,
+      geometry: {
+        ...geom,
+        coordinates: [...(geom.coordinates ?? [])]
+          .reverse()
+          .map((line: any[]) => [...(line ?? [])].reverse()),
+      },
+    };
+  }
+
+  return feature;
+}
+
+function safeNum(v: any): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * Define si hay que invertir la geometría para que el flujo visual vaya:
+ * - Impulsión: menor cota -> mayor cota.
+ * - Distribución / ramal: mayor cota -> menor cota.
+ * - Sin cotas: dirección de la simulación.
+ */
+function shouldReverseForVisualFlow(feature: any, ps: any, sim: SimRunResponse | null | undefined) {
+  const conn = getConnHint(feature);
+  const role = inferPipeRole(feature);
+
+  const u = ps?.u ? String(ps.u) : null;
+  const v = ps?.v ? String(ps.v) : null;
+
+  const uElev = u ? safeNum(sim?.nodes?.[u]?.elev_m) : null;
+  const vElev = v ? safeNum(sim?.nodes?.[v]?.elev_m) : null;
+
+  /*
+    La geometría normalmente está en sentido from_node -> to_node.
+    El backend de simulación usa u -> v.
+    Si from/to coincide con u/v, sabemos si la geometría está en sentido u->v o v->u.
+  */
+  let geometryIsUtoV: boolean | null = null;
+
+  if (u && v && conn.from_node && conn.to_node) {
+    if (conn.from_node === u && conn.to_node === v) geometryIsUtoV = true;
+    if (conn.from_node === v && conn.to_node === u) geometryIsUtoV = false;
+  }
+
+  /*
+    Si no podemos saberlo, asumimos que la geometría está en sentido u -> v.
+    Es el caso más habitual cuando las conexiones están bien cargadas.
+  */
+  if (geometryIsUtoV == null) {
+    geometryIsUtoV = true;
+  }
+
+  let desiredIsUtoV: boolean;
+
+  if (uElev != null && vElev != null && uElev !== vElev) {
+    if (role.key === "impulsion") {
+      /*
+        Impulsión: subir.
+        Menor cota -> mayor cota.
+      */
+      desiredIsUtoV = uElev < vElev;
+    } else {
+      /*
+        Distribución / ramal: bajar hacia zonas más bajas.
+        Mayor cota -> menor cota.
+      */
+      desiredIsUtoV = uElev > vElev;
+    }
+  } else {
+    /*
+      Fallback: si no hay cotas, respetamos la dirección hidráulica del backend.
+    */
+    desiredIsUtoV = ps?.dir !== -1;
+  }
+
+  return geometryIsUtoV !== desiredIsUtoV;
+}
+
+function flowColorByRole(roleKey: string) {
+  if (roleKey === "impulsion") return "#38bdf8";
+  if (roleKey === "ramal") return "#5eead4";
+  return "#4ade80";
+}
+
+function flowDashByRole(roleKey: string) {
+  if (roleKey === "impulsion") return "16 22";
+  if (roleKey === "ramal") return "7 16";
+  return "10 18";
+}
+
+/* ============================================================
    COMPONENT
 ============================================================ */
 export default function PipesLayer({
@@ -465,7 +582,12 @@ export default function PipesLayer({
   const [error, setError] = React.useState<string | null>(null);
 
   const freezeRef = React.useRef<boolean>(freeze);
-  const arrowLayerRef = React.useRef<L.LayerGroup | null>(null);
+
+  /*
+    Antes era arrowLayerRef y dibujaba triangulitos.
+    Ahora es una capa de flujo animado sin flechas.
+  */
+  const flowLayerRef = React.useRef<L.LayerGroup | null>(null);
 
   React.useEffect(() => {
     freezeRef.current = freeze;
@@ -570,10 +692,14 @@ export default function PipesLayer({
     onConnectivityStats?.(computeConnectivityStats(visibleData));
   }, [visibleData, onCount, onConnectivityStats]);
 
+  /*
+    Flujo visual animado.
+    Reemplaza los triangulitos blancos por trazos que se mueven sobre la cañería.
+  */
   React.useEffect(() => {
-    if (arrowLayerRef.current) {
-      arrowLayerRef.current.remove();
-      arrowLayerRef.current = null;
+    if (flowLayerRef.current) {
+      flowLayerRef.current.remove();
+      flowLayerRef.current = null;
     }
 
     if (!showArrows) return;
@@ -582,49 +708,8 @@ export default function PipesLayer({
     if (!visibleData?.features || !Array.isArray(visibleData.features)) return;
 
     const grp = L.layerGroup();
-    arrowLayerRef.current = grp;
+    flowLayerRef.current = grp;
     grp.addTo(map);
-
-    const arrowIcon = L.divIcon({
-      className: "pipe-arrow-icon",
-      html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:12px solid rgba(255,255,255,0.88);filter:drop-shadow(0 2px 4px rgba(0,0,0,.55));"></div>`,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
-    });
-
-    function midpoint(coords: any[]): [number, number] | null {
-      if (!Array.isArray(coords) || coords.length < 2) return null;
-
-      const midIdx = Math.floor(coords.length / 2);
-      const a = coords[midIdx - 1] ?? coords[0];
-      const b = coords[midIdx] ?? coords[coords.length - 1];
-
-      if (!a || !b) return null;
-
-      return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    }
-
-    function bearingDeg(a: [number, number], b: [number, number]) {
-      const toRad = (x: number) => (x * Math.PI) / 180;
-      const toDeg = (x: number) => (x * 180) / Math.PI;
-
-      const lon1 = toRad(a[0]);
-      const lat1 = toRad(a[1]);
-      const lon2 = toRad(b[0]);
-      const lat2 = toRad(b[1]);
-
-      const dLon = lon2 - lon1;
-
-      const y = Math.sin(dLon) * Math.cos(lat2);
-      const x =
-        Math.cos(lat1) * Math.sin(lat2) -
-        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-
-      let brng = toDeg(Math.atan2(y, x));
-      brng = (brng + 360) % 360;
-
-      return brng;
-    }
 
     for (const f of visibleData.features) {
       const id = featureId(f);
@@ -638,50 +723,37 @@ export default function PipesLayer({
 
       const geom = f.geometry;
       if (!geom) continue;
+      if (geom.type !== "LineString" && geom.type !== "MultiLineString") continue;
 
-      let coords: any[] | null = null;
+      const role = inferPipeRole(f);
+      const visualFeature = shouldReverseForVisualFlow(f, ps, sim) ? reverseLineGeometry(f) : f;
 
-      if (geom.type === "LineString") coords = geom.coordinates;
-      else if (geom.type === "MultiLineString") coords = geom.coordinates?.[0] ?? null;
+      const flowColor = flowColorByRole(role.key);
+      const flowWeight = Math.max(4, weightFromAbsQ(absQ) + 1.2);
 
-      if (!coords || coords.length < 2) continue;
-
-      const coordsDir = ps.dir === -1 ? [...coords].reverse() : coords;
-
-      const mid = midpoint(coordsDir);
-      if (!mid) continue;
-
-      const mi = Math.floor(coordsDir.length / 2);
-      const p1 = coordsDir[Math.max(0, mi - 1)];
-      const p2 = coordsDir[Math.min(coordsDir.length - 1, mi)];
-
-      if (!p1 || !p2) continue;
-
-      const brng = bearingDeg([p1[0], p1[1]], [p2[0], p2[1]]);
-
-      const m = L.marker([mid[1], mid[0]], {
-        icon: arrowIcon,
+      const layer = L.geoJSON(visualFeature, {
         interactive: false,
-        keyboard: false,
+        style: {
+          color: flowColor,
+          weight: flowWeight,
+          opacity: 0.9,
+          dashArray: flowDashByRole(role.key),
+          lineCap: "round",
+          lineJoin: "round",
+          className:
+            role.key === "impulsion"
+              ? "pipe-flow-water pipe-flow-water--impulsion"
+              : "pipe-flow-water pipe-flow-water--distribucion",
+        } as L.PathOptions,
       });
 
-      m.on("add", () => {
-        const el = (m as any)._icon as HTMLElement | undefined;
-        if (!el) return;
-
-        el.style.transformOrigin = "center";
-        el.style.transform += ` rotate(${brng}deg)`;
-        el.style.opacity = "0.95";
-        el.style.pointerEvents = "none";
-      });
-
-      grp.addLayer(m);
+      layer.addTo(grp);
     }
 
     return () => {
-      if (arrowLayerRef.current) {
-        arrowLayerRef.current.remove();
-        arrowLayerRef.current = null;
+      if (flowLayerRef.current) {
+        flowLayerRef.current.remove();
+        flowLayerRef.current = null;
       }
     };
   }, [map, visible, showArrows, sim, visibleData]);
@@ -880,15 +952,37 @@ export default function PipesLayer({
     <>
       <style>
         {`
-          .pipe-arrow-icon {
-            background: transparent !important;
-            border: 0 !important;
+          .pipe-flow-water {
+            pointer-events: none;
+            stroke-dashoffset: 0;
+            animation: pipe-flow-water-move 1.15s linear infinite;
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.48));
+          }
+
+          .pipe-flow-water--impulsion {
+            animation-duration: 0.95s;
+          }
+
+          .pipe-flow-water--distribucion {
+            animation-duration: 1.35s;
+          }
+
+          @keyframes pipe-flow-water-move {
+            from {
+              stroke-dashoffset: 0;
+            }
+
+            to {
+              stroke-dashoffset: -44;
+            }
           }
         `}
       </style>
 
       <GeoJSON
-        key={`pipes-${selectedId ?? "none"}-${sim ? "sim" : "nosim"}-${showOnlySimulated ? "onlysim" : "all"}-${visibleData?.features?.length ?? 0}`}
+        key={`pipes-${selectedId ?? "none"}-${sim ? "sim" : "nosim"}-${
+          showOnlySimulated ? "onlysim" : "all"
+        }-${visibleData?.features?.length ?? 0}`}
         data={visibleData}
         style={styleFn ?? defaultStyle}
         onEachFeature={(feature, layer) => {

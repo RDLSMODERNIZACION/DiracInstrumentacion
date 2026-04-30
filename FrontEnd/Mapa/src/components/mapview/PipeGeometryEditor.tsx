@@ -1,5 +1,5 @@
 import React from "react";
-import type L from "leaflet";
+import L from "leaflet";
 import { createPortal } from "react-dom";
 import { patchPipeGeometry, fetchPipeById } from "../../services/mapasagua";
 
@@ -7,48 +7,140 @@ type Props = {
   open: boolean;
   pipeId: string | null;
   pipeLayer: L.Layer | null;
+
+  /**
+   * Importante:
+   * Se usa para reconstruir una polilínea editable desde la geometría real.
+   * Así no dependemos de que el layer GeoJSON original sea editable.
+   */
+  pipeFeature?: any | null;
+
   onClose: () => void;
   onSaved?: (feature: any) => void;
 };
 
-/** ✅ Debug on/off (solo consola) */
-const DBG = true;
+const DBG = false;
 
 function dbg(...args: any[]) {
   if (DBG) console.log(...args);
 }
 
+type SupportedGeometry =
+  | {
+      type: "LineString";
+      coordinates: any[];
+    }
+  | {
+      type: "MultiLineString";
+      coordinates: any[];
+    };
+
+function isSupportedGeometry(geom: any): geom is SupportedGeometry {
+  return (
+    geom &&
+    (geom.type === "LineString" || geom.type === "MultiLineString") &&
+    Array.isArray(geom.coordinates)
+  );
+}
+
+function coordToLatLng(c: any): [number, number] | null {
+  if (!Array.isArray(c) || c.length < 2) return null;
+
+  const lng = Number(c[0]);
+  const lat = Number(c[1]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return [lat, lng];
+}
+
+function latLngsFromGeometry(geom: SupportedGeometry): any {
+  if (geom.type === "LineString") {
+    return geom.coordinates.map(coordToLatLng).filter(Boolean);
+  }
+
+  return geom.coordinates
+    .map((seg: any[]) => seg.map(coordToLatLng).filter(Boolean))
+    .filter((seg: any[]) => seg.length >= 2);
+}
+
+function countCoordsFromGeometry(geom: any): number {
+  if (!isSupportedGeometry(geom)) return 0;
+
+  if (geom.type === "LineString") {
+    return Array.isArray(geom.coordinates) ? geom.coordinates.length : 0;
+  }
+
+  return geom.coordinates.reduce((acc: number, seg: any[]) => {
+    return acc + (Array.isArray(seg) ? seg.length : 0);
+  }, 0);
+}
+
+function countLatLngs(latlngs: any): number {
+  if (!Array.isArray(latlngs)) return 0;
+
+  if (latlngs.length && typeof latlngs[0]?.lat === "number") {
+    return latlngs.length;
+  }
+
+  if (
+    latlngs.length &&
+    Array.isArray(latlngs[0]) &&
+    latlngs[0].length &&
+    typeof latlngs[0][0]?.lat === "number"
+  ) {
+    return latlngs.reduce((acc, seg) => acc + seg.length, 0);
+  }
+
+  return latlngs.reduce((acc, x) => acc + countLatLngs(x), 0);
+}
+
 function resolveEditableLayer(layer: any): any | null {
   if (!layer) return null;
 
-  // Caso simple: el layer tiene geoman
-  if (layer.pm) return layer;
+  if (layer.pm && typeof layer.getLatLngs === "function") return layer;
 
-  // Caso MultiLineString / LayerGroup: buscar sublayer con pm
   if (typeof layer.getLayers === "function") {
     const kids = layer.getLayers?.() ?? [];
+
     for (const k of kids) {
-      if (k?.pm) return k;
+      const found = resolveEditableLayer(k);
+      if (found) return found;
     }
   }
 
   return null;
 }
 
-/** Cuenta puntos (LineString o MultiLineString en latlngs) */
-function countLatLngs(latlngs: any): number {
-  if (!Array.isArray(latlngs)) return 0;
+function resolveMapFromLayer(layer: any): L.Map | null {
+  if (!layer) return null;
 
-  // LineString => [LatLng...]
-  if (latlngs.length && typeof latlngs[0]?.lat === "number") return latlngs.length;
+  if (layer._map) return layer._map as L.Map;
 
-  // MultiLine => [[LatLng...], [LatLng...]]
-  return latlngs.reduce((acc, x) => acc + countLatLngs(x), 0);
+  if (typeof layer.getLayers === "function") {
+    const kids = layer.getLayers?.() ?? [];
+
+    for (const k of kids) {
+      const m = resolveMapFromLayer(k);
+      if (m) return m;
+    }
+  }
+
+  return null;
+}
+
+function disablePmSafely(layer: any) {
+  try {
+    if (layer?.pm?.enabled?.()) {
+      layer.pm.disable();
+    }
+  } catch {}
 }
 
 function layerInfo(layer: any) {
   try {
     const latlngs = layer?.getLatLngs?.();
+
     return {
       layerType: layer?.constructor?.name,
       hasPm: !!layer?.pm,
@@ -58,7 +150,8 @@ function layerInfo(layer: any) {
       hasGetLatLngs: typeof layer?.getLatLngs === "function",
       vertexCount: latlngs ? countLatLngs(latlngs) : 0,
       hasGetLayers: typeof layer?.getLayers === "function",
-      childCount: typeof layer?.getLayers === "function" ? (layer.getLayers()?.length ?? 0) : 0,
+      childCount: typeof layer?.getLayers === "function" ? layer.getLayers()?.length ?? 0 : 0,
+      hasMap: !!layer?._map,
     };
   } catch (e) {
     return { err: String(e) };
@@ -66,165 +159,303 @@ function layerInfo(layer: any) {
 }
 
 function applyGeometryToLayer(layer: any, geom: any) {
-  if (!layer?.setLatLngs || !geom) return;
+  if (!layer || !geom) return false;
 
-  if (geom.type === "LineString" && Array.isArray(geom.coordinates)) {
-    const latlngs = geom.coordinates.map((c: any) => [c[1], c[0]]);
+  if (typeof layer.setLatLngs === "function" && isSupportedGeometry(geom)) {
+    const latlngs = latLngsFromGeometry(geom);
     layer.setLatLngs(latlngs);
-    return;
+    return true;
   }
 
-  if (geom.type === "MultiLineString" && Array.isArray(geom.coordinates)) {
-    const latlngs = geom.coordinates.map((seg: any[]) => seg.map((c: any) => [c[1], c[0]]));
-    layer.setLatLngs(latlngs);
-    return;
+  if (typeof layer.getLayers === "function") {
+    const kids = layer.getLayers?.() ?? [];
+
+    for (const k of kids) {
+      const ok = applyGeometryToLayer(k, geom);
+      if (ok) return true;
+    }
   }
+
+  return false;
+}
+
+function getGeometryFromLayer(layer: any): any | null {
+  try {
+    const gj = layer?.toGeoJSON?.();
+    return gj?.geometry ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanGeometryForSave(geom: any): SupportedGeometry {
+  if (!isSupportedGeometry(geom)) {
+    throw new Error("La geometría editada no es LineString ni MultiLineString.");
+  }
+
+  if (geom.type === "LineString") {
+    const coords = geom.coordinates.filter((c: any) => {
+      return (
+        Array.isArray(c) &&
+        c.length >= 2 &&
+        Number.isFinite(Number(c[0])) &&
+        Number.isFinite(Number(c[1]))
+      );
+    });
+
+    if (coords.length < 2) {
+      throw new Error("La cañería debe tener al menos dos vértices.");
+    }
+
+    return {
+      type: "LineString",
+      coordinates: coords,
+    };
+  }
+
+  const segments = geom.coordinates
+    .map((seg: any[]) =>
+      Array.isArray(seg)
+        ? seg.filter((c: any) => {
+            return (
+              Array.isArray(c) &&
+              c.length >= 2 &&
+              Number.isFinite(Number(c[0])) &&
+              Number.isFinite(Number(c[1]))
+            );
+          })
+        : []
+    )
+    .filter((seg: any[]) => seg.length >= 2);
+
+  if (!segments.length) {
+    throw new Error("La cañería debe tener al menos un tramo con dos vértices.");
+  }
+
+  return {
+    type: "MultiLineString",
+    coordinates: segments,
+  };
 }
 
 export default function PipeGeometryEditor({
   open,
   pipeId,
   pipeLayer,
+  pipeFeature,
   onClose,
   onSaved,
 }: Props) {
   const [editing, setEditing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const [vertexCount, setVertexCount] = React.useState(0);
+  const [geometryType, setGeometryType] = React.useState<string | null>(null);
+
+  const editLayerRef = React.useRef<L.Polyline | null>(null);
+  const mapRef = React.useRef<L.Map | null>(null);
 
   const portalTarget = React.useMemo(() => {
     if (typeof document === "undefined") return null;
     return document.body;
   }, []);
 
-  const canEdit = !!pipeId && !!pipeLayer;
+  const canPrepare = !!pipeId && !!pipeLayer;
+
+  const cleanupTempLayer = React.useCallback(() => {
+    const editLayer = editLayerRef.current;
+
+    if (editLayer) {
+      disablePmSafely(editLayer);
+
+      try {
+        editLayer.remove();
+      } catch {}
+    }
+
+    editLayerRef.current = null;
+    setEditing(false);
+  }, []);
 
   React.useEffect(() => {
     if (!open) {
-      setEditing(false);
+      cleanupTempLayer();
+
       setBusy(false);
       setErr(null);
+      setVertexCount(0);
+      setGeometryType(null);
 
       const base = resolveEditableLayer(pipeLayer as any);
-      try {
-        if (base?.pm?.enabled?.()) base.pm.disable();
-      } catch {}
+      disablePmSafely(base);
 
-      // ✅ log de cierre
-      if (DBG) dbg("[GEOM] close/reset", { pipeId, pipeLayer: layerInfo(pipeLayer as any), base: layerInfo(base) });
+      dbg("[GEOM] close/reset", {
+        pipeId,
+        pipeLayer: layerInfo(pipeLayer as any),
+        base: layerInfo(base),
+      });
     }
-  }, [open, pipeLayer, pipeId]);
+  }, [open, pipeLayer, pipeId, cleanupTempLayer]);
 
-  if (!open || !pipeId || !portalTarget) return null;
-
-  const enableEdit = () => {
-    if (!canEdit) return;
-
-    const base = resolveEditableLayer(pipeLayer as any);
-
-    // ✅ LOGS principales
-    dbg("[GEOM] enableEdit requested", {
-      pipeId,
-      pipeLayer: layerInfo(pipeLayer as any),
-      base: layerInfo(base),
-    });
-
-    if (!base?.pm) {
-      setErr("No se puede editar este recorrido (layer sin Geoman / MultiLine sin soporte).");
-      return;
-    }
-
-    // ✅ Si es troncal gigante, limitamos markers a zoom alto
-    const vertexCount = layerInfo(base).vertexCount ?? 0;
-    const heavy = vertexCount >= 800; // umbral práctico
-    const pmOpts: any = {
-      allowSelfIntersection: false,
-      snappable: true,
-      snapDistance: 10,
-      // performance: en geometrías largas reduce markers
-      hideMiddleMarkers: heavy ? true : false,
-      limitMarkersToZoom: heavy ? 18 : undefined,
+  React.useEffect(() => {
+    return () => {
+      cleanupTempLayer();
     };
+  }, [cleanupTempLayer]);
 
-    try {
-      dbg("[GEOM] pm.enable()", { pipeId, vertexCount, heavy, pmOpts });
-      base.pm.enable(pmOpts);
-      setEditing(true);
-      setErr(null);
-      dbg("[GEOM] pm enabled OK", { pipeId });
-    } catch (e: any) {
-      dbg("[GEOM] pm enable FAILED", { pipeId, error: e });
-      setErr(e?.message ?? "No se pudo activar edición");
+  async function loadGeometry(): Promise<SupportedGeometry> {
+    const fromFeature = pipeFeature?.geometry;
+
+    if (isSupportedGeometry(fromFeature)) {
+      return fromFeature;
     }
-  };
 
-  const cancelEdit = async () => {
-    const base = resolveEditableLayer(pipeLayer as any);
+    if (!pipeId) {
+      throw new Error("No hay pipeId para cargar geometría.");
+    }
+
+    const fresh = await fetchPipeById(pipeId);
+    const freshGeom = fresh?.geometry;
+
+    if (isSupportedGeometry(freshGeom)) {
+      return freshGeom;
+    }
+
+    throw new Error("No se encontró una geometría editable para esta cañería.");
+  }
+
+  async function enableEdit() {
+    if (!pipeId) return;
+    if (busy) return;
 
     setBusy(true);
+    setErr(null);
+
     try {
-      dbg("[GEOM] cancelEdit", { pipeId, base: layerInfo(base) });
+      cleanupTempLayer();
 
-      try {
-        if (base?.pm?.enabled?.()) base.pm.disable();
-      } catch {}
+      const map = resolveMapFromLayer(pipeLayer as any);
 
-      const fresh = await fetchPipeById(pipeId);
-      dbg("[GEOM] cancel -> reloaded from DB", {
-        pipeId,
-        geometryType: fresh?.geometry?.type,
+      if (!map) {
+        throw new Error(
+          "No se pudo obtener el mapa desde la capa seleccionada. Cerrá el editor, seleccioná otra vez la cañería y volvé a intentar."
+        );
+      }
+
+      mapRef.current = map;
+
+      const geom = await loadGeometry();
+
+      if (!isSupportedGeometry(geom)) {
+        throw new Error("La geometría no es editable. Solo se admite LineString o MultiLineString.");
+      }
+
+      const latlngs = latLngsFromGeometry(geom);
+      const n = countCoordsFromGeometry(geom);
+
+      if (n < 2) {
+        throw new Error("La cañería tiene menos de dos vértices.");
+      }
+
+      const editableLine = L.polyline(latlngs, {
+        color: "#ffffff",
+        weight: 9,
+        opacity: 0.95,
+        dashArray: "8 8",
+        lineCap: "round",
+        lineJoin: "round",
+        pane: "overlayPane",
       });
 
-      const g = fresh?.geometry;
-      if (g) applyGeometryToLayer(base, g);
+      editableLine.addTo(map);
+      editableLine.bringToFront();
 
-      setEditing(false);
-      setErr(null);
-      onClose();
+      editLayerRef.current = editableLine;
+      setVertexCount(n);
+      setGeometryType(geom.type);
+
+      const bounds = editableLine.getBounds?.();
+
+      if (bounds?.isValid?.()) {
+        try {
+          map.fitBounds(bounds, {
+            padding: [80, 80],
+            maxZoom: 19,
+          });
+        } catch {}
+      }
+
+      if (!editableLine.pm) {
+        throw new Error(
+          "Leaflet-Geoman no está disponible en esta línea. Revisá que leaflet-geoman esté cargado en el proyecto."
+        );
+      }
+
+      const heavy = n >= 1200;
+
+      editableLine.pm.enable({
+        allowSelfIntersection: false,
+        snappable: true,
+        snapDistance: 12,
+        hideMiddleMarkers: false,
+        limitMarkersToZoom: heavy ? 18 : undefined,
+      } as any);
+
+      setEditing(true);
+
+      dbg("[GEOM] edit temp layer OK", {
+        pipeId,
+        geometryType: geom.type,
+        vertexCount: n,
+        heavy,
+        layer: layerInfo(editableLine),
+      });
     } catch (e: any) {
-      dbg("[GEOM] cancel FAILED", { pipeId, error: e });
-      setErr(e?.message ?? "No se pudo cancelar/recargar");
+      cleanupTempLayer();
+      setErr(e?.message ?? "No se pudo activar la edición del recorrido.");
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const saveEdit = async () => {
-    const base = resolveEditableLayer(pipeLayer as any);
-    if (!base) return;
+  async function cancelEdit() {
+    if (busy) return;
+
+    cleanupTempLayer();
+    setErr(null);
+    onClose();
+  }
+
+  async function saveEdit() {
+    if (!pipeId) return;
+    if (busy) return;
+
+    const editLayer = editLayerRef.current;
+
+    if (!editLayer) {
+      setErr("No hay una línea editable activa.");
+      return;
+    }
 
     setBusy(true);
+    setErr(null);
+
     try {
-      dbg("[GEOM] saveEdit start", { pipeId, base: layerInfo(base) });
-
-      const gj = base.toGeoJSON?.();
-      const geom = gj?.geometry;
-      if (!geom) throw new Error("No se pudo leer geometry desde layer.toGeoJSON()");
-
-      dbg("[GEOM] toGeoJSON geometry", {
-        pipeId,
-        type: geom?.type,
-        coordsLen:
-          geom?.type === "LineString"
-            ? geom?.coordinates?.length
-            : geom?.type === "MultiLineString"
-            ? geom?.coordinates?.length
-            : null,
-      });
+      const rawGeom = getGeometryFromLayer(editLayer);
+      const geom = cleanGeometryForSave(rawGeom);
 
       const updated = await patchPipeGeometry(pipeId, geom);
 
-      dbg("[GEOM] saved OK (server)", {
-        pipeId,
-        returnedType: updated?.geometry?.type,
-      });
+      const updatedGeom = updated?.geometry ?? geom;
 
-      try {
-        if (base?.pm?.enabled?.()) base.pm.disable();
-      } catch {}
+      const originalBase = resolveEditableLayer(pipeLayer as any);
 
-      const g2 = updated?.geometry;
-      if (g2) applyGeometryToLayer(base, g2);
+      if (updatedGeom) {
+        applyGeometryToLayer(originalBase, updatedGeom);
+        applyGeometryToLayer(pipeLayer as any, updatedGeom);
+      }
+
+      cleanupTempLayer();
 
       setEditing(false);
       setErr(null);
@@ -232,37 +463,35 @@ export default function PipeGeometryEditor({
       onSaved?.(updated);
       onClose();
     } catch (e: any) {
-      dbg("[GEOM] save FAILED", { pipeId, error: e });
-      setErr(e?.message ?? "Error guardando geometría");
+      setErr(e?.message ?? "Error guardando geometría.");
     } finally {
       setBusy(false);
     }
-  };
+  }
 
   const C = {
-    // “sombra” visual pero NO bloquea clicks
     overlay: "rgba(2,6,23,0.18)",
     surface: "#ffffff",
     text: "#0f172a",
     muted: "rgba(15,23,42,0.65)",
     border: "rgba(15,23,42,0.14)",
     primary: "#2563eb",
+    danger: "#dc2626",
   };
 
+  if (!open || !pipeId || !portalTarget) return null;
+
   const panel = (
-    // ✅ IMPORTANTE: el contenedor NO captura clicks (deja tocar el mapa)
     <div style={{ position: "fixed", inset: 0, zIndex: 999999, pointerEvents: "none" }}>
-      {/* Sombra visual (no bloquea) */}
       <div style={{ position: "absolute", inset: 0, background: C.overlay }} />
 
-      {/* Panel flotante (este sí captura clicks) */}
       <div
         style={{
           position: "absolute",
           left: "50%",
           top: 18,
           transform: "translateX(-50%)",
-          width: "min(720px, calc(100% - 24px))",
+          width: "min(760px, calc(100% - 24px))",
           pointerEvents: "auto",
         }}
       >
@@ -278,7 +507,6 @@ export default function PipeGeometryEditor({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header */}
           <div
             style={{
               padding: "14px 16px",
@@ -290,19 +518,17 @@ export default function PipeGeometryEditor({
             }}
           >
             <div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>Editar recorrido</div>
-              <div style={{ fontSize: 12, color: C.muted }}>
-                Pipe: {pipeId.slice(0, 8)}… · Vértices:{" "}
-                {(() => {
-                  const base = resolveEditableLayer(pipeLayer as any);
-                  const n = layerInfo(base).vertexCount ?? 0;
-                  return n;
-                })()}
+              <div style={{ fontSize: 18, fontWeight: 850 }}>Editar recorrido</div>
+
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>
+                Pipe: {pipeId.slice(0, 8)}…
+                {geometryType ? ` · ${geometryType}` : ""}
+                {vertexCount ? ` · Vértices: ${vertexCount}` : ""}
               </div>
             </div>
 
             <button
-              onClick={busy ? undefined : onClose}
+              onClick={busy ? undefined : cancelEdit}
               disabled={busy}
               style={{
                 width: 36,
@@ -312,13 +538,14 @@ export default function PipeGeometryEditor({
                 background: "#fff",
                 fontSize: 18,
                 cursor: busy ? "not-allowed" : "pointer",
+                opacity: busy ? 0.65 : 1,
               }}
+              title="Cerrar"
             >
               ×
             </button>
           </div>
 
-          {/* Body */}
           <div style={{ padding: 16, display: "grid", gap: 12 }}>
             {err && (
               <div
@@ -329,26 +556,55 @@ export default function PipeGeometryEditor({
                   padding: 10,
                   borderRadius: 10,
                   fontSize: 13,
+                  fontWeight: 650,
                 }}
               >
                 {err}
               </div>
             )}
 
-            <div style={{ fontSize: 13, color: C.muted }}>
-              Tip: tocá <b>Editar</b>, mové vértices en el mapa y luego <b>Guardar</b>.
-              <br />
-              Si es una troncal grande, acercate (zoom) para ver y mover puntos.
-            </div>
-
             {!editing && (
-              <div style={{ fontSize: 13, color: C.muted }}>
-                (El panel no bloquea el mapa: podés pan/zoom mientras está abierto.)
+              <div
+                style={{
+                  background: "#EFF6FF",
+                  border: "1px solid #BFDBFE",
+                  color: "#1E3A8A",
+                  padding: 10,
+                  borderRadius: 10,
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                Al tocar <b>Editar recorrido</b>, se crea una línea blanca temporal arriba de la
+                cañería. Esa línea sí muestra los vértices aunque la cañería original sea GeoJSON o
+                MultiLineString.
               </div>
             )}
+
+            {editing && (
+              <div
+                style={{
+                  background: "#ECFDF5",
+                  border: "1px solid #BBF7D0",
+                  color: "#166534",
+                  padding: 10,
+                  borderRadius: 10,
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                Mové los vértices blancos sobre el mapa. También podés usar los puntos intermedios
+                para agregar nuevos vértices. Cuando termines, tocá <b>Guardar</b>.
+              </div>
+            )}
+
+            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.45 }}>
+              El panel no bloquea el mapa: podés hacer zoom o mover la vista mientras editás.
+              <br />
+              Si no ves vértices, acercate más al tramo y verificá que la simulación esté apagada.
+            </div>
           </div>
 
-          {/* Footer */}
           <div
             style={{
               padding: 14,
@@ -356,19 +612,20 @@ export default function PipeGeometryEditor({
               display: "flex",
               justifyContent: "flex-end",
               gap: 10,
+              flexWrap: "wrap",
             }}
           >
             {!editing ? (
               <>
                 <button
-                  onClick={onClose}
+                  onClick={cancelEdit}
                   disabled={busy}
                   style={{
                     padding: "10px 14px",
                     borderRadius: 12,
                     border: `1px solid ${C.border}`,
                     background: "#fff",
-                    fontWeight: 600,
+                    fontWeight: 650,
                     cursor: busy ? "not-allowed" : "pointer",
                     opacity: busy ? 0.7 : 1,
                   }}
@@ -378,18 +635,19 @@ export default function PipeGeometryEditor({
 
                 <button
                   onClick={enableEdit}
-                  disabled={!canEdit || busy}
+                  disabled={!canPrepare || busy}
                   style={{
                     padding: "10px 16px",
                     borderRadius: 12,
+                    border: "none",
                     background: C.primary,
                     color: "#fff",
-                    fontWeight: 800,
-                    cursor: !canEdit || busy ? "not-allowed" : "pointer",
-                    opacity: !canEdit || busy ? 0.7 : 1,
+                    fontWeight: 850,
+                    cursor: !canPrepare || busy ? "not-allowed" : "pointer",
+                    opacity: !canPrepare || busy ? 0.7 : 1,
                   }}
                 >
-                  Editar
+                  {busy ? "Preparando…" : "Editar recorrido"}
                 </button>
               </>
             ) : (
@@ -402,7 +660,7 @@ export default function PipeGeometryEditor({
                     borderRadius: 12,
                     border: `1px solid ${C.border}`,
                     background: "#fff",
-                    fontWeight: 600,
+                    fontWeight: 650,
                     cursor: busy ? "not-allowed" : "pointer",
                     opacity: busy ? 0.7 : 1,
                   }}
@@ -416,9 +674,10 @@ export default function PipeGeometryEditor({
                   style={{
                     padding: "10px 16px",
                     borderRadius: 12,
+                    border: "none",
                     background: C.primary,
                     color: "#fff",
-                    fontWeight: 800,
+                    fontWeight: 850,
                     cursor: busy ? "not-allowed" : "pointer",
                     opacity: busy ? 0.7 : 1,
                   }}
