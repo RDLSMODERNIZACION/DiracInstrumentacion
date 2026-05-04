@@ -110,6 +110,52 @@ def _source_label(s: dict[str, Any]) -> str:
     )
 
 
+def _pressure_kind_from_source_type(source_type: str | None) -> str:
+    """
+    Clasificación visual para el front:
+      REAL   = presión medida por manómetro/manifold
+      TANK   = carga por tanque/nivel/cota
+      MANUAL = source manual antigua
+      CALC   = nodo calculado, sin fuente propia
+    """
+    if source_type == "PRESSURE_MEASURE":
+        return "REAL"
+
+    if source_type == "TANK_HEAD":
+        return "TANK"
+
+    if source_type == "MANUAL_SOURCE":
+        return "MANUAL"
+
+    return "CALC"
+
+
+def _pipe_pressure_kind(kind_u: str | None, kind_v: str | None) -> str:
+    ku = kind_u or "CALC"
+    kv = kind_v or "CALC"
+
+    if ku == kv:
+        return ku
+
+    # Si un extremo es real/tanque/manual y el otro calculado, el tramo es mixto.
+    return "MIXED"
+
+
+def _safe_float(v: Any) -> float | None:
+    if v is None:
+        return None
+
+    try:
+        n = float(v)
+    except Exception:
+        return None
+
+    if not math.isfinite(n):
+        return None
+
+    return n
+
+
 # ============================================================
 # Debug sources
 # GET /mapa/sim/debug_sources
@@ -120,7 +166,7 @@ def debug_sources():
     """
     Muestra las fuentes hidráulicas que usa la simulación.
 
-    Ahora sale de:
+    Sale de:
       "MapasAgua"."v_sim_sources_live"
 
     Esa vista combina:
@@ -258,14 +304,17 @@ def sim_run(body: SimRunRequest):
     """
     SIM SIMPLE:
     - Parte de fuentes con head fijo.
-    - Ahora las fuentes salen de "MapasAgua"."v_sim_sources_live":
+    - Las fuentes salen de "MapasAgua"."v_sim_sources_live":
         * MANUAL_SOURCE
         * TANK_HEAD
         * PRESSURE_MEASURE
     - Propaga por cañerías activas, abiertas y conectadas.
     - Usa elev_m para calcular presión estimada:
         pressure_mca = head_m - elev_m
-    - Devuelve pipes con sentido y caudal visual aproximado.
+    - Devuelve:
+        * nodos con pressure_kind: REAL / TANK / MANUAL / CALC
+        * pipes con pressure_bar_min/max/avg
+        * pipes con pressure_kind: REAL / TANK / MANUAL / CALC / MIXED
     """
     with get_conn() as conn, conn.cursor() as cur:
         # ----------------------------------------------------
@@ -446,7 +495,7 @@ def sim_run(body: SimRunRequest):
     # --------------------------------------------------------
     # Sources con head fijo
     # Si hay más de una fuente en un nodo, usamos la mayor.
-    # También guardamos la metadata de la fuente ganadora.
+    # Guardamos la metadata de la fuente ganadora.
     # --------------------------------------------------------
     head: Dict[str, float] = {}
     fixed_sources: Dict[str, float] = {}
@@ -467,13 +516,9 @@ def sim_run(body: SimRunRequest):
             sources_blocked += 1
             continue
 
-        try:
-            h = float(s["head_m"])
-        except Exception:
-            sources_invalid += 1
-            continue
+        h = _safe_float(s.get("head_m"))
 
-        if not math.isfinite(h):
+        if h is None:
             sources_invalid += 1
             continue
 
@@ -482,10 +527,14 @@ def sim_run(body: SimRunRequest):
         previous_h = fixed_sources.get(nid, float("-inf"))
 
         if h >= previous_h:
+            source_type = s.get("source_type")
+            pressure_kind = _pressure_kind_from_source_type(source_type)
+
             fixed_sources[nid] = h
             fixed_source_meta[nid] = {
                 "source_id": s.get("id"),
-                "source_type": s.get("source_type"),
+                "source_type": source_type,
+                "pressure_kind": pressure_kind,
                 "asset_link_id": s.get("asset_link_id"),
                 "asset_type": s.get("asset_type"),
                 "asset_id": s.get("asset_id"),
@@ -509,11 +558,14 @@ def sim_run(body: SimRunRequest):
 
     # --------------------------------------------------------
     # Propagación best-first desde head mayor
+    # origin_source guarda de dónde salió la presión calculada
     # --------------------------------------------------------
     pq: List[Tuple[float, str]] = []
+    origin_source: Dict[str, dict[str, Any]] = {}
 
     for nid, h in fixed_sources.items():
         head[nid] = h
+        origin_source[nid] = fixed_source_meta[nid]
         heapq.heappush(pq, (-h, nid))
 
     R0 = float(body.options.R0) if body.options.R0 else 500000.0
@@ -539,6 +591,7 @@ def sim_run(body: SimRunRequest):
 
             if hv > head.get(v, float("-inf")):
                 head[v] = hv
+                origin_source[v] = origin_source.get(u, fixed_source_meta.get(u))
                 heapq.heappush(pq, (-hv, v))
 
             prev = pipe_out.get(pid)
@@ -558,7 +611,7 @@ def sim_run(body: SimRunRequest):
                 }
 
     # --------------------------------------------------------
-    # Finalizar pipes: sentido real según heads finales
+    # Finalizar pipes: sentido real y presión por tramo
     # --------------------------------------------------------
     for pid, po in pipe_out.items():
         u = po["u"]
@@ -575,10 +628,84 @@ def sim_run(body: SimRunRequest):
             po["q_lps"] = 0.0
             po["abs_q_lps"] = 0.0
             po["dH_m"] = None
+
+            po["pressure_mca_u"] = None
+            po["pressure_mca_v"] = None
+            po["pressure_mca_avg"] = None
+            po["pressure_mca_min"] = None
+            po["pressure_mca_max"] = None
+
+            po["pressure_bar_u"] = None
+            po["pressure_bar_v"] = None
+            po["pressure_bar_avg"] = None
+            po["pressure_bar_min"] = None
+            po["pressure_bar_max"] = None
+
+            po["pressure_kind_u"] = None
+            po["pressure_kind_v"] = None
+            po["pressure_kind"] = None
+            po["origin_source_u"] = origin_source.get(u)
+            po["origin_source_v"] = origin_source.get(v)
             continue
 
         hu = float(hu)
         hv = float(hv)
+
+        elev_u = node_elev.get(u)
+        elev_v = node_elev.get(v)
+
+        pressure_mca_u, pressure_bar_u = _pressure_from_head(hu, elev_u)
+        pressure_mca_v, pressure_bar_v = _pressure_from_head(hv, elev_v)
+
+        pressure_mcas = [
+            x for x in [pressure_mca_u, pressure_mca_v]
+            if x is not None and math.isfinite(float(x))
+        ]
+
+        pressure_bars = [
+            x for x in [pressure_bar_u, pressure_bar_v]
+            if x is not None and math.isfinite(float(x))
+        ]
+
+        if pressure_mcas:
+            po["pressure_mca_u"] = float(pressure_mca_u) if pressure_mca_u is not None else None
+            po["pressure_mca_v"] = float(pressure_mca_v) if pressure_mca_v is not None else None
+            po["pressure_mca_avg"] = float(sum(pressure_mcas) / len(pressure_mcas))
+            po["pressure_mca_min"] = float(min(pressure_mcas))
+            po["pressure_mca_max"] = float(max(pressure_mcas))
+        else:
+            po["pressure_mca_u"] = None
+            po["pressure_mca_v"] = None
+            po["pressure_mca_avg"] = None
+            po["pressure_mca_min"] = None
+            po["pressure_mca_max"] = None
+
+        if pressure_bars:
+            po["pressure_bar_u"] = float(pressure_bar_u) if pressure_bar_u is not None else None
+            po["pressure_bar_v"] = float(pressure_bar_v) if pressure_bar_v is not None else None
+            po["pressure_bar_avg"] = float(sum(pressure_bars) / len(pressure_bars))
+            po["pressure_bar_min"] = float(min(pressure_bars))
+            po["pressure_bar_max"] = float(max(pressure_bars))
+        else:
+            po["pressure_bar_u"] = None
+            po["pressure_bar_v"] = None
+            po["pressure_bar_avg"] = None
+            po["pressure_bar_min"] = None
+            po["pressure_bar_max"] = None
+
+        source_u = fixed_source_meta.get(u)
+        source_v = fixed_source_meta.get(v)
+
+        # Si el nodo no es fuente directa, su presión es calculada.
+        pressure_kind_u = source_u.get("pressure_kind") if source_u else "CALC"
+        pressure_kind_v = source_v.get("pressure_kind") if source_v else "CALC"
+
+        po["pressure_kind_u"] = pressure_kind_u
+        po["pressure_kind_v"] = pressure_kind_v
+        po["pressure_kind"] = _pipe_pressure_kind(pressure_kind_u, pressure_kind_v)
+
+        po["origin_source_u"] = origin_source.get(u)
+        po["origin_source_v"] = origin_source.get(v)
 
         dH = hu - hv
 
@@ -602,6 +729,15 @@ def sim_run(body: SimRunRequest):
         elev_m = node_elev.get(nid)
 
         reached = h is not None and math.isfinite(float(h))
+        source = fixed_source_meta.get(nid)
+        origin = origin_source.get(nid)
+
+        if source:
+            pressure_kind = source.get("pressure_kind") or "CALC"
+        elif reached:
+            pressure_kind = "CALC"
+        else:
+            pressure_kind = None
 
         if not reached:
             nodes_out[nid] = {
@@ -613,8 +749,13 @@ def sim_run(body: SimRunRequest):
                 "kind": node_kind.get(nid, "JUNCTION"),
                 "label": node_label.get(nid),
                 "reached": False,
+
                 "is_source": nid in fixed_sources,
-                "source": fixed_source_meta.get(nid),
+                "pressure_kind": pressure_kind,
+                "source": source,
+                "origin_source": origin,
+                "is_pressure_real": False,
+                "is_pressure_theoretical": False,
             }
             continue
 
@@ -629,8 +770,17 @@ def sim_run(body: SimRunRequest):
             "kind": node_kind.get(nid, "JUNCTION"),
             "label": node_label.get(nid),
             "reached": True,
+
+            # Clasificación visual
             "is_source": nid in fixed_sources,
-            "source": fixed_source_meta.get(nid),
+            "pressure_kind": pressure_kind,
+            "source": source,
+            "origin_source": origin,
+
+            # Si es PRESSURE_MEASURE, el valor proviene de medición real.
+            "is_pressure_real": pressure_kind == "REAL",
+            # Si es nodo alcanzado pero no fuente directa, es calculado.
+            "is_pressure_theoretical": pressure_kind == "CALC",
         }
 
     return {
@@ -657,6 +807,13 @@ def sim_run(body: SimRunRequest):
             "demands_ignored": True,
             "pressure_formula": "pressure_mca = head_m - elev_m",
             "sources_origin": '"MapasAgua"."v_sim_sources_live"',
+            "pressure_kinds": {
+                "REAL": "Punto con presión real medida por manómetro/manifold",
+                "TANK": "Punto con carga por tanque, nivel y cota",
+                "MANUAL": "Fuente manual",
+                "CALC": "Presión teórica calculada por propagación",
+                "MIXED": "Cañería entre fuentes/orígenes distintos",
+            },
         },
     }
 
