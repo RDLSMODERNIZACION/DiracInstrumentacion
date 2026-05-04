@@ -1,6 +1,19 @@
-import { Popup } from "react-leaflet";
+import type { MouseEvent } from "react";
 import type { PipeConnHint } from "./mapTypes";
 import type { SimRunResponse } from "./PipesLayer";
+
+type Action = () => void | Promise<void>;
+
+function stop(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+async function run(e: MouseEvent<HTMLButtonElement>, fn: Action) {
+  e.preventDefault();
+  e.stopPropagation();
+  await fn();
+}
 
 export default function PipePopup({
   selectedPipeId,
@@ -17,7 +30,7 @@ export default function PipePopup({
 }: {
   selectedPipeId: string;
   selectedPipeLabel: string | null;
-  selectedPipePos: [number, number];
+  selectedPipePos?: [number, number] | null;
   connHint: PipeConnHint;
   sim: SimRunResponse | null;
   nodesBusy: boolean;
@@ -27,113 +40,137 @@ export default function PipePopup({
   onDelete: () => void | Promise<void>;
   onClose: () => void;
 }) {
-  const simPipe = sim?.pipes?.[selectedPipeId];
-
   return (
-    <Popup position={selectedPipePos} className="pipe-popup" closeButton={true} autoClose={false}>
-      <div className="pipePopup">
-        <div className="pipePopup__title" title={selectedPipeLabel ?? ""}>
-          {selectedPipeLabel ?? "Cañería"}
-        </div>
+    <div
+      className="pipePopupFixed"
+      onClick={stop}
+      onMouseDown={stop}
+      onDoubleClick={stop}
+      style={{
+        position: "absolute",
+        left: "50%",
+        bottom: 18,
+        transform: "translateX(-50%)",
+        zIndex: 5000,
+        width: "min(620px, calc(100% - 32px))",
+        borderRadius: 18,
+        background: "rgba(15,23,42,0.96)",
+        color: "#fff",
+        boxShadow: "0 20px 55px rgba(0,0,0,0.38)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        padding: "14px 56px 14px 14px",
+        backdropFilter: "blur(10px)",
+        pointerEvents: "auto",
+      }}
+    >
+      <button
+        type="button"
+        onClick={(e) => run(e, onClose)}
+        onMouseDown={stop}
+        title="Cerrar"
+        style={{
+          position: "absolute",
+          right: 10,
+          top: 10,
+          width: 38,
+          height: 38,
+          borderRadius: 14,
+          border: "1px solid rgba(255,255,255,0.18)",
+          background: "rgba(255,255,255,0.11)",
+          color: "#fff",
+          cursor: "pointer",
+          fontSize: 24,
+          lineHeight: "30px",
+          fontWeight: 950,
+        }}
+      >
+        ×
+      </button>
 
-        <div className="pipePopup__statusRow">
-          <span
-            className={
-              connHint.connected
-                ? "pipePopup__badge pipePopup__badge--ok"
-                : "pipePopup__badge pipePopup__badge--warn"
-            }
-          >
-            {connHint.connected ? "Conectada" : "Sin conectar"}
-          </span>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          alignItems: "center",
+        }}
+      >
+        <button
+          type="button"
+          onClick={(e) => run(e, onEdit)}
+          onMouseDown={stop}
+          style={btnPrimary}
+        >
+          Editar datos
+        </button>
 
-          {connHint.connected ? (
-            <span className="pipePopup__connText">
-              {connHint.from_node?.slice(0, 8)} → {connHint.to_node?.slice(0, 8)}
-            </span>
-          ) : (
-            <span className="pipePopup__connText">Falta origen/destino</span>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={(e) => run(e, onEditGeometry)}
+          onMouseDown={stop}
+          style={btnSecondary}
+        >
+          Recorrido
+        </button>
 
-        <div className="pipePopup__actions">
-          <button
-            className="pipePopup__btn pipePopup__btn--primary"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEdit();
-            }}
-          >
-            Editar
-          </button>
+        <button
+          type="button"
+          disabled={nodesBusy}
+          onClick={(e) => run(e, onConnect)}
+          onMouseDown={stop}
+          title={nodesBusy ? "Cargando nodos..." : connHint.connected ? "Modificar conexión" : "Conectar a nodos"}
+          style={{
+            ...btnSecondary,
+            opacity: nodesBusy ? 0.6 : 1,
+            cursor: nodesBusy ? "default" : "pointer",
+          }}
+        >
+          {nodesBusy ? "Nodos..." : connHint.connected ? "Conexión" : "Conectar"}
+        </button>
 
-          <button
-            className="pipePopup__btn"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onEditGeometry();
-            }}
-          >
-            Recorrido
-          </button>
+        <button
+          type="button"
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
 
-          <button
-            className="pipePopup__btn"
-            onClick={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              await onConnect();
-            }}
-            title={nodesBusy ? "Cargando nodos..." : connHint.connected ? "Modificar conexión" : "Conectar a nodos"}
-          >
-            {nodesBusy ? "Nodos..." : connHint.connected ? "Conexión" : "Conectar"}
-          </button>
+            const ok = confirm(`¿Borrar cañería "${selectedPipeLabel ?? ""}"?`);
+            if (!ok) return;
 
-          <button
-            className="pipePopup__btn"
-            onClick={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-
-              const ok = confirm(`¿Borrar cañería "${selectedPipeLabel ?? ""}"?`);
-              if (!ok) return;
-
-              await onDelete();
-            }}
-          >
-            Borrar
-          </button>
-
-          <button
-            className="pipePopup__btn"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onClose();
-            }}
-          >
-            Cerrar
-          </button>
-        </div>
-
-        {simPipe && (
-          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9 }}>
-            <div>
-              <b>Q visual</b>: {Number(simPipe.q_lps ?? 0).toFixed(3)} L/s {" "}
-              ({simPipe.dir === 1 ? "from→to" : "to→from"})
-            </div>
-
-            <div>
-              <b>ΔH</b>: {" "}
-              {simPipe.dH_m == null ? "N/D" : Number(simPipe.dH_m).toFixed(2)} m
-            </div>
-
-            {simPipe.blocked && <div style={{ fontWeight: 800, color: "#b91c1c" }}>BLOQUEADO</div>}
-          </div>
-        )}
+            await onDelete();
+          }}
+          onMouseDown={stop}
+          style={btnDanger}
+        >
+          Borrar
+        </button>
       </div>
-    </Popup>
+    </div>
   );
 }
+
+const btnBase: React.CSSProperties = {
+  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 13,
+  color: "#fff",
+  padding: "12px 16px",
+  fontWeight: 950,
+  cursor: "pointer",
+  minWidth: 130,
+  fontSize: 15,
+};
+
+const btnPrimary: React.CSSProperties = {
+  ...btnBase,
+  background: "rgba(37,99,235,0.98)",
+};
+
+const btnSecondary: React.CSSProperties = {
+  ...btnBase,
+  background: "rgba(255,255,255,0.09)",
+};
+
+const btnDanger: React.CSSProperties = {
+  ...btnBase,
+  background: "rgba(220,38,38,0.9)",
+};

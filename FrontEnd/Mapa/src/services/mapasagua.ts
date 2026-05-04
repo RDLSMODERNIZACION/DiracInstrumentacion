@@ -60,6 +60,112 @@ export type NodeCreateInput = {
 export type NodeUpdateInput = Partial<NodeCreateInput>;
 
 /* =========================
+   ACTIVOS REALES DEL MAPA
+========================= */
+
+export type MapAssetType =
+  | "TANK"
+  | "PUMP"
+  | "MANIFOLD"
+  | "VALVE"
+  | "PRESSURE_SENSOR"
+  | "FLOW_SENSOR"
+  | "LEVEL_SENSOR"
+  | "WELL"
+  | "SECTOR"
+  | "OTHER";
+
+export type MapAssetLiveStatus = "ONLINE" | "STALE" | "NO_DATA" | string;
+
+export type MapAssetLive = {
+  asset_link_id: string;
+
+  asset_type: MapAssetType | string;
+  asset_id: string;
+  asset_name: string | null;
+
+  source_table?: string | null;
+  location_id?: number | null;
+
+  sim_role?: string | null;
+  hydraulic_position?: string | null;
+
+  map_node_id?: string | null;
+  map_pipe_id?: string | null;
+  linked_to_map: boolean;
+
+  level_pct?: number | null;
+  pressure_bar?: number | null;
+  flow_lps?: number | null;
+  run_status?: string | null;
+
+  online?: boolean | null;
+  age_sec?: number | null;
+  live_status?: MapAssetLiveStatus | null;
+
+  enabled?: boolean;
+  priority?: number;
+  props?: Record<string, any>;
+  notes?: string | null;
+};
+
+export type MapAssetsLiveResponse = {
+  items: MapAssetLive[];
+};
+
+export type MapAssetsStatsResponse = {
+  totals: {
+    total?: number;
+    linked?: number;
+    unlinked?: number;
+    online?: number;
+    stale?: number;
+    no_data?: number;
+    [key: string]: any;
+  };
+  by_status: Array<{
+    asset_type: string;
+    sim_role: string;
+    live_status: string;
+    linked_to_map: boolean;
+    count: number;
+  }>;
+};
+
+export type MapAssetsLiveParams = {
+  asset_type?: string;
+  sim_role?: string;
+  location_id?: number;
+  live_status?: string;
+  linked_to_map?: boolean;
+  enabled?: boolean;
+  limit?: number;
+};
+
+export type MapAssetLinkPayload = {
+  map_node_id?: string | null;
+  map_pipe_id?: string | null;
+  clear?: boolean;
+
+  hydraulic_position?: string | null;
+  enabled?: boolean;
+  priority?: number;
+
+  props?: Record<string, any>;
+  notes?: string | null;
+};
+
+export type MapAssetUpdatePayload = {
+  asset_name?: string | null;
+  sim_role?: string | null;
+  hydraulic_position?: string | null;
+  enabled?: boolean;
+  priority?: number;
+  props?: Record<string, any>;
+  notes?: string | null;
+};
+
+/* =========================
    CONECTAR CAÑERÍAS EN CRUCE
 ========================= */
 
@@ -133,6 +239,17 @@ async function fetchJSON<T = any>(url: string, init?: RequestInit): Promise<T> {
 
 function isMissingEndpoint(e: any) {
   return e?.status === 404 || e?.status === 405;
+}
+
+function buildQuery(params: Record<string, any>) {
+  const qs = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    qs.set(key, String(value));
+  }
+
+  return qs.toString();
 }
 
 /* =========================
@@ -330,6 +447,65 @@ export async function deleteNode(nodeId: string): Promise<{ ok: boolean; node_id
   const url = `${API_BASE}/mapa/nodes/${encodeURIComponent(nodeId)}`;
 
   return fetchJSON(url, {
+    method: "DELETE",
+  });
+}
+
+/* =========================
+   MAPA - ACTIVOS REALES
+========================= */
+
+export async function fetchMapAssetsLive(
+  params: MapAssetsLiveParams = {}
+): Promise<MapAssetLive[]> {
+  const qs = buildQuery(params);
+  const url = `${API_BASE}/mapa/assets/live${qs ? `?${qs}` : ""}`;
+
+  const json = await fetchJSON<MapAssetsLiveResponse | MapAssetLive[]>(url);
+
+  return Array.isArray(json) ? json : json?.items ?? [];
+}
+
+export async function fetchMapAsset(assetLinkId: string): Promise<MapAssetLive> {
+  const url = `${API_BASE}/mapa/assets/${encodeURIComponent(assetLinkId)}`;
+
+  return fetchJSON<MapAssetLive>(url);
+}
+
+export async function fetchMapAssetsStats(): Promise<MapAssetsStatsResponse> {
+  const url = `${API_BASE}/mapa/assets/stats`;
+
+  return fetchJSON<MapAssetsStatsResponse>(url);
+}
+
+export async function updateMapAsset(
+  assetLinkId: string,
+  payload: MapAssetUpdatePayload
+): Promise<MapAssetLive> {
+  const url = `${API_BASE}/mapa/assets/${encodeURIComponent(assetLinkId)}`;
+
+  return fetchJSON<MapAssetLive>(url, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function linkMapAsset(
+  assetLinkId: string,
+  payload: MapAssetLinkPayload
+): Promise<MapAssetLive> {
+  const url = `${API_BASE}/mapa/assets/${encodeURIComponent(assetLinkId)}/link`;
+
+  return fetchJSON<MapAssetLive>(url, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unlinkMapAsset(assetLinkId: string): Promise<MapAssetLive> {
+  const url = `${API_BASE}/mapa/assets/${encodeURIComponent(assetLinkId)}/link`;
+
+  return fetchJSON<MapAssetLive>(url, {
     method: "DELETE",
   });
 }

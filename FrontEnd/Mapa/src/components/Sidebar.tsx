@@ -58,6 +58,8 @@ function assetTypeLabel(t: Asset["type"]) {
       return "Válvula";
     case "MANIFOLD":
       return "Manifold";
+    default:
+      return "Activo";
   }
 }
 
@@ -88,11 +90,13 @@ function getValveTargets(args: { valveId: string; assetsById: Map<string, Asset>
       barrioNames.push(b?.name ?? t.barrioId);
       continue;
     }
+
     if (t.kind === "LOCATION") {
       const z = zones.find((x) => x.id === t.locationId);
       locationNames.push(z?.name ?? t.locationId);
       continue;
     }
+
     if (t.kind === "ASSET") {
       const a = assetsById.get(t.assetId);
       assetNames.push(a?.name ?? t.assetId);
@@ -147,20 +151,16 @@ export function Sidebar(props: {
 
   assetsById: Map<string, Asset>;
 
-  // ✅ viene de App (para que el mapa sepa qué resaltar)
   activeValveId: string | null;
   setActiveValveId: (id: string | null) => void;
 
-  // ✅ App decide si corresponde mostrar impacto
   showValveImpact: boolean;
 
-  // ✅ NUEVO: modo vista (Todos/Localidades/Cañerías/Barrios)
   viewMode: ViewMode;
   setViewMode: (m: ViewMode) => void;
   viewSelectedId: string | null;
   setViewSelectedId: (id: string | null) => void;
 
-  // ✅ listas para selector de vista (globales)
   zonesAll: Zone[];
   barriosAll: typeof barrios;
   edgesAll: Edge[];
@@ -188,9 +188,6 @@ export function Sidebar(props: {
     edgesAll,
   } = props;
 
-  // =========================
-  // VIDEO MODAL (por localidad)
-  // =========================
   const [videoOpen, setVideoOpen] = React.useState(false);
 
   const zoneVideoUrl = useMemo(() => {
@@ -208,8 +205,10 @@ export function Sidebar(props: {
       onClick={() => setZoneTab(id)}
       style={{
         opacity: zoneTab === id ? 1 : 0.7,
-        borderColor: zoneTab === id ? "rgba(34,211,238,0.35)" : "rgba(255,255,255,0.10)",
-        background: zoneTab === id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.04)",
+        borderColor:
+          zoneTab === id ? "rgba(34,211,238,0.35)" : "rgba(255,255,255,0.10)",
+        background:
+          zoneTab === id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.04)",
       }}
     >
       {label}
@@ -225,8 +224,10 @@ export function Sidebar(props: {
       }}
       style={{
         opacity: viewMode === id ? 1 : 0.7,
-        borderColor: viewMode === id ? "rgba(34,211,238,0.35)" : "rgba(255,255,255,0.10)",
-        background: viewMode === id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.04)",
+        borderColor:
+          viewMode === id ? "rgba(34,211,238,0.35)" : "rgba(255,255,255,0.10)",
+        background:
+          viewMode === id ? "rgba(34,211,238,0.10)" : "rgba(255,255,255,0.04)",
       }}
     >
       {label}
@@ -267,7 +268,6 @@ export function Sidebar(props: {
 
   return (
     <div className="sidebar">
-      {/* Header limpio */}
       <div className="header">
         <div className="brand">
           <div className="brandTitle">Localidades</div>
@@ -278,7 +278,9 @@ export function Sidebar(props: {
                 <span style={{ color: "var(--muted)" }}>· {selectedZone.id}</span>
               </>
             ) : (
-              <span style={{ color: "var(--muted)" }}>Seleccioná una localidad en el mapa</span>
+              <span style={{ color: "var(--muted)" }}>
+                Seleccioná una localidad en el mapa
+              </span>
             )}
           </div>
         </div>
@@ -290,9 +292,12 @@ export function Sidebar(props: {
         </div>
       </div>
 
-      {/* ✅ VISTA / FILTRO (Todos / Localidades / Cañerías / Barrios) */}
+      {/* Mapa hidráulico: MapView inyecta acá sus herramientas por portal */}
+      <div id="map-tools-slot" />
+
       <div className="card">
         <div className="sectionTitle">Vista</div>
+
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <ModeBtn id="ALL" label="Todos" />
           <ModeBtn id="ZONES" label="Localidades" />
@@ -303,13 +308,14 @@ export function Sidebar(props: {
         {viewMode !== "ALL" && (
           <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
-              Seleccioná un ítem (si no, se muestran todos).
+              Seleccioná un ítem. Si no elegís ninguno, se muestran todos.
             </div>
 
             {viewMode === "ZONES" && (
               <div className="list">
                 {zonesAll.map((z) => {
                   const active = viewSelectedId === z.id;
+
                   return (
                     <div
                       key={z.id}
@@ -338,6 +344,7 @@ export function Sidebar(props: {
               <div className="list">
                 {barriosAll.map((b) => {
                   const active = viewSelectedId === b.id;
+
                   return (
                     <div
                       key={b.id}
@@ -350,7 +357,10 @@ export function Sidebar(props: {
                       onClick={() => setViewSelectedId(active ? null : b.id)}
                     >
                       <div className="itemLeft">
-                        <span className="dot" style={{ background: "rgba(255,255,255,0.65)" }} />
+                        <span
+                          className="dot"
+                          style={{ background: "rgba(255,255,255,0.65)" }}
+                        />
                         <div style={{ minWidth: 0 }}>
                           <div className="itemTitle">{b.name}</div>
                           <div className="itemSub">
@@ -369,6 +379,7 @@ export function Sidebar(props: {
                 {edgesAll.map((e) => {
                   const active = viewSelectedId === e.id;
                   const title = (e.meta as any)?.name ?? e.id;
+
                   return (
                     <div
                       key={e.id}
@@ -398,30 +409,41 @@ export function Sidebar(props: {
         )}
       </div>
 
-      {/* Estado NONE */}
       {mode === "NONE" && (
         <div className="card" style={{ marginTop: 10 }}>
           <div className="sectionTitle">Operación</div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            • Click en una localidad para ver activos y conexiones.<br />
-            • En válvulas, tocá una fila para ver el impacto real (barrios o cañerías).
+          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+            • Usá el panel de Mapa hidráulico para editar cañerías, conectar nodos y
+            activar capas.
+            <br />
+            • Los activos reales se cargan desde el backend.
+            <br />
+            • En válvulas, tocá una fila para ver impacto real si está configurado.
           </div>
         </div>
       )}
 
-      {/* Localidad */}
       {mode === "ZONE" && selectedZone && (
         <div className="card" style={{ marginTop: 10 }}>
           <div className="sectionTitle">Localidad</div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              marginTop: 6,
+              flexWrap: "wrap",
+            }}
+          >
             <span className="pill">
-              <span className="dot" style={{ background: "var(--zone)" }} /> {selectedZone.id}
+              <span className="dot" style={{ background: "var(--zone)" }} />{" "}
+              {selectedZone.id}
             </span>
+
             <div style={{ fontWeight: 900, fontSize: 14 }}>{selectedZone.name}</div>
           </div>
 
-          {/* 🎥 Video de la localidad */}
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button
               className="btn"
@@ -432,7 +454,11 @@ export function Sidebar(props: {
                 borderColor: "rgba(255,255,255,0.14)",
                 background: "rgba(255,255,255,0.06)",
               }}
-              title={zoneVideoUrl ? "Ver video de la localidad" : "Esta localidad no tiene video configurado"}
+              title={
+                zoneVideoUrl
+                  ? "Ver video de la localidad"
+                  : "Esta localidad no tiene video configurado"
+              }
             >
               🎥 Ver video
             </button>
@@ -442,12 +468,14 @@ export function Sidebar(props: {
             <TabBtn id="VALVES" label={`Válvulas (${locationInventory.valves.length})`} />
             <TabBtn id="TANKS" label={`Tanques (${locationInventory.tanks.length})`} />
             <TabBtn id="PUMPS" label={`Bombas (${locationInventory.pumps.length})`} />
-            <TabBtn id="MANIFOLDS" label={`Manifolds (${locationInventory.manifolds.length})`} />
+            <TabBtn
+              id="MANIFOLDS"
+              label={`Manifolds (${locationInventory.manifolds.length})`}
+            />
             <TabBtn id="PIPES" label={`Cañerías (${locationInventory.pipes.length})`} />
             <TabBtn id="BARRIOS" label={`Barrios (${locationInventory.barrios.length})`} />
           </div>
 
-          {/* TAB: VALVES */}
           {zoneTab === "VALVES" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Válvulas</div>
@@ -469,7 +497,9 @@ export function Sidebar(props: {
                       <div
                         className="itemLeft"
                         role="button"
-                        onClick={() => setActiveValveId((cur) => (cur === v.id ? null : v.id))}
+                        onClick={() =>
+                          setActiveValveId(activeValveId === v.id ? null : v.id)
+                        }
                         style={{ cursor: "pointer" }}
                         title="Ver impacto"
                       >
@@ -513,9 +543,17 @@ export function Sidebar(props: {
                     border: "1px solid rgba(255,255,255,0.10)",
                   }}
                 >
-                  <div style={{ fontWeight: 900, fontSize: 12, letterSpacing: 0.4, textTransform: "uppercase" }}>
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 12,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                    }}
+                  >
                     Impacto
                   </div>
+
                   <div style={{ marginTop: 6, fontWeight: 900, fontSize: 14 }}>
                     {valveImpact.valveName}
                   </div>
@@ -523,25 +561,56 @@ export function Sidebar(props: {
                   <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
                     {valveImpact.barrioNames.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Barrios</div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--muted)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Barrios
+                        </div>
+
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          {valveImpact.barrioNames.map((n) => <Chip key={n} text={n} />)}
+                          {valveImpact.barrioNames.map((n) => (
+                            <Chip key={n} text={n} />
+                          ))}
                         </div>
                       </div>
                     )}
 
-                    {!!valveImpact.locationNames.length && (
+                    {valveImpact.locationNames.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Localidades</div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--muted)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Localidades
+                        </div>
+
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          {valveImpact.locationNames.map((n) => <Chip key={n} text={n} />)}
+                          {valveImpact.locationNames.map((n) => (
+                            <Chip key={n} text={n} />
+                          ))}
                         </div>
                       </div>
                     )}
 
                     {valveImpact.pipeItems.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>Cañerías</div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--muted)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Cañerías
+                        </div>
+
                         <div style={{ display: "grid", gap: 8 }}>
                           {valveImpact.pipeItems.map((p) => (
                             <div
@@ -569,16 +638,30 @@ export function Sidebar(props: {
                                 >
                                   {p.label}
                                 </div>
+
                                 {p.requires.length ? (
-                                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      color: "var(--muted)",
+                                      marginTop: 2,
+                                    }}
+                                  >
                                     Requiere: {p.requires.join(", ")}
                                   </div>
                                 ) : (
-                                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      color: "var(--muted)",
+                                      marginTop: 2,
+                                    }}
+                                  >
                                     Sin prerequisitos
                                   </div>
                                 )}
                               </div>
+
                               <span
                                 className="pill"
                                 style={{
@@ -586,7 +669,8 @@ export function Sidebar(props: {
                                   border: "1px solid rgba(255,255,255,0.10)",
                                 }}
                               >
-                                <span className="dot" style={{ background: edgeColor(p.type) }} /> {p.type}
+                                <span className="dot" style={{ background: edgeColor(p.type) }} />{" "}
+                                {p.type}
                               </span>
                             </div>
                           ))}
@@ -611,24 +695,27 @@ export function Sidebar(props: {
             </div>
           )}
 
-          {/* TAB: TANKS */}
           {zoneTab === "TANKS" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Tanques</div>
+
               <div className="list">
                 {locationInventory.tanks.map((t) => (
                   <div key={t.id} className="item">
                     <div className="itemLeft" role="button">
                       <span className="dot" style={{ background: dotColor(t.status) }} />
+
                       <div style={{ minWidth: 0 }}>
                         <div className="itemTitle">{t.name}</div>
                         <div className="itemSub">
-                          {String(t.meta.nivel_pct ?? "—")} % · {String(t.meta.autonomia_h ?? "—")} h
+                          {String(t.meta.nivel_pct ?? "—")} % ·{" "}
+                          {String(t.meta.autonomia_h ?? "—")} h
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
+
                 {locationInventory.tanks.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     Sin tanques cargados.
@@ -638,25 +725,27 @@ export function Sidebar(props: {
             </div>
           )}
 
-          {/* TAB: PUMPS */}
           {zoneTab === "PUMPS" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Bombas</div>
+
               <div className="list">
                 {locationInventory.pumps.map((p) => (
                   <div key={p.id} className="item">
                     <div className="itemLeft" role="button">
                       <span className="dot" style={{ background: dotColor(p.status) }} />
+
                       <div style={{ minWidth: 0 }}>
                         <div className="itemTitle">{p.name}</div>
                         <div className="itemSub">
-                          Estado: {String(p.meta.estado ?? "—")} · Hz: {String(p.meta.hz ?? "—")} · kW:{" "}
-                          {String(p.meta.kw ?? "—")}
+                          Estado: {String(p.meta.estado ?? "—")} · Hz:{" "}
+                          {String(p.meta.hz ?? "—")} · kW: {String(p.meta.kw ?? "—")}
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
+
                 {locationInventory.pumps.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     Sin bombas cargadas.
@@ -666,24 +755,27 @@ export function Sidebar(props: {
             </div>
           )}
 
-          {/* TAB: MANIFOLDS */}
           {zoneTab === "MANIFOLDS" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Manifolds</div>
+
               <div className="list">
                 {locationInventory.manifolds.map((m) => (
                   <div key={m.id} className="item">
                     <div className="itemLeft" role="button">
                       <span className="dot" style={{ background: dotColor(m.status) }} />
+
                       <div style={{ minWidth: 0 }}>
                         <div className="itemTitle">{m.name}</div>
                         <div className="itemSub">
-                          {String(m.meta.presion_psi ?? "—")} psi · {String(m.meta.caudal_m3h ?? "—")} m³/h
+                          {String(m.meta.presion_psi ?? "—")} psi ·{" "}
+                          {String(m.meta.caudal_m3h ?? "—")} m³/h
                         </div>
                       </div>
                     </div>
                   </div>
                 ))}
+
                 {locationInventory.manifolds.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     Sin manifolds cargados.
@@ -693,30 +785,35 @@ export function Sidebar(props: {
             </div>
           )}
 
-          {/* TAB: PIPES */}
           {zoneTab === "PIPES" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Cañerías / Conexiones</div>
+
               <div className="list">
                 {locationInventory.pipes.map((e) => {
                   const from = assetsById.get(e.from);
                   const to = assetsById.get(e.to);
+
                   return (
                     <div key={e.id} className="item">
                       <div className="itemLeft" role="button">
                         <span className="dot" style={{ background: edgeColor(e.type) }} />
+
                         <div style={{ minWidth: 0 }}>
                           <div className="itemTitle">
                             {from?.name ?? e.from} → {to?.name ?? e.to}
                           </div>
+
                           <div className="itemSub">
-                            Tipo: {e.type} · {from?.locationId ?? "?"} → {to?.locationId ?? "?"}
+                            Tipo: {e.type} · {from?.locationId ?? "?"} →{" "}
+                            {to?.locationId ?? "?"}
                           </div>
                         </div>
                       </div>
                     </div>
                   );
                 })}
+
                 {locationInventory.pipes.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     Sin cañerías asociadas.
@@ -726,15 +823,19 @@ export function Sidebar(props: {
             </div>
           )}
 
-          {/* TAB: BARRIOS */}
           {zoneTab === "BARRIOS" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Barrios</div>
+
               <div className="list">
                 {locationInventory.barrios.map((b) => (
                   <div key={b.id} className="item">
                     <div className="itemLeft" role="button">
-                      <span className="dot" style={{ background: "rgba(255,255,255,0.6)" }} />
+                      <span
+                        className="dot"
+                        style={{ background: "rgba(255,255,255,0.6)" }}
+                      />
+
                       <div style={{ minWidth: 0 }}>
                         <div className="itemTitle">{b.name}</div>
                         <div className="itemSub">Alimentado por: {b.meta.alimentado_por}</div>
@@ -742,6 +843,7 @@ export function Sidebar(props: {
                     </div>
                   </div>
                 ))}
+
                 {locationInventory.barrios.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
                     Sin barrios cargados.
@@ -753,16 +855,18 @@ export function Sidebar(props: {
         </div>
       )}
 
-      {/* ASSET */}
       {mode === "ASSET" && selectedAsset && (
         <div className="card" style={{ marginTop: 10 }}>
           <div className="sectionTitle">Activo</div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span className="dot" style={{ background: dotColor(selectedAsset.status) }} />
+
             <div>
               <div style={{ fontWeight: 900, fontSize: 14 }}>{selectedAsset.name}</div>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                {assetTypeLabel(selectedAsset.type)} · {selectedAsset.status} · {selectedAsset.locationId}
+                {assetTypeLabel(selectedAsset.type)} · {selectedAsset.status} ·{" "}
+                {selectedAsset.locationId}
               </div>
             </div>
           </div>
@@ -770,8 +874,11 @@ export function Sidebar(props: {
           {selectedAsset.type === "VALVE" && (
             <div style={{ marginTop: 12 }}>
               <div className="sectionTitle">Control</div>
+
               <div
-                className={"switch " + (props.valveEnabled[selectedAsset.id] !== false ? "on" : "")}
+                className={
+                  "switch " + (props.valveEnabled?.[selectedAsset.id] !== false ? "on" : "")
+                }
                 onClick={() => onToggleValve(selectedAsset.id)}
                 title="Activar / desactivar"
               >
@@ -787,7 +894,10 @@ export function Sidebar(props: {
                     ...t.locationNames.map((x) => `Localidad: ${x}`),
                     ...t.assetNames.map((x) => `Asset: ${x}`),
                   ];
-                  return parts.length ? parts.join(" · ") : t.note ?? "Sin destinos configurados";
+
+                  return parts.length
+                    ? parts.join(" · ")
+                    : t.note ?? "Sin destinos configurados";
                 })()}
               </div>
             </div>
@@ -795,7 +905,6 @@ export function Sidebar(props: {
         </div>
       )}
 
-      {/* 🎥 Modal centrado: video de la localidad */}
       <VideoModal
         open={videoOpen}
         title={selectedZone ? `Video · ${selectedZone.name}` : "Video"}

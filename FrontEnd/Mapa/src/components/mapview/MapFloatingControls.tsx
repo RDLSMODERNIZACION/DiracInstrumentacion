@@ -1,125 +1,306 @@
-import type { CSSProperties } from "react";
-import type { SimMode } from "./mapTypes";
+// src/components/mapview/MapFloatingControls.tsx
 
-function mainButtonStyle(active: boolean, activeBg: string, opacity = 1): CSSProperties {
+import type { CSSProperties, ReactNode } from "react";
+import type { SimMode } from "./mapTypes";
+import type { PipeConnectivityStats } from "./PipesLayer";
+
+type BoolSetter = (updater: (v: boolean) => boolean) => void;
+
+function buttonStyle(active: boolean, activeBg: string, disabled = false): CSSProperties {
   return {
+    width: "100%",
     padding: "10px 12px",
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: active ? activeBg : "rgba(15,23,42,0.78)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: active ? activeBg : "rgba(255,255,255,0.05)",
     color: "#fff",
-    fontWeight: 800,
-    cursor: "pointer",
-    boxShadow: "0 12px 25px rgba(0,0,0,0.22)",
-    opacity,
+    fontWeight: 900,
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.58 : 1,
+    textAlign: "center",
+    transition: "all 0.15s ease",
   };
+}
+
+function sectionBoxStyle(): CSSProperties {
+  return {
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.035)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    padding: 12,
+  };
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 950,
+        letterSpacing: 0.6,
+        textTransform: "uppercase",
+        color: "rgba(255,255,255,0.68)",
+        marginBottom: 10,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function StatusDot({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: 99,
+        background: color,
+        boxShadow: `0 0 0 3px ${color}22`,
+        flex: "0 0 auto",
+      }}
+    />
+  );
 }
 
 export default function MapFloatingControls({
   creatingPipe,
   onToggleCreatingPipe,
+
   nodeConnectOpen,
   onOpenNodeConnector,
+
+  intersectionConnectOpen,
+  onOpenIntersectionConnector,
+
   showContours,
   setShowContours,
+
   showPressureNodes,
   setShowPressureNodes,
+
+  showMapAssets,
+  setShowMapAssets,
+
+  assetsPanelOpen,
+  setAssetsPanelOpen,
+
   simMode,
   onToggleSimMode,
+
   simActive,
   simBusy,
   onToggleSim,
+
   showLegend,
   setShowLegend,
+
+  pipeConnectivityStats,
+  simErr,
 }: {
   creatingPipe: boolean;
   onToggleCreatingPipe: () => void;
+
   nodeConnectOpen: boolean;
   onOpenNodeConnector: () => void;
+
+  intersectionConnectOpen: boolean;
+  onOpenIntersectionConnector: () => void;
+
   showContours: boolean;
-  setShowContours: (updater: (v: boolean) => boolean) => void;
+  setShowContours: BoolSetter;
+
   showPressureNodes: boolean;
-  setShowPressureNodes: (updater: (v: boolean) => boolean) => void;
+  setShowPressureNodes: BoolSetter;
+
+  showMapAssets: boolean;
+  setShowMapAssets: BoolSetter;
+
+  assetsPanelOpen: boolean;
+  setAssetsPanelOpen: BoolSetter;
+
   simMode: SimMode;
   onToggleSimMode: () => void;
+
   simActive: boolean;
   simBusy: boolean;
   onToggleSim: () => void;
+
   showLegend: boolean;
-  setShowLegend: (updater: (v: boolean) => boolean) => void;
+  setShowLegend: BoolSetter;
+
+  pipeConnectivityStats?: PipeConnectivityStats | null;
+  simErr?: string | null;
 }) {
   return (
-    <div
-      style={{
-        position: "absolute",
-        right: 16,
-        top: 16,
-        zIndex: 1000,
-        display: "grid",
-        gap: 8,
-        width: 170,
-      }}
-    >
-      <button onClick={onToggleCreatingPipe} style={mainButtonStyle(creatingPipe, "rgba(37,99,235,0.95)")}>
-        {creatingPipe ? "Cancelar dibujo" : "+ Cañería"}
-      </button>
+    <div style={{ display: "grid", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 950, lineHeight: 1.1 }}>
+          Mapa hidráulico
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.68)", marginTop: 3 }}>
+          Edición, capas y simulación
+        </div>
+      </div>
 
-      <button
-        onClick={onOpenNodeConnector}
-        style={mainButtonStyle(nodeConnectOpen, "rgba(234,88,12,0.95)")}
-        title="Crear una cañería conectando dos nodos existentes"
-      >
-        {nodeConnectOpen ? "Nodos: ON" : "Conectar nodos"}
-      </button>
+      <div style={sectionBoxStyle()}>
+        <SectionTitle>Herramientas</SectionTitle>
 
-      <button
-        onClick={() => setShowContours((v) => !v)}
-        style={mainButtonStyle(showContours, "rgba(14,165,233,0.95)")}
-        title="Mostrar curvas de nivel / topografía"
-      >
-        {showContours ? "Curvas: ON" : "Curvas"}
-      </button>
+        <div style={{ display: "grid", gap: 8 }}>
+          <button
+            onClick={onToggleCreatingPipe}
+            style={buttonStyle(creatingPipe, "rgba(37,99,235,0.96)")}
+          >
+            {creatingPipe ? "Cancelar cañería" : "+ Cañería"}
+          </button>
 
-      <button
-        onClick={() => setShowPressureNodes((v) => !v)}
-        style={mainButtonStyle(showPressureNodes, "rgba(20,184,166,0.95)", simActive ? 1 : 0.72)}
-        title="Mostrar puntos de presión al simular"
-      >
-        {showPressureNodes ? "Puntos: ON" : "Puntos"}
-      </button>
+          <button
+            onClick={onOpenNodeConnector}
+            style={buttonStyle(nodeConnectOpen, "rgba(234,88,12,0.96)")}
+          >
+            {nodeConnectOpen ? "Nodos: ON" : "Conectar nodos"}
+          </button>
 
-      <button
-        onClick={onToggleSimMode}
-        style={mainButtonStyle(true, simMode === "topografico" ? "rgba(99,102,241,0.95)" : "rgba(217,119,6,0.95)")}
-        title="Cambiar modo de simulación"
-      >
-        {simMode === "topografico" ? "Modo: Topo" : "Modo: Hidr."}
-      </button>
+          <button
+            onClick={onOpenIntersectionConnector}
+            style={buttonStyle(intersectionConnectOpen, "rgba(239,68,68,0.96)")}
+          >
+            {intersectionConnectOpen ? "Cancelar cruce" : "Conectar cruce"}
+          </button>
+        </div>
+      </div>
 
-      <button
-        onClick={onToggleSim}
-        style={mainButtonStyle(simActive, "rgba(34,197,94,0.95)")}
-        title={simActive ? "Quitar simulación" : "Correr simulación"}
-      >
-        {simBusy ? "Simulando..." : simActive ? "SIM: ON" : "SIM"}
-      </button>
+      <div style={sectionBoxStyle()}>
+        <SectionTitle>Capas</SectionTitle>
 
-      <button
-        onClick={() => setShowLegend((v) => !v)}
-        style={{
-          padding: "8px 10px",
-          borderRadius: 12,
-          border: "1px solid rgba(255,255,255,0.2)",
-          background: showLegend ? "rgba(15,23,42,0.78)" : "rgba(15,23,42,0.5)",
-          color: "#fff",
-          fontWeight: 800,
-          cursor: "pointer",
-          fontSize: 12,
-          boxShadow: "0 12px 25px rgba(0,0,0,0.22)",
-        }}
-      >
-        {showLegend ? "Ocultar leyenda" : "Ver leyenda"}
-      </button>
+        <div style={{ display: "grid", gap: 8 }}>
+          <button
+            onClick={() => setShowContours((v) => !v)}
+            style={buttonStyle(showContours, "rgba(14,165,233,0.96)")}
+          >
+            {showContours ? "Curvas: ON" : "Curvas"}
+          </button>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <button
+              onClick={() => setShowMapAssets((v) => !v)}
+              style={buttonStyle(showMapAssets, "rgba(168,85,247,0.96)")}
+              title="Mostrar u ocultar los activos en el mapa"
+            >
+              {showMapAssets ? "Activos: ON" : "Activos"}
+            </button>
+
+            <button
+              onClick={() => {
+                setAssetsPanelOpen((v) => !v);
+
+                if (!showMapAssets) {
+                  setShowMapAssets(() => true);
+                }
+              }}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: assetsPanelOpen
+                  ? "rgba(168,85,247,0.32)"
+                  : "rgba(255,255,255,0.05)",
+                color: "#fff",
+                fontWeight: 950,
+                cursor: "pointer",
+                minWidth: 46,
+              }}
+              title="Abrir panel de activos"
+            >
+              {assetsPanelOpen ? "‹" : "›"}
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowPressureNodes((v) => !v)}
+            style={buttonStyle(showPressureNodes, "rgba(20,184,166,0.96)")}
+          >
+            {showPressureNodes ? "Puntos: ON" : "Puntos"}
+          </button>
+
+          <button
+            onClick={() => setShowLegend((v) => !v)}
+            style={buttonStyle(showLegend, "rgba(100,116,139,0.95)")}
+          >
+            {showLegend ? "Leyenda: ON" : "Leyenda"}
+          </button>
+        </div>
+      </div>
+
+      <div style={sectionBoxStyle()}>
+        <SectionTitle>Simulación</SectionTitle>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <button
+            onClick={onToggleSimMode}
+            style={buttonStyle(
+              true,
+              simMode === "topografico"
+                ? "rgba(99,102,241,0.96)"
+                : "rgba(217,119,6,0.96)"
+            )}
+          >
+            {simMode === "topografico" ? "Modo: Topo" : "Modo: Hidr."}
+          </button>
+
+          <button
+            onClick={onToggleSim}
+            disabled={simBusy}
+            style={buttonStyle(simActive, "rgba(34,197,94,0.96)", simBusy)}
+          >
+            {simBusy ? "Simulando..." : simActive ? "SIM: ON" : "SIM"}
+          </button>
+        </div>
+
+        {simErr && (
+          <div
+            style={{
+              marginTop: 10,
+              background: "rgba(220,38,38,0.86)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              borderRadius: 12,
+              padding: 9,
+              fontSize: 12,
+              fontWeight: 800,
+              lineHeight: 1.25,
+            }}
+          >
+            {simErr}
+          </div>
+        )}
+      </div>
+
+      <div style={sectionBoxStyle()}>
+        <SectionTitle>Estado red</SectionTitle>
+
+        {pipeConnectivityStats ? (
+          <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
+            <div style={statusRowStyle}>
+              <StatusDot color="#22c55e" />
+              <span>{pipeConnectivityStats.connected} conectadas</span>
+            </div>
+
+            <div style={statusRowStyle}>
+              <StatusDot color="#f59e0b" />
+              <span>{pipeConnectivityStats.unconnected} sin conectar</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, opacity: 0.65 }}>Sin datos todavía</div>
+        )}
+      </div>
     </div>
   );
 }
+
+const statusRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  fontWeight: 800,
+};
