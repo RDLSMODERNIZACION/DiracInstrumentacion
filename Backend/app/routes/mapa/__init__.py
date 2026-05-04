@@ -7,6 +7,7 @@ from .nodes import router as nodes_router
 from .contours import router as contours_router
 from .assets import router as assets_router
 from .diameters import router as diameters_router
+from .valves import router as valves_router
 
 router = APIRouter()
 
@@ -16,5 +17,6 @@ router.include_router(nodes_router)
 router.include_router(contours_router)
 router.include_router(assets_router)
 router.include_router(diameters_router)
+router.include_router(valves_router)
 
 __all__ = ["router"]
