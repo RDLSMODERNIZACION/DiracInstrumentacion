@@ -601,3 +601,65 @@ export async function previewPipesAtIntersection(input: {
     apply: false,
   });
 }
+
+/* =========================
+   MAPA - TRANSICIONES DE DIÁMETRO
+========================= */
+
+export type DiameterTransitionPipe = {
+  pipe_id: string;
+  layer_name?: string | null;
+  diam_mm?: number | null;
+  flow_func?: string | null;
+  other_node_id?: string | null;
+  length_m?: number | null;
+};
+
+export type DiameterTransition = {
+  node_id: string;
+  kind?: string | null;
+  elev_m?: number | null;
+  node_label?: string | null;
+  lat: number;
+  lng: number;
+
+  pipes_count: number;
+  unique_pipes_count: number;
+  diameters_count: number;
+
+  min_diam_mm: number;
+  max_diam_mm: number;
+  delta_diam_mm: number;
+  ratio_diam: number;
+
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | string;
+  transition_type: string;
+
+  diameters_mm?: number[];
+  pipes: DiameterTransitionPipe[];
+};
+
+export type DiameterTransitionsResponse = {
+  count: number;
+  items: DiameterTransition[];
+};
+
+export async function fetchDiameterTransitions(params: {
+  min_delta_mm?: number;
+  min_ratio?: number;
+  severity?: string;
+  limit?: number;
+} = {}): Promise<DiameterTransition[]> {
+  const qs = new URLSearchParams();
+
+  if (params.min_delta_mm != null) qs.set("min_delta_mm", String(params.min_delta_mm));
+  if (params.min_ratio != null) qs.set("min_ratio", String(params.min_ratio));
+  if (params.severity) qs.set("severity", params.severity);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+
+  const url = `${API_BASE}/mapa/diameters/transitions${qs.toString() ? `?${qs}` : ""}`;
+
+  const json = await fetchJSON<DiameterTransitionsResponse>(url);
+
+  return Array.isArray(json?.items) ? json.items : [];
+}

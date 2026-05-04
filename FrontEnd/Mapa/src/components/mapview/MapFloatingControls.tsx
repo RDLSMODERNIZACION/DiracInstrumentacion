@@ -82,6 +82,9 @@ export default function MapFloatingControls({
   showElevationNodes,
   setShowElevationNodes,
 
+  showDiameterTransitions,
+  setShowDiameterTransitions,
+
   showMapAssets,
   setShowMapAssets,
 
@@ -118,6 +121,9 @@ export default function MapFloatingControls({
 
   showElevationNodes: boolean;
   setShowElevationNodes: BoolSetter;
+
+  showDiameterTransitions: boolean;
+  setShowDiameterTransitions: BoolSetter;
 
   showMapAssets: boolean;
   setShowMapAssets: BoolSetter;
@@ -234,6 +240,14 @@ export default function MapFloatingControls({
             style={buttonStyle(showElevationNodes, "rgba(234,179,8,0.96)")}
           >
             {showElevationNodes ? "Cotas: ON" : "Cotas"}
+          </button>
+
+          <button
+            onClick={() => setShowDiameterTransitions((v) => !v)}
+            style={buttonStyle(showDiameterTransitions, "rgba(249,115,22,0.96)")}
+            title="Mostrar conexiones entre cañerías de distinto diámetro"
+          >
+            {showDiameterTransitions ? "Diámetros: ON" : "Diámetros"}
           </button>
 
           <button

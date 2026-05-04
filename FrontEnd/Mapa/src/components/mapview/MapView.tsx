@@ -23,6 +23,7 @@ import MapAssetsPanel from "./MapAssetsPanel";
 import MapAssetNodePickerLayer from "./MapAssetNodePickerLayer";
 import MapAssetsLayer from "./MapAssetsLayer";
 import MapElevationNodesLayer from "./MapElevationNodesLayer";
+import DiameterTransitionsLayer from "./DiameterTransitionsLayer";
 
 import {
   MapClickClear,
@@ -111,6 +112,7 @@ export function MapView(props: {
   const [showContours, setShowContours] = React.useState(false);
   const [showPressureNodes, setShowPressureNodes] = React.useState(true);
   const [showElevationNodes, setShowElevationNodes] = React.useState(false);
+  const [showDiameterTransitions, setShowDiameterTransitions] = React.useState(false);
   const [showLegend, setShowLegend] = React.useState(true);
 
   const [showMapAssets, setShowMapAssets] = React.useState(false);
@@ -452,6 +454,8 @@ export function MapView(props: {
               setShowPressureNodes={setShowPressureNodes}
               showElevationNodes={showElevationNodes}
               setShowElevationNodes={setShowElevationNodes}
+              showDiameterTransitions={showDiameterTransitions}
+              setShowDiameterTransitions={setShowDiameterTransitions}
               showMapAssets={showMapAssets}
               setShowMapAssets={setShowMapAssets}
               assetsPanelOpen={assetsPanelOpen}
@@ -571,6 +575,12 @@ export function MapView(props: {
           <MapElevationNodesLayer
             visible={showElevationNodes}
             nodes={nodesLite}
+          />
+
+          <DiameterTransitionsLayer
+            visible={showDiameterTransitions}
+            minDeltaMm={20}
+            minRatio={1.1}
           />
 
           <PipeDrawController

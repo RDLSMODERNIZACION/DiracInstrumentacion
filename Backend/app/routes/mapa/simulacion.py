@@ -19,7 +19,14 @@ router = APIRouter()
 class SimOptions(BaseModel):
     default_diam_mm: float = 75.0
     r_scale: float = 1.0
+
+    # Si una válvula está asociada a un nodo y está cerrada,
+    # bloquea todas las cañerías conectadas a ese nodo.
     closed_valve_blocks_node: bool = True
+
+    # Si una válvula está asociada a una cañería y está cerrada,
+    # esa cañería no entra al grafo hidráulico.
+    closed_valve_blocks_pipe: bool = True
 
     # Caída de head por resistencia.
     # Esto NO es EPANET; es una simulación simple/visual para ver continuidad,
@@ -30,7 +37,11 @@ class SimOptions(BaseModel):
     # Si ves caudales visuales muy bajos, se puede subir.
     R0: float = 500000.0
 
-    # Cuántas fuentes alternativas devolver por nodo/cañería para no inflar demasiado el JSON.
+    # Compatibilidad con llamadas viejas del front.
+    ignore_unconnected: bool = True
+    min_pressure_m: float = 0.0
+
+    # Cuántas fuentes alternativas devolver por nodo/cañería.
     max_sources_reaching_per_node: int = 6
 
 
@@ -149,7 +160,7 @@ def _source_group_from_type(source_type: str | None) -> str:
     Grupo operativo para detectar mezclas:
       TANK     = tanques
       PRESSURE = presión real medida
-      MANUAL   = fuente fija manual, se trata como presión no-real para alertas
+      MANUAL   = fuente fija manual
       OTHER
     """
     if source_type == "TANK_HEAD":
@@ -238,13 +249,6 @@ def _source_meta_from_row(s: dict[str, Any], head_m: float) -> dict[str, Any]:
         "live_status": s.get("live_status"),
         "props": s.get("props"),
     }
-
-
-def _trim_sources_reaching(
-    items: list[dict[str, Any]],
-    max_items: int = 6,
-) -> list[dict[str, Any]]:
-    return sorted(items, key=lambda x: float(x.get("head_m") or -1e18), reverse=True)[:max_items]
 
 
 def _classify_sources_reaching(items: list[dict[str, Any]]) -> tuple[str | None, list[str]]:
@@ -408,6 +412,82 @@ def _propagate_from_single_source(
     return heads
 
 
+def _read_valves(cur, conn) -> tuple[Dict[str, bool], Dict[str, bool], int]:
+    """
+    Lee válvulas de MapasAgua.valves.
+
+    Soporta dos modelos:
+      Nuevo:
+        map_node_id
+        map_pipe_id
+        is_open
+
+      Viejo:
+        node_id
+        is_open
+
+    Devuelve:
+      valve_node_open: node_id -> is_open
+      valve_pipe_open: pipe_id -> is_open
+      valves_total
+    """
+    valve_node_open: Dict[str, bool] = {}
+    valve_pipe_open: Dict[str, bool] = {}
+    valves_total = 0
+
+    # Modelo nuevo
+    try:
+        cur.execute(
+            """
+            SELECT
+                map_node_id::text AS node_id,
+                map_pipe_id::text AS pipe_id,
+                is_open
+            FROM "MapasAgua".valves
+            """
+        )
+
+        for r in _fetchall_dict(cur):
+            valves_total += 1
+            is_open = bool(r.get("is_open"))
+
+            if r.get("node_id"):
+                valve_node_open[r["node_id"]] = is_open
+
+            if r.get("pipe_id"):
+                valve_pipe_open[r["pipe_id"]] = is_open
+
+        return valve_node_open, valve_pipe_open, valves_total
+
+    except Exception:
+        _safe_rollback(conn)
+
+    # Modelo viejo
+    try:
+        cur.execute(
+            """
+            SELECT
+                node_id::text AS node_id,
+                null::text AS pipe_id,
+                is_open
+            FROM "MapasAgua".valves
+            """
+        )
+
+        for r in _fetchall_dict(cur):
+            valves_total += 1
+            is_open = bool(r.get("is_open"))
+
+            if r.get("node_id"):
+                valve_node_open[r["node_id"]] = is_open
+
+        return valve_node_open, valve_pipe_open, valves_total
+
+    except Exception:
+        _safe_rollback(conn)
+        return {}, {}, 0
+
+
 # ============================================================
 # Debug sources
 # GET /mapa/sim/debug_sources
@@ -420,11 +500,6 @@ def debug_sources():
 
     Sale de:
       "MapasAgua"."v_sim_sources_live"
-
-    Esa vista combina:
-      - MapasAgua.sources
-      - Tanques reales como SOURCE_HEAD
-      - Manómetros / manifolds como PRESSURE_MEASURE
     """
     with get_conn() as conn, conn.cursor() as cur:
         try:
@@ -474,12 +549,12 @@ def debug_sources():
 @router.get("/sim/debug_network")
 def debug_network():
     """
-    Diagnóstico rápido para saber por qué no simula:
+    Diagnóstico rápido:
     - cañerías totales
     - cañerías conectadas
-    - cañerías sin conectar
     - nodos
-    - fuentes hidráulicas vivas
+    - fuentes
+    - válvulas
     """
     with get_conn() as conn, conn.cursor() as cur:
         try:
@@ -535,6 +610,8 @@ def debug_network():
             )
             sources = _fetchall_dict(cur)[0]
 
+            valve_node_open, valve_pipe_open, valves_total = _read_valves(cur, conn)
+
         except Exception as e:
             _safe_rollback(conn)
             raise HTTPException(500, f"debug_network falló: {e}")
@@ -543,6 +620,13 @@ def debug_network():
         "pipes": pipes,
         "nodes": nodes,
         "sources": sources,
+        "valves": {
+            "valves_total": valves_total,
+            "valves_on_nodes": len(valve_node_open),
+            "valves_on_pipes": len(valve_pipe_open),
+            "closed_node_valves": sum(1 for v in valve_node_open.values() if v is False),
+            "closed_pipe_valves": sum(1 for v in valve_pipe_open.values() if v is False),
+        },
     }
 
 
@@ -556,19 +640,16 @@ def sim_run(body: SimRunRequest):
     """
     SIM SIMPLE:
     - Parte de fuentes con head fijo.
-    - Las fuentes salen de "MapasAgua"."v_sim_sources_live":
+    - Fuentes desde "MapasAgua"."v_sim_sources_live":
         * MANUAL_SOURCE
         * TANK_HEAD
         * PRESSURE_MEASURE
-    - Propaga por cañerías activas, abiertas y conectadas.
-    - Usa elev_m para calcular presión estimada:
+    - Válvula en nodo cerrada:
+        bloquea el nodo.
+    - Válvula en cañería cerrada:
+        saca esa cañería del grafo.
+    - Usa elev_m para calcular presión:
         pressure_mca = head_m - elev_m
-    - Devuelve:
-        * nodos con pressure_kind: REAL / TANK / MANUAL / CALC
-        * nodes.sources_reaching: fuentes que también llegan al nodo
-        * nodes.source_mix: MIXED_TANK_PRESSURE, MULTI_TANK, etc.
-        * pipes con pressure_bar_min/max/avg
-        * pipes.source_mix/warnings para detectar cruces y sectores mixtos
     """
     with get_conn() as conn, conn.cursor() as cur:
         # ----------------------------------------------------
@@ -619,27 +700,9 @@ def sim_run(body: SimRunRequest):
             raise HTTPException(500, f"Error leyendo nodes: {e}")
 
         # ----------------------------------------------------
-        # Valves opcional
-        # Si la tabla no existe, no frenamos la simulación.
+        # Valves
         # ----------------------------------------------------
-        valve_open: Dict[str, bool] = {}
-
-        try:
-            cur.execute(
-                """
-                SELECT
-                    node_id::text AS node_id,
-                    is_open
-                FROM "MapasAgua".valves
-                """
-            )
-
-            for r in _fetchall_dict(cur):
-                valve_open[r["node_id"]] = bool(r["is_open"])
-
-        except Exception:
-            _safe_rollback(conn)
-            valve_open = {}
+        valve_node_open, valve_pipe_open, valves_total = _read_valves(cur, conn)
 
         # ----------------------------------------------------
         # Sources hidráulicas vivas
@@ -703,7 +766,7 @@ def sim_run(body: SimRunRequest):
     blocked: set[str] = set()
 
     if body.options.closed_valve_blocks_node:
-        for nid, is_open in valve_open.items():
+        for nid, is_open in valve_node_open.items():
             if is_open is False:
                 blocked.add(nid)
 
@@ -716,6 +779,7 @@ def sim_run(body: SimRunRequest):
 
     unconnected_count = 0
     closed_count = 0
+    closed_by_valve_count = 0
     blocked_count = 0
 
     for p in pipes:
@@ -735,6 +799,11 @@ def sim_run(body: SimRunRequest):
 
         if not p.get("is_open", True):
             closed_count += 1
+            continue
+
+        if body.options.closed_valve_blocks_pipe and valve_pipe_open.get(pid) is False:
+            closed_count += 1
+            closed_by_valve_count += 1
             continue
 
         u = p.get("from_node")
@@ -763,7 +832,6 @@ def sim_run(body: SimRunRequest):
     # --------------------------------------------------------
     # Sources con head fijo
     # Si hay más de una fuente en un nodo, usamos la mayor.
-    # Guardamos la metadata de la fuente ganadora.
     # --------------------------------------------------------
     head: Dict[str, float] = {}
     fixed_sources: Dict[str, float] = {}
@@ -806,12 +874,11 @@ def sim_run(body: SimRunRequest):
     if not fixed_sources:
         raise HTTPException(
             400,
-            "Todas las fuentes están bloqueadas, no tienen head_m válido o no existen.",
+            "Todas las fuentes están bloqueadas por válvulas, no tienen head_m válido o no existen.",
         )
 
     # --------------------------------------------------------
-    # Propagación best-first desde fuente dominante
-    # origin_source guarda de dónde salió la presión calculada
+    # Propagación dominante
     # --------------------------------------------------------
     pq: List[Tuple[float, str]] = []
     origin_source: Dict[str, dict[str, Any]] = {}
@@ -831,7 +898,6 @@ def sim_run(body: SimRunRequest):
         neg_h, u = heapq.heappop(pq)
         hu = -neg_h
 
-        # Saltar entradas viejas
         if head.get(u, float("-inf")) > hu + 1e-9:
             continue
 
@@ -866,13 +932,11 @@ def sim_run(body: SimRunRequest):
                     "v": v,
                     "flow_func": pm.get("flow_func"),
                     "pipe_role": pm.get("role"),
+                    "valve_closed": False,
                 }
 
     # --------------------------------------------------------
-    # Propagar cada fuente por separado para detectar:
-    # - fuentes que también llegan
-    # - mezcla tanque + impulsión
-    # - sectores alimentados por varios orígenes
+    # Propagar cada fuente individualmente
     # --------------------------------------------------------
     node_sources_reaching: Dict[str, list[dict[str, Any]]] = {}
 
@@ -901,7 +965,7 @@ def sim_run(body: SimRunRequest):
             node_sources_reaching.setdefault(nid, []).append(reached_meta)
 
     # --------------------------------------------------------
-    # Precalcular resumen de fuentes por nodo
+    # Resumen de fuentes por nodo
     # --------------------------------------------------------
     node_source_summary: Dict[str, dict[str, Any]] = {}
 
@@ -926,9 +990,57 @@ def sim_run(body: SimRunRequest):
         }
 
     # --------------------------------------------------------
-    # Finalizar pipes: sentido real y presión por tramo
+    # Agregar cañerías cerradas por válvula al output
+    # para que el front pueda mostrarlas si lo necesita.
+    # --------------------------------------------------------
+    for p in pipes:
+        pid = p["id"]
+
+        if not (body.options.closed_valve_blocks_pipe and valve_pipe_open.get(pid) is False):
+            continue
+
+        pipe_out[pid] = {
+            "q_lps": 0.0,
+            "abs_q_lps": 0.0,
+            "dir": 1,
+            "dH_m": None,
+            "R": None,
+            "length_m": p.get("length_m"),
+            "diam_mm": p.get("diametro_mm"),
+            "blocked": True,
+            "valve_closed": True,
+            "u": p.get("from_node"),
+            "v": p.get("to_node"),
+            "flow_func": p.get("flow_func"),
+            "pipe_role": pipe_meta.get(pid, {}).get("role"),
+            "pressure_mca_u": None,
+            "pressure_mca_v": None,
+            "pressure_mca_avg": None,
+            "pressure_mca_min": None,
+            "pressure_mca_max": None,
+            "pressure_bar_u": None,
+            "pressure_bar_v": None,
+            "pressure_bar_avg": None,
+            "pressure_bar_min": None,
+            "pressure_bar_max": None,
+            "pressure_kind_u": None,
+            "pressure_kind_v": None,
+            "pressure_kind": "BLOCKED",
+            "origin_source_u": None,
+            "origin_source_v": None,
+            "sources_reaching": [],
+            "sources_reaching_count": 0,
+            "source_mix": "VALVE_CLOSED",
+            "warnings": ["PIPE_BLOCKED_BY_CLOSED_VALVE"],
+        }
+
+    # --------------------------------------------------------
+    # Finalizar pipes
     # --------------------------------------------------------
     for pid, po in pipe_out.items():
+        if po.get("valve_closed") is True:
+            continue
+
         u = po["u"]
         v = po["v"]
 
@@ -949,11 +1061,10 @@ def sim_run(body: SimRunRequest):
             *(node_sources_reaching.get(v, []) or []),
         ]
 
-        # Deduplicar por source_id y mayor head
         dedup: Dict[str, dict[str, Any]] = {}
 
         for x in combined_sources:
-            sid = str(x.get("source_id") or x.get("source_id") or x.get("label") or "")
+            sid = str(x.get("source_id") or x.get("label") or "")
             if not sid:
                 continue
 
@@ -1060,7 +1171,6 @@ def sim_run(body: SimRunRequest):
             po["pressure_bar_min"] = None
             po["pressure_bar_max"] = None
 
-        # Direct source en endpoint = REAL/TANK/MANUAL. Si no, endpoint calculado.
         direct_source_u = fixed_source_meta.get(u)
         direct_source_v = fixed_source_meta.get(v)
 
@@ -1119,6 +1229,7 @@ def sim_run(body: SimRunRequest):
 
         base = {
             "blocked": nid in blocked,
+            "valve_closed": valve_node_open.get(nid) is False,
             "kind": node_kind.get(nid, "JUNCTION"),
             "label": node_label.get(nid),
 
@@ -1178,12 +1289,23 @@ def sim_run(body: SimRunRequest):
 
             "pipes_unconnected": unconnected_count,
             "pipes_closed": closed_count,
+            "pipes_closed_by_valve": closed_by_valve_count,
             "pipes_blocked_by_valve": blocked_count,
+
+            "valves_total": valves_total,
+            "valves_on_nodes": len(valve_node_open),
+            "valves_on_pipes": len(valve_pipe_open),
+            "closed_node_valves": sum(1 for v in valve_node_open.values() if v is False),
+            "closed_pipe_valves": sum(1 for v in valve_pipe_open.values() if v is False),
 
             "demands_ignored": True,
             "pressure_formula": "pressure_mca = head_m - elev_m",
             "sources_origin": '"MapasAgua"."v_sim_sources_live"',
             "source_mix_logic": "propagación individual por fuente + fuente dominante por mayor head_m",
+            "valve_logic": {
+                "node_valve_closed": "bloquea todas las cañerías conectadas al nodo",
+                "pipe_valve_closed": "bloquea solo la cañería asociada",
+            },
             "pressure_kinds": {
                 "REAL": "Punto con presión real medida por manómetro/manifold",
                 "TANK": "Punto con carga por tanque, nivel y cota",
@@ -1198,6 +1320,7 @@ def sim_run(body: SimRunRequest):
                 "MULTI_TANK": "Llegan varios tanques",
                 "MULTI_PRESSURE": "Llegan varias fuentes de presión",
                 "MIXED_TANK_PRESSURE": "Llegan tanque(s) y presión/impulsión",
+                "VALVE_CLOSED": "Cañería bloqueada por válvula cerrada",
             },
             "warnings_catalog": {
                 "TANK_AND_PRESSURE_REACH_NODE": "Al nodo/tramo llegan tanque e impulsión/presión",
@@ -1208,6 +1331,7 @@ def sim_run(body: SimRunRequest):
                 "REAL_AND_MANUAL_PRESSURE_REACH_NODE": "Llegan presión real y fuente manual",
                 "DISTRIBUTION_FED_BY_PRESSURE": "Cañería de distribución/ramal dominada o alcanzada por impulsión/presión",
                 "TANK_ZONE_INVADED_BY_PRESSURE": "Zona de tanque alcanzada también por impulsión/presión",
+                "PIPE_BLOCKED_BY_CLOSED_VALVE": "Cañería bloqueada por válvula cerrada",
             },
         },
     }
