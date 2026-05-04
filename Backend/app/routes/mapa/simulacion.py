@@ -76,15 +76,13 @@ def _pressure_from_head(
     elev_m: float | None,
 ) -> tuple[float | None, float | None]:
     """
-    Presión correcta cuando tenemos cota:
+    Presión cuando tenemos cota:
 
       pressure_mca = head_m - elev_m
       pressure_bar = pressure_mca / 10.197162129779
 
     Si elev_m todavía no está cargada, mantenemos compatibilidad:
       pressure_mca = head_m
-
-    Esto evita romper la simulación mientras todavía no tenemos curvas de nivel.
     """
     if head_m is None:
         return None, None
@@ -102,6 +100,16 @@ def _pressure_from_head(
     return pressure_mca, pressure_mca / 10.197162129779
 
 
+def _source_label(s: dict[str, Any]) -> str:
+    return (
+        s.get("label")
+        or s.get("source_name")
+        or s.get("asset_name")
+        or s.get("source_type")
+        or "Fuente"
+    )
+
+
 # ============================================================
 # Debug sources
 # GET /mapa/sim/debug_sources
@@ -109,24 +117,44 @@ def _pressure_from_head(
 
 @router.get("/sim/debug_sources")
 def debug_sources():
+    """
+    Muestra las fuentes hidráulicas que usa la simulación.
+
+    Ahora sale de:
+      "MapasAgua"."v_sim_sources_live"
+
+    Esa vista combina:
+      - MapasAgua.sources
+      - Tanques reales como SOURCE_HEAD
+      - Manómetros / manifolds como PRESSURE_MEASURE
+    """
     with get_conn() as conn, conn.cursor() as cur:
         try:
             cur.execute(
                 """
                 SELECT
-                    s.id::text AS id,
-                    s.node_id::text AS node_id,
-                    s.head_m::double precision AS head_m,
-                    s.props,
-                    n.kind,
-                    n.elev_m::double precision AS elev_m,
-                    COALESCE(n.props->>'label', s.props->>'label', '') AS label,
-                    ST_X(n.geom)::double precision AS lng,
-                    ST_Y(n.geom)::double precision AS lat
-                FROM "MapasAgua".sources s
-                JOIN "MapasAgua".nodes n
-                    ON n.id = s.node_id
-                ORDER BY label, s.id
+                    source_id::text AS id,
+                    source_type,
+                    asset_link_id::text AS asset_link_id,
+                    asset_type,
+                    asset_id,
+                    source_name AS label,
+                    node_id::text AS node_id,
+                    head_m::double precision AS head_m,
+                    node_elev_m::double precision AS elev_m,
+                    pressure_bar_real::double precision AS pressure_bar_real,
+                    level_pct::double precision AS level_pct,
+                    tank_height_m::double precision AS tank_height_m,
+                    water_height_m::double precision AS water_height_m,
+                    online,
+                    age_sec::double precision AS age_sec,
+                    live_status,
+                    props
+                FROM "MapasAgua"."v_sim_sources_live"
+                WHERE enabled = true
+                  AND head_m IS NOT NULL
+                  AND node_id IS NOT NULL
+                ORDER BY source_type, source_name, source_id
                 """
             )
             items = _fetchall_dict(cur)
@@ -153,7 +181,7 @@ def debug_network():
     - cañerías conectadas
     - cañerías sin conectar
     - nodos
-    - fuentes
+    - fuentes hidráulicas vivas
     """
     with get_conn() as conn, conn.cursor() as cur:
         try:
@@ -184,7 +212,8 @@ def debug_network():
                 """
                 SELECT
                     count(*)::int AS nodes_total,
-                    count(*) FILTER (WHERE elev_m IS NOT NULL)::int AS nodes_with_elev
+                    count(*) FILTER (WHERE elev_m IS NOT NULL)::int AS nodes_with_elev,
+                    count(*) FILTER (WHERE elev_m IS NULL)::int AS nodes_without_elev
                 FROM "MapasAgua".nodes
                 """
             )
@@ -193,8 +222,17 @@ def debug_network():
             cur.execute(
                 """
                 SELECT
-                    count(*)::int AS sources_total
-                FROM "MapasAgua".sources
+                    count(*)::int AS sources_total,
+                    count(*) FILTER (WHERE source_type = 'MANUAL_SOURCE')::int AS manual_sources,
+                    count(*) FILTER (WHERE source_type = 'TANK_HEAD')::int AS tank_sources,
+                    count(*) FILTER (WHERE source_type = 'PRESSURE_MEASURE')::int AS pressure_sources,
+                    count(*) FILTER (WHERE live_status = 'ONLINE')::int AS online_sources,
+                    count(*) FILTER (WHERE live_status = 'STALE')::int AS stale_sources,
+                    count(*) FILTER (WHERE live_status = 'NO_DATA')::int AS no_data_sources
+                FROM "MapasAgua"."v_sim_sources_live"
+                WHERE enabled = true
+                  AND head_m IS NOT NULL
+                  AND node_id IS NOT NULL
                 """
             )
             sources = _fetchall_dict(cur)[0]
@@ -219,11 +257,14 @@ def debug_network():
 def sim_run(body: SimRunRequest):
     """
     SIM SIMPLE:
-    - Parte de sources con head fijo.
+    - Parte de fuentes con head fijo.
+    - Ahora las fuentes salen de "MapasAgua"."v_sim_sources_live":
+        * MANUAL_SOURCE
+        * TANK_HEAD
+        * PRESSURE_MEASURE
     - Propaga por cañerías activas, abiertas y conectadas.
     - Usa elev_m para calcular presión estimada:
         pressure_mca = head_m - elev_m
-    - Si todavía no hay elev_m, usa head_m como presión para no romper.
     - Devuelve pipes con sentido y caudal visual aproximado.
     """
     with get_conn() as conn, conn.cursor() as cur:
@@ -296,29 +337,44 @@ def sim_run(body: SimRunRequest):
             valve_open = {}
 
         # ----------------------------------------------------
-        # Sources
+        # Sources hidráulicas vivas
         # ----------------------------------------------------
         try:
             cur.execute(
                 """
                 SELECT
-                    s.node_id::text AS node_id,
-                    s.head_m::double precision AS head_m,
-                    COALESCE(n.props->>'label', s.props->>'label', '') AS label
-                FROM "MapasAgua".sources s
-                JOIN "MapasAgua".nodes n
-                    ON n.id = s.node_id
+                    source_id::text AS id,
+                    node_id::text AS node_id,
+                    head_m::double precision AS head_m,
+                    source_name AS label,
+                    source_type,
+                    asset_link_id::text AS asset_link_id,
+                    asset_type,
+                    asset_id,
+                    pressure_bar_real::double precision AS pressure_bar_real,
+                    level_pct::double precision AS level_pct,
+                    tank_height_m::double precision AS tank_height_m,
+                    water_height_m::double precision AS water_height_m,
+                    online,
+                    age_sec::double precision AS age_sec,
+                    live_status,
+                    props
+                FROM "MapasAgua"."v_sim_sources_live"
+                WHERE enabled = true
+                  AND head_m IS NOT NULL
+                  AND node_id IS NOT NULL
                 """
             )
             sources = _fetchall_dict(cur)
         except Exception as e:
             _safe_rollback(conn)
-            raise HTTPException(500, f"Error leyendo sources: {e}")
+            raise HTTPException(500, f"Error leyendo sources desde v_sim_sources_live: {e}")
 
     if not sources:
         raise HTTPException(
             400,
-            'No hay sources en "MapasAgua".sources. Se necesita al menos un node_id + head_m.',
+            'No hay fuentes hidráulicas en "MapasAgua"."v_sim_sources_live". '
+            "Se necesita al menos una fuente manual, tanque o manómetro con nodo y cota.",
         )
 
     node_kind = {
@@ -390,33 +446,65 @@ def sim_run(body: SimRunRequest):
     # --------------------------------------------------------
     # Sources con head fijo
     # Si hay más de una fuente en un nodo, usamos la mayor.
+    # También guardamos la metadata de la fuente ganadora.
     # --------------------------------------------------------
     head: Dict[str, float] = {}
     fixed_sources: Dict[str, float] = {}
+    fixed_source_meta: Dict[str, dict[str, Any]] = {}
+
+    sources_valid: List[dict[str, Any]] = []
+    sources_blocked = 0
+    sources_invalid = 0
 
     for s in sources:
-        nid = s["node_id"]
+        nid = s.get("node_id")
+
+        if not nid:
+            sources_invalid += 1
+            continue
 
         if nid in blocked:
+            sources_blocked += 1
             continue
 
         try:
             h = float(s["head_m"])
         except Exception:
+            sources_invalid += 1
             continue
 
         if not math.isfinite(h):
+            sources_invalid += 1
             continue
 
-        fixed_sources[nid] = max(
-            fixed_sources.get(nid, float("-inf")),
-            h,
-        )
+        sources_valid.append(s)
+
+        previous_h = fixed_sources.get(nid, float("-inf"))
+
+        if h >= previous_h:
+            fixed_sources[nid] = h
+            fixed_source_meta[nid] = {
+                "source_id": s.get("id"),
+                "source_type": s.get("source_type"),
+                "asset_link_id": s.get("asset_link_id"),
+                "asset_type": s.get("asset_type"),
+                "asset_id": s.get("asset_id"),
+                "label": _source_label(s),
+                "head_m": h,
+                "pressure_bar_real": s.get("pressure_bar_real"),
+                "level_pct": s.get("level_pct"),
+                "tank_height_m": s.get("tank_height_m"),
+                "water_height_m": s.get("water_height_m"),
+                "online": s.get("online"),
+                "age_sec": s.get("age_sec"),
+                "live_status": s.get("live_status"),
+                "props": s.get("props"),
+            }
 
     if not fixed_sources:
         raise HTTPException(
             400,
-            "Todas las sources están bloqueadas, no tienen head_m válido o no existen.",
+            "Todas las fuentes están bloqueadas, no tienen head_m válido o no existen.",
         )
 
     # --------------------------------------------------------
@@ -525,6 +613,8 @@ def sim_run(body: SimRunRequest):
                 "kind": node_kind.get(nid, "JUNCTION"),
                 "label": node_label.get(nid),
                 "reached": False,
+                "is_source": nid in fixed_sources,
+                "source": fixed_source_meta.get(nid),
             }
             continue
 
@@ -539,12 +629,15 @@ def sim_run(body: SimRunRequest):
             "kind": node_kind.get(nid, "JUNCTION"),
             "label": node_label.get(nid),
             "reached": True,
+            "is_source": nid in fixed_sources,
+            "source": fixed_source_meta.get(nid),
         }
 
     return {
         "model": "SIMPLE",
         "nodes": nodes_out,
         "pipes": pipe_out,
+        "sources": list(fixed_source_meta.values()),
         "meta": {
             "n_nodes": len(nodes),
             "n_pipes_used": len(pipe_out),
@@ -553,6 +646,9 @@ def sim_run(body: SimRunRequest):
             "pipes_count": len(pipes),
             "nodes_count": len(nodes),
             "sources_count": len(sources),
+            "sources_valid": len(sources_valid),
+            "sources_invalid": sources_invalid,
+            "sources_blocked": sources_blocked,
 
             "pipes_unconnected": unconnected_count,
             "pipes_closed": closed_count,
@@ -560,6 +656,7 @@ def sim_run(body: SimRunRequest):
 
             "demands_ignored": True,
             "pressure_formula": "pressure_mca = head_m - elev_m",
+            "sources_origin": '"MapasAgua"."v_sim_sources_live"',
         },
     }
 

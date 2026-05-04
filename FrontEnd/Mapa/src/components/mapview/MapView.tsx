@@ -22,6 +22,7 @@ import PipePopup from "./PipePopup";
 import MapAssetsPanel from "./MapAssetsPanel";
 import MapAssetNodePickerLayer from "./MapAssetNodePickerLayer";
 import MapAssetsLayer from "./MapAssetsLayer";
+import MapElevationNodesLayer from "./MapElevationNodesLayer";
 
 import {
   MapClickClear,
@@ -109,6 +110,7 @@ export function MapView(props: {
 
   const [showContours, setShowContours] = React.useState(false);
   const [showPressureNodes, setShowPressureNodes] = React.useState(true);
+  const [showElevationNodes, setShowElevationNodes] = React.useState(false);
   const [showLegend, setShowLegend] = React.useState(true);
 
   const [showMapAssets, setShowMapAssets] = React.useState(false);
@@ -251,6 +253,13 @@ export function MapView(props: {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMapAssets, assetsPanelOpen]);
+
+  React.useEffect(() => {
+    if (showElevationNodes && nodesLite.length === 0 && !nodesBusy) {
+      ensureNodes();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showElevationNodes]);
 
   async function startAssetLinkMode(mode: "node" | "pipe") {
     if (!selectedMapAsset) {
@@ -441,6 +450,8 @@ export function MapView(props: {
               setShowContours={setShowContours}
               showPressureNodes={showPressureNodes}
               setShowPressureNodes={setShowPressureNodes}
+              showElevationNodes={showElevationNodes}
+              setShowElevationNodes={setShowElevationNodes}
               showMapAssets={showMapAssets}
               setShowMapAssets={setShowMapAssets}
               assetsPanelOpen={assetsPanelOpen}
@@ -555,6 +566,11 @@ export function MapView(props: {
             nodes={nodesLite}
             selectedAsset={selectedMapAsset}
             onPick={handleLinkSelectedAssetToNode}
+          />
+
+          <MapElevationNodesLayer
+            visible={showElevationNodes}
+            nodes={nodesLite}
           />
 
           <PipeDrawController

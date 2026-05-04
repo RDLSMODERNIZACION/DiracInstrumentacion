@@ -79,6 +79,9 @@ export default function MapFloatingControls({
   showPressureNodes,
   setShowPressureNodes,
 
+  showElevationNodes,
+  setShowElevationNodes,
+
   showMapAssets,
   setShowMapAssets,
 
@@ -112,6 +115,9 @@ export default function MapFloatingControls({
 
   showPressureNodes: boolean;
   setShowPressureNodes: BoolSetter;
+
+  showElevationNodes: boolean;
+  setShowElevationNodes: BoolSetter;
 
   showMapAssets: boolean;
   setShowMapAssets: BoolSetter;
@@ -221,6 +227,13 @@ export default function MapFloatingControls({
             style={buttonStyle(showPressureNodes, "rgba(20,184,166,0.96)")}
           >
             {showPressureNodes ? "Puntos: ON" : "Puntos"}
+          </button>
+
+          <button
+            onClick={() => setShowElevationNodes((v) => !v)}
+            style={buttonStyle(showElevationNodes, "rgba(234,179,8,0.96)")}
+          >
+            {showElevationNodes ? "Cotas: ON" : "Cotas"}
           </button>
 
           <button
