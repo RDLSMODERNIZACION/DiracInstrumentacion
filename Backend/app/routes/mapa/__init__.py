@@ -6,23 +6,15 @@ from .simulacion import router as simulacion_router
 from .nodes import router as nodes_router
 from .contours import router as contours_router
 from .assets import router as assets_router
+from .diameters import router as diameters_router
 
 router = APIRouter()
 
-# /mapa/mapasagua/...
 router.include_router(mapasagua_router)
-
-# /mapa/sim/...
-# /mapa/pipes/{pipe_id}/connect
 router.include_router(simulacion_router)
-
-# /mapa/nodes/...
 router.include_router(nodes_router)
-
-# /mapa/contours/...
 router.include_router(contours_router)
-
-# /mapa/assets/...
 router.include_router(assets_router)
+router.include_router(diameters_router)
 
 __all__ = ["router"]
