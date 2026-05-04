@@ -9,6 +9,7 @@ import { fetchPipesBBox, fetchPipesAll } from "../../services/mapasagua";
  */
 export type SimRunResponse = {
   model: "SIMPLE" | "LINEAR" | string;
+
   nodes?: Record<
     string,
     {
@@ -20,8 +21,16 @@ export type SimRunResponse = {
       kind?: string;
       label?: string | null;
       reached?: boolean;
+
+      is_source?: boolean;
+      pressure_kind?: "REAL" | "TANK" | "MANUAL" | "CALC" | string | null;
+      source?: any;
+      origin_source?: any;
+      is_pressure_real?: boolean;
+      is_pressure_theoretical?: boolean;
     }
   >;
+
   pipes?: Record<
     string,
     {
@@ -35,8 +44,29 @@ export type SimRunResponse = {
       R?: number;
       length_m?: number;
       diam_mm?: number;
+
+      pressure_mca_u?: number | null;
+      pressure_mca_v?: number | null;
+      pressure_mca_avg?: number | null;
+      pressure_mca_min?: number | null;
+      pressure_mca_max?: number | null;
+
+      pressure_bar_u?: number | null;
+      pressure_bar_v?: number | null;
+      pressure_bar_avg?: number | null;
+      pressure_bar_min?: number | null;
+      pressure_bar_max?: number | null;
+
+      pressure_kind_u?: "REAL" | "TANK" | "MANUAL" | "CALC" | string | null;
+      pressure_kind_v?: "REAL" | "TANK" | "MANUAL" | "CALC" | string | null;
+      pressure_kind?: "REAL" | "TANK" | "MANUAL" | "CALC" | "MIXED" | string | null;
+
+      origin_source_u?: any;
+      origin_source_v?: any;
     }
   >;
+
+  sources?: any[];
   meta?: Record<string, any>;
 };
 
@@ -73,6 +103,9 @@ type Props = {
    */
   showArrows?: boolean;
 
+  /**
+   * Si está activo, la simulación pinta cañerías por presión.
+   */
   colorByPressure?: boolean;
 
   /**
@@ -247,8 +280,8 @@ function fmt(n: number | null | undefined, digits = 2) {
   return x.toFixed(digits);
 }
 
-function escapeHtml(s: string) {
-  return String(s)
+function escapeHtml(s: string | null | undefined) {
+  return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -262,7 +295,7 @@ function shortId(s: string | null | undefined) {
 }
 
 /* ============================================================
-   Presión
+   Presión / origen
 ============================================================ */
 
 function pressureColor(bar: number | null | undefined) {
@@ -270,13 +303,13 @@ function pressureColor(bar: number | null | undefined) {
 
   const p = Number(bar);
 
-  if (p < 0.5) return "#ef4444";
-  if (p < 1.2) return "#f97316";
-  if (p < 2.0) return "#facc15";
-  if (p <= 5.0) return "#22c55e";
-  if (p <= 6.5) return "#38bdf8";
+  if (p < 0.5) return "#ef4444";   // muy baja
+  if (p < 1.2) return "#f97316";   // baja
+  if (p < 2.0) return "#facc15";   // aceptable baja
+  if (p <= 5.0) return "#22c55e";  // normal
+  if (p <= 6.5) return "#38bdf8";  // alta
 
-  return "#a855f7";
+  return "#a855f7";                // sobrepresión
 }
 
 function pressureLabel(bar: number | null | undefined) {
@@ -293,8 +326,26 @@ function pressureLabel(bar: number | null | undefined) {
   return "Sobrepresión";
 }
 
+function pressureKindLabel(kind: string | null | undefined) {
+  if (kind === "REAL") return "REAL";
+  if (kind === "TANK") return "TANQUE";
+  if (kind === "MANUAL") return "MANUAL";
+  if (kind === "MIXED") return "MIXTA";
+  if (kind === "CALC") return "TEÓRICA";
+  return "N/D";
+}
+
+function pressureKindColor(kind: string | null | undefined) {
+  if (kind === "REAL") return "#8b5cf6";
+  if (kind === "TANK") return "#06b6d4";
+  if (kind === "MANUAL") return "#eab308";
+  if (kind === "MIXED") return "#f97316";
+  if (kind === "CALC") return "#64748b";
+  return "#94a3b8";
+}
+
 function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: string | null) {
-  if (!sim?.pipes || !sim?.nodes || !pipeId) return null;
+  if (!sim?.pipes || !pipeId) return null;
 
   const ps = sim.pipes[pipeId];
   if (!ps) return null;
@@ -302,8 +353,46 @@ function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: st
   const u = ps.u;
   const v = ps.v;
 
-  const nu = u ? sim.nodes[u] : null;
-  const nv = v ? sim.nodes[v] : null;
+  const nu = u ? sim.nodes?.[u] : null;
+  const nv = v ? sim.nodes?.[v] : null;
+
+  const backendHasPressure =
+    ps.pressure_bar_min != null ||
+    ps.pressure_bar_avg != null ||
+    ps.pressure_bar_max != null ||
+    ps.pressure_bar_u != null ||
+    ps.pressure_bar_v != null;
+
+  if (backendHasPressure) {
+    return {
+      u,
+      v,
+
+      min_bar: ps.pressure_bar_min ?? null,
+      max_bar: ps.pressure_bar_max ?? null,
+      avg_bar: ps.pressure_bar_avg ?? null,
+
+      u_bar: ps.pressure_bar_u ?? null,
+      v_bar: ps.pressure_bar_v ?? null,
+
+      u_elev_m: nu?.elev_m ?? null,
+      v_elev_m: nv?.elev_m ?? null,
+
+      u_pressure_mca: ps.pressure_mca_u ?? nu?.pressure_mca ?? null,
+      v_pressure_mca: ps.pressure_mca_v ?? nv?.pressure_mca ?? null,
+
+      pressure_kind: ps.pressure_kind ?? null,
+      pressure_kind_u: ps.pressure_kind_u ?? nu?.pressure_kind ?? null,
+      pressure_kind_v: ps.pressure_kind_v ?? nv?.pressure_kind ?? null,
+
+      origin_source_u: ps.origin_source_u ?? nu?.origin_source ?? null,
+      origin_source_v: ps.origin_source_v ?? nv?.origin_source ?? null,
+
+      reached: true,
+    };
+  }
+
+  if (!sim?.nodes) return null;
 
   const pu = nu?.pressure_bar;
   const pv = nv?.pressure_bar;
@@ -325,6 +414,11 @@ function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: st
       v_elev_m: nv?.elev_m ?? null,
       u_pressure_mca: nu?.pressure_mca ?? null,
       v_pressure_mca: nv?.pressure_mca ?? null,
+      pressure_kind: ps.pressure_kind ?? null,
+      pressure_kind_u: nu?.pressure_kind ?? null,
+      pressure_kind_v: nv?.pressure_kind ?? null,
+      origin_source_u: nu?.origin_source ?? null,
+      origin_source_v: nv?.origin_source ?? null,
       reached: false,
     };
   }
@@ -345,6 +439,11 @@ function getPipePressureStats(sim: SimRunResponse | null | undefined, pipeId: st
     v_elev_m: nv?.elev_m ?? null,
     u_pressure_mca: nu?.pressure_mca ?? null,
     v_pressure_mca: nv?.pressure_mca ?? null,
+    pressure_kind: ps.pressure_kind ?? "CALC",
+    pressure_kind_u: nu?.pressure_kind ?? null,
+    pressure_kind_v: nv?.pressure_kind ?? null,
+    origin_source_u: nu?.origin_source ?? null,
+    origin_source_v: nv?.origin_source ?? null,
     reached: true,
   };
 }
@@ -701,11 +800,6 @@ export default function PipesLayer({
     if (!sim?.pipes) return;
     if (!visibleData?.features || !Array.isArray(visibleData.features)) return;
 
-    /*
-      Bajé el umbral para que aparezca antes.
-      Si lo querés más cerca, subí a 16.4.
-      Si lo querés más lejos, bajá a 14.8.
-    */
     if (mapZoom < 15.7) return;
 
     const flowItems = visibleData.features
@@ -773,10 +867,6 @@ export default function PipesLayer({
       flowLayers.push(layer);
     }
 
-    /*
-      Leaflet crea los SVG después de agregarlos al mapa.
-      Por eso esperamos un frame antes de buscar los path.
-    */
     const raf = window.requestAnimationFrame(() => {
       for (const layer of flowLayers) {
         layer.eachLayer((subLayer: any) => {
@@ -794,10 +884,6 @@ export default function PipesLayer({
       }
     });
 
-    /*
-      Movimiento simple.
-      No usa partículas, sombras ni muchas capas.
-    */
     let offset = 0;
 
     const timer = window.setInterval(() => {
@@ -863,13 +949,19 @@ export default function PipesLayer({
 
     /*
       Modo simulación:
-      - color principal = presión
+      - color principal = presión mínima del tramo
+      - presión real/tanque/manual/teórica viene del backend
       - línea animada blanca = movimiento, solo de cerca
-      - no usamos dash del tipo de cañería para evitar mezcla visual
     */
     if (simStyle && id && sim?.pipes && sim.pipes[id]) {
       const ps = sim.pipes[id];
-      const absQ = typeof ps.abs_q_lps === "number" ? ps.abs_q_lps : Math.abs(ps.q_lps ?? 0);
+      const absQ =
+        typeof ps.abs_q_lps === "number"
+          ? ps.abs_q_lps
+          : Math.abs(ps.q_lps ?? 0);
+
+      const pr = getPipePressureStats(sim, id);
+      const pressureForColor = pr?.min_bar ?? pr?.avg_bar ?? null;
 
       weight = Math.max(weight, weightFromAbsQ(absQ));
       dashArray = undefined;
@@ -878,10 +970,9 @@ export default function PipesLayer({
         color = "#ef4444";
         opacity = 0.82;
         dashArray = "3 8";
-      } else if (colorByPressure && sim?.nodes) {
-        const pr = getPipePressureStats(sim, id);
-        color = pressureColor(pr?.min_bar ?? pr?.avg_bar);
-        opacity = 0.9;
+      } else if (colorByPressure) {
+        color = pressureColor(pressureForColor);
+        opacity = 0.92;
       } else if (absQ >= 0.001) {
         color = "#22c55e";
         opacity = 0.88;
@@ -938,8 +1029,12 @@ export default function PipesLayer({
       ? "background:#f59e0b;color:#111827"
       : "background:#16a34a;color:#ffffff";
 
-    const pressureBadgeColor = pressureColor(pressure?.min_bar ?? pressure?.avg_bar);
-    const pressureText = pressureLabel(pressure?.min_bar ?? pressure?.avg_bar);
+    const pressureValueForLabel = pressure?.min_bar ?? pressure?.avg_bar;
+    const pressureBadgeColor = pressureColor(pressureValueForLabel);
+    const pressureText = pressureLabel(pressureValueForLabel);
+    const kind = pressure?.pressure_kind ?? ps?.pressure_kind ?? null;
+    const kindColor = pressureKindColor(kind);
+    const kindLabel = pressureKindLabel(kind);
 
     const lines: string[] = [];
 
@@ -987,29 +1082,46 @@ export default function PipesLayer({
       lines.push(`<hr style="border:0;border-top:1px solid rgba(255,255,255,.18);margin:8px 0" />`);
 
       lines.push(
-        `<div style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:800;background:${pressureBadgeColor};color:#08111f">
-          ${pressureText}
+        `<div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:900;background:${pressureBadgeColor};color:#08111f">
+            ${pressureText}
+          </span>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:999px;font-size:11px;font-weight:900;background:${kindColor};color:#08111f">
+            ${kindLabel}
+          </span>
         </div>`
       );
 
       if (pressure) {
         lines.push(
           `<div style="margin-top:6px;font-size:12px">
-            <b>Presión tramo</b>: mín ${fmt(pressure.min_bar)} bar · prom ${fmt(pressure.avg_bar)} bar
+            <b>Presión tramo</b>: mín ${fmt(pressure.min_bar)} bar · prom ${fmt(pressure.avg_bar)} bar · máx ${fmt(pressure.max_bar)} bar
           </div>`
         );
 
         lines.push(
           `<div style="font-size:12px">
-            <b>U</b>: cota ${fmt(pressure.u_elev_m, 0)} m · ${fmt(pressure.u_bar)} bar
+            <b>U</b>: cota ${fmt(pressure.u_elev_m, 0)} m · ${fmt(pressure.u_bar)} bar · ${escapeHtml(pressureKindLabel(pressure.pressure_kind_u))}
           </div>`
         );
 
         lines.push(
           `<div style="font-size:12px">
-            <b>V</b>: cota ${fmt(pressure.v_elev_m, 0)} m · ${fmt(pressure.v_bar)} bar
+            <b>V</b>: cota ${fmt(pressure.v_elev_m, 0)} m · ${fmt(pressure.v_bar)} bar · ${escapeHtml(pressureKindLabel(pressure.pressure_kind_v))}
           </div>`
         );
+
+        const srcU = pressure.origin_source_u?.label ?? pressure.origin_source_u?.source_type;
+        const srcV = pressure.origin_source_v?.label ?? pressure.origin_source_v?.source_type;
+
+        if (srcU || srcV) {
+          lines.push(
+            `<div style="margin-top:5px;font-size:11px;opacity:.72">
+              Fuente U: ${escapeHtml(srcU ?? "—")}<br/>
+              Fuente V: ${escapeHtml(srcV ?? "—")}
+            </div>`
+          );
+        }
       }
 
       lines.push(
@@ -1027,7 +1139,7 @@ export default function PipesLayer({
       lines.push(`<div style="opacity:.72;margin-top:5px">Sin datos de simulación para esta cañería</div>`);
     }
 
-    const html = `<div style="min-width:280px;color:#fff">${lines.join("")}</div>`;
+    const html = `<div style="min-width:300px;color:#fff">${lines.join("")}</div>`;
 
     try {
       (layer as any).bindTooltip(html, {
