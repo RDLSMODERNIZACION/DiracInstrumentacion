@@ -24,6 +24,7 @@ import MapAssetNodePickerLayer from "./MapAssetNodePickerLayer";
 import MapAssetsLayer from "./MapAssetsLayer";
 import MapElevationNodesLayer from "./MapElevationNodesLayer";
 import DiameterTransitionsLayer from "./DiameterTransitionsLayer";
+import MapValvesLayer from "./MapValvesLayer";
 
 import {
   MapClickClear,
@@ -44,6 +45,7 @@ import {
   fetchMapAssetsLive,
   linkMapAsset,
   unlinkMapAsset,
+  createMapValve,
   type MapAssetLive,
 } from "../../services/mapasagua";
 
@@ -113,6 +115,7 @@ export function MapView(props: {
   const [showPressureNodes, setShowPressureNodes] = React.useState(true);
   const [showElevationNodes, setShowElevationNodes] = React.useState(false);
   const [showDiameterTransitions, setShowDiameterTransitions] = React.useState(false);
+  const [showValves, setShowValves] = React.useState(false);
   const [showLegend, setShowLegend] = React.useState(true);
 
   const [showMapAssets, setShowMapAssets] = React.useState(false);
@@ -130,6 +133,7 @@ export function MapView(props: {
   const [simErr, setSimErr] = React.useState<string | null>(null);
 
   const [pipesReloadKey, setPipesReloadKey] = React.useState(0);
+  const [valvesReloadKey, setValvesReloadKey] = React.useState(0);
 
   const [connectOpen, setConnectOpen] = React.useState(false);
   const [nodesLite, setNodesLite] = React.useState<NodeLite[]>([]);
@@ -392,8 +396,9 @@ export function MapView(props: {
         head_drop_scale: modeToRun === "topografico" ? 0 : 0.0000001,
         ignore_unconnected: true,
         closed_valve_blocks_node: true,
+        closed_valve_blocks_pipe: true,
         min_pressure_m: 0,
-      });
+      } as any);
 
       setSim(r as any);
     } catch (e: any) {
@@ -436,6 +441,43 @@ export function MapView(props: {
     }
   }
 
+  async function handleCreateValveOnSelectedPipe() {
+    if (!selectedPipeId) return;
+
+    const defaultName = `Válvula ${selectedPipeLabel ?? selectedPipeId.slice(0, 8)}`;
+    const name = prompt("Nombre de la válvula:", defaultName);
+
+    if (name === null) return;
+
+    try {
+      await createMapValve({
+        name: name.trim() || defaultName,
+        map_pipe_id: selectedPipeId,
+        is_open: true,
+        valve_type: "MANUAL",
+        source: "MANUAL",
+        notes: "Creada desde el mapa sobre cañería",
+      });
+
+      setShowValves(true);
+      setValvesReloadKey((k) => k + 1);
+
+      if (sim) {
+        runSimulation();
+      }
+    } catch (e: any) {
+      alert(e?.message ?? "No se pudo crear la válvula");
+    }
+  }
+
+  function handleValveChanged() {
+    setValvesReloadKey((k) => k + 1);
+
+    if (sim) {
+      runSimulation();
+    }
+  }
+
   return (
     <>
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -456,6 +498,8 @@ export function MapView(props: {
               setShowElevationNodes={setShowElevationNodes}
               showDiameterTransitions={showDiameterTransitions}
               setShowDiameterTransitions={setShowDiameterTransitions}
+              showValves={showValves}
+              setShowValves={setShowValves}
               showMapAssets={showMapAssets}
               setShowMapAssets={setShowMapAssets}
               assetsPanelOpen={assetsPanelOpen}
@@ -581,6 +625,12 @@ export function MapView(props: {
             visible={showDiameterTransitions}
             minDeltaMm={20}
             minRatio={1.1}
+          />
+
+          <MapValvesLayer
+            visible={showValves}
+            reloadKey={valvesReloadKey}
+            onChanged={handleValveChanged}
           />
 
           <PipeDrawController
@@ -726,6 +776,7 @@ export function MapView(props: {
                 await ensureNodes();
                 setConnectOpen(true);
               }}
+              onCreateValve={handleCreateValveOnSelectedPipe}
               onDelete={handleDeleteSelectedPipe}
               onClose={clearPipeSelection}
             />

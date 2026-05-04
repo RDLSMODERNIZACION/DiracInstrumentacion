@@ -85,6 +85,9 @@ export default function MapFloatingControls({
   showDiameterTransitions,
   setShowDiameterTransitions,
 
+  showValves,
+  setShowValves,
+
   showMapAssets,
   setShowMapAssets,
 
@@ -124,6 +127,9 @@ export default function MapFloatingControls({
 
   showDiameterTransitions: boolean;
   setShowDiameterTransitions: BoolSetter;
+
+  showValves: boolean;
+  setShowValves: BoolSetter;
 
   showMapAssets: boolean;
   setShowMapAssets: BoolSetter;
@@ -227,6 +233,14 @@ export default function MapFloatingControls({
               {assetsPanelOpen ? "‹" : "›"}
             </button>
           </div>
+
+          <button
+            onClick={() => setShowValves((v) => !v)}
+            style={buttonStyle(showValves, "rgba(239,68,68,0.96)")}
+            title="Mostrar válvulas manuales y su estado abierto/cerrado"
+          >
+            {showValves ? "Válvulas: ON" : "Válvulas"}
+          </button>
 
           <button
             onClick={() => setShowPressureNodes((v) => !v)}

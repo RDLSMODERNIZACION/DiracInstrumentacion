@@ -663,3 +663,103 @@ export async function fetchDiameterTransitions(params: {
 
   return Array.isArray(json?.items) ? json.items : [];
 }
+
+/* =========================
+   MAPA - VÁLVULAS
+========================= */
+
+export type MapValveLive = {
+  valve_id: string;
+  name: string;
+  location_id?: number | null;
+
+  map_node_id?: string | null;
+  map_pipe_id?: string | null;
+
+  is_open: boolean;
+  valve_status: "OPEN" | "CLOSED" | string;
+
+  valve_type?: string | null;
+  normal_position?: string | null;
+  source?: string | null;
+  tag?: string | null;
+  last_ts?: string | null;
+  notes?: string | null;
+  props?: Record<string, any> | null;
+
+  node_elev_m?: number | null;
+
+  lat: number | null;
+  lng: number | null;
+
+  pipe_name?: string | null;
+  diametro_mm?: number | null;
+  flow_func?: string | null;
+
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MapValvesResponse = {
+  count: number;
+  items: MapValveLive[];
+};
+
+export async function fetchMapValves(): Promise<MapValveLive[]> {
+  const url = `${API_BASE}/mapa/valves`;
+
+  const json = await fetchJSON<MapValvesResponse>(url);
+
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+export async function createMapValve(input: {
+  name?: string;
+  map_node_id?: string | null;
+  map_pipe_id?: string | null;
+  is_open?: boolean;
+  valve_type?: string;
+  location_id?: number | null;
+  source?: string;
+  tag?: string | null;
+  notes?: string | null;
+}): Promise<MapValveLive> {
+  const url = `${API_BASE}/mapa/valves`;
+
+  return fetchJSON<MapValveLive>(url, {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      map_node_id: input.map_node_id ?? null,
+      map_pipe_id: input.map_pipe_id ?? null,
+      is_open: input.is_open ?? true,
+      valve_type: input.valve_type ?? "MANUAL",
+      location_id: input.location_id ?? null,
+      source: input.source ?? "MANUAL",
+      tag: input.tag ?? null,
+      notes: input.notes ?? null,
+    }),
+  });
+}
+
+export async function updateMapValveState(
+  valveId: string,
+  isOpen: boolean
+): Promise<MapValveLive> {
+  const url = `${API_BASE}/mapa/valves/${encodeURIComponent(valveId)}/state`;
+
+  return fetchJSON<MapValveLive>(url, {
+    method: "PATCH",
+    body: JSON.stringify({
+      is_open: isOpen,
+    }),
+  });
+}
+
+export async function deleteMapValve(valveId: string): Promise<{ ok: boolean; valve_id: string }> {
+  const url = `${API_BASE}/mapa/valves/${encodeURIComponent(valveId)}`;
+
+  return fetchJSON(url, {
+    method: "DELETE",
+  });
+}
