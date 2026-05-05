@@ -34,15 +34,35 @@ export default function PipePopup({
   selectedPipePos?: [number, number] | null;
   connHint: PipeConnHint;
   sim: SimRunResponse | null;
+
+  /**
+   * Se mantienen por compatibilidad con MapViewScreen,
+   * pero ya no se usan en este popup.
+   * La conexión ahora se hace al guardar "Editar recorrido".
+   */
   nodesBusy: boolean;
+  onConnect: () => void | Promise<void>;
+
+  /**
+   * Se mantiene por compatibilidad, pero ya no se muestra botón de válvula.
+   * Las válvulas se insertan desde el botón general + Válvula.
+   */
+  onCreateValve?: () => void | Promise<void>;
+
   onEdit: () => void;
   onEditGeometry: () => void;
-  onConnect: () => void | Promise<void>;
-  onCreateValve?: () => void | Promise<void>;
   onDelete: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const connected = Boolean(connHint.connected);
+
+  /**
+   * Evita warnings de variables no usadas mientras limpiamos MapViewScreen.
+   */
+  void selectedPipePos;
+  void nodesBusy;
+  void onConnect;
+  void onCreateValve;
 
   return (
     <div
@@ -66,8 +86,11 @@ export default function PipePopup({
         <div style={headerRow}>
           <div style={{ minWidth: 0 }}>
             <div style={titleStyle}>Cañería seleccionada</div>
+
             <div style={subtitleStyle}>
-              {connected ? "Conectada hidráulicamente" : "Falta conexión hidráulica"}
+              {connected
+                ? "Conectada hidráulicamente"
+                : "Falta conexión hidráulica"}
               {sim ? " · simulación activa" : ""}
             </div>
           </div>
@@ -75,13 +98,39 @@ export default function PipePopup({
           <span
             style={{
               ...badgeStyle,
-              background: connected ? "rgba(34,197,94,0.18)" : "rgba(245,158,11,0.18)",
-              borderColor: connected ? "rgba(34,197,94,0.35)" : "rgba(245,158,11,0.38)",
+              background: connected
+                ? "rgba(34,197,94,0.18)"
+                : "rgba(245,158,11,0.18)",
+              borderColor: connected
+                ? "rgba(34,197,94,0.35)"
+                : "rgba(245,158,11,0.38)",
               color: connected ? "#bbf7d0" : "#fde68a",
             }}
           >
             {connected ? "CONECTADA" : "SIN CONECTAR"}
           </span>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 12,
+            borderRadius: 13,
+            padding: "9px 10px",
+            background: connected
+              ? "rgba(34,197,94,0.10)"
+              : "rgba(245,158,11,0.12)",
+            border: connected
+              ? "1px solid rgba(34,197,94,0.22)"
+              : "1px solid rgba(245,158,11,0.24)",
+            color: "rgba(255,255,255,0.82)",
+            fontSize: 12,
+            lineHeight: 1.35,
+            fontWeight: 750,
+          }}
+        >
+          {connected
+            ? "Podés editar los datos o ajustar el recorrido."
+            : "Para conectarla a la red, usá Editar recorrido y apoyá las puntas sobre una cañería o nodo existente. Al guardar se conecta automáticamente."}
         </div>
 
         <div style={actionsGrid}>
@@ -99,45 +148,9 @@ export default function PipePopup({
             onClick={(e) => run(e, onEditGeometry)}
             onMouseDown={stop}
             style={btnSecondary}
-            title="Ajusta el dibujo/recorrido de la cañería. No cambia necesariamente los nodos hidráulicos."
+            title="Ajusta el recorrido. Al guardar, intenta conectar automáticamente las puntas a la red."
           >
-            Recorrido
-          </button>
-
-          <button
-            type="button"
-            disabled={nodesBusy}
-            onClick={(e) => run(e, onConnect)}
-            onMouseDown={stop}
-            title={
-              nodesBusy
-                ? "Cargando nodos..."
-                : connected
-                ? "Modificar conexión hidráulica"
-                : "Conectar a nodos"
-            }
-            style={{
-              ...btnSecondary,
-              opacity: nodesBusy ? 0.6 : 1,
-              cursor: nodesBusy ? "default" : "pointer",
-            }}
-          >
-            {nodesBusy ? "Nodos..." : connected ? "Conexión" : "Conectar"}
-          </button>
-
-          <button
-            type="button"
-            disabled={!onCreateValve}
-            onClick={(e) => run(e, onCreateValve ?? (() => {}))}
-            onMouseDown={stop}
-            style={{
-              ...btnValve,
-              opacity: onCreateValve ? 1 : 0.55,
-              cursor: onCreateValve ? "pointer" : "default",
-            }}
-            title="Crear una válvula manual sobre esta cañería"
-          >
-            Válvula
+            Editar recorrido
           </button>
 
           <button
@@ -146,7 +159,9 @@ export default function PipePopup({
               e.preventDefault();
               e.stopPropagation();
 
-              const ok = confirm(`¿Borrar cañería "${selectedPipeLabel ?? selectedPipeId}"?`);
+              const ok = confirm(
+                `¿Borrar cañería "${selectedPipeLabel ?? selectedPipeId}"?`
+              );
               if (!ok) return;
 
               await onDelete();
@@ -214,7 +229,7 @@ const badgeStyle: CSSProperties = {
 
 const actionsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: 9,
   alignItems: "center",
 };
@@ -239,11 +254,6 @@ const btnPrimary: CSSProperties = {
 const btnSecondary: CSSProperties = {
   ...btnBase,
   background: "rgba(255,255,255,0.09)",
-};
-
-const btnValve: CSSProperties = {
-  ...btnBase,
-  background: "rgba(239,68,68,0.88)",
 };
 
 const btnDanger: CSSProperties = {

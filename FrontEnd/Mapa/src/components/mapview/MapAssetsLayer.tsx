@@ -28,6 +28,71 @@ function fmt(v: number | null | undefined, digits = 2) {
   return Number(v).toFixed(digits);
 }
 
+function shapeCssForAsset(a: MapAssetLive) {
+  if (a.asset_type === "TANK") {
+    return "border-radius:10px;";
+  }
+
+  if (a.asset_type === "PUMP") {
+    return "border-radius:999px;";
+  }
+
+  if (a.asset_type === "MANIFOLD") {
+    return "border-radius:14px;";
+  }
+
+  return "border-radius:12px;";
+}
+
+function buildAssetIcon(a: MapAssetLive, selected: boolean) {
+  const c = assetColor(a);
+  const size = selected ? 34 : 30;
+  const short = assetShort(a);
+  const shapeCss = shapeCssForAsset(a);
+
+  return L.divIcon({
+    className: "mapAssetMarker",
+    html: `
+      <div style="position:relative;width:${size + 10}px;height:${size + 10}px;display:grid;place-items:center;">
+        <div
+          style="
+            position:absolute;
+            inset:6px;
+            border-radius:999px;
+            background:${c};
+            opacity:.18;
+            transform:scale(1.3);
+            filter:blur(1px);
+          "
+        ></div>
+
+        <div
+          style="
+            width:${size}px;
+            height:${size}px;
+            ${shapeCss}
+            background:${c};
+            border:3px solid rgba(15,23,42,.96);
+            box-shadow:
+              0 0 0 4px rgba(255,255,255,.38),
+              0 12px 24px rgba(0,0,0,.30);
+            display:grid;
+            place-items:center;
+            color:white;
+            font-size:10px;
+            font-weight:950;
+          "
+        >
+          ${short}
+        </div>
+      </div>
+    `,
+    iconSize: [size + 10, size + 10],
+    iconAnchor: [(size + 10) / 2, (size + 10) / 2],
+    tooltipAnchor: [0, -16],
+  });
+}
+
 export default function MapAssetsLayer({
   visible,
   assets,
@@ -54,31 +119,15 @@ export default function MapAssetsLayer({
     <>
       {linkedAssets.map((a) => {
         const n = nodeById.get(a.map_node_id!)!;
-        const c = assetColor(a);
         const selected = selectedAssetId === a.asset_link_id;
-        const size = selected ? 32 : 28;
-
-        const icon = L.divIcon({
-          className: "mapAssetMarker",
-          html:
-            '<div style="width:' +
-            size +
-            "px;height:" +
-            size +
-            "px;border-radius:999px;background:" +
-            c +
-            ';border:3px solid rgba(15,23,42,.95);box-shadow:0 0 0 4px rgba(255,255,255,.36),0 14px 26px rgba(0,0,0,.34);display:grid;place-items:center;color:white;font-size:10px;font-weight:950;">' +
-            assetShort(a) +
-            "</div>",
-          iconSize: [size + 6, size + 6],
-          iconAnchor: [(size + 6) / 2, (size + 6) / 2],
-        });
 
         return (
           <Marker
             key={`map-asset-${a.asset_link_id}`}
             position={[Number(n.lat), Number(n.lng)]}
-            icon={icon}
+            icon={buildAssetIcon(a, selected)}
+            zIndexOffset={selected ? 2100 : 1800}
+            riseOnHover
             eventHandlers={{
               click: (e) => {
                 e.originalEvent?.preventDefault?.();

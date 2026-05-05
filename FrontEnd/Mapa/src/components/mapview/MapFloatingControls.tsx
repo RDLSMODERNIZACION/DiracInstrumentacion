@@ -117,14 +117,14 @@ export default function MapFloatingControls({
   onToggleCreatingPipe,
 
   /**
-   * Compatibilidad con MapView actual.
+   * Compatibilidad con MapView viejo.
    * Más adelante se puede reemplazar por insertMode/onSelectInsertMode.
    */
   valveInsertMode = false,
   onToggleValveInsert,
 
   /**
-   * Nuevo modo unificado opcional.
+   * Nuevo modo unificado.
    * Si MapView lo pasa, estos tienen prioridad para + Válvula/+ Tanque/+ Bomba.
    */
   insertMode,
@@ -133,6 +133,11 @@ export default function MapFloatingControls({
   onAddTank,
   onAddPump,
 
+  /**
+   * Se mantienen por compatibilidad con MapViewScreen,
+   * pero ya no se muestran como botones.
+   * La conexión ahora se hace desde Editar recorrido al guardar.
+   */
   nodeConnectOpen,
   onOpenNodeConnector,
 
@@ -228,6 +233,15 @@ export default function MapFloatingControls({
   const activeInsertMode: InsertMode =
     insertMode ?? (valveInsertMode ? "valve" : "none");
 
+  /**
+   * Evita warnings por props heredadas que ya no usamos visualmente.
+   * Se dejan para no romper MapViewScreen mientras limpiamos la estructura.
+   */
+  void nodeConnectOpen;
+  void onOpenNodeConnector;
+  void intersectionConnectOpen;
+  void onOpenIntersectionConnector;
+
   function toggleInsert(mode: InsertMode) {
     if (onSelectInsertMode) {
       onSelectInsertMode(activeInsertMode === mode ? "none" : mode);
@@ -321,27 +335,30 @@ export default function MapFloatingControls({
                 fontWeight: 800,
               }}
             >
-              {activeInsertMode === "valve" && "Tocá la cañería en el punto exacto donde va la válvula."}
-              {activeInsertMode === "tank" && "Tocá la cañería o el punto donde querés ubicar el tanque."}
-              {activeInsertMode === "pump" && "Tocá la cañería o el punto donde querés ubicar la bomba."}
+              {activeInsertMode === "valve" &&
+                "Tocá la cañería en el punto exacto donde va la válvula."}
+              {activeInsertMode === "tank" &&
+                "Tocá la cañería o el punto donde querés ubicar el tanque."}
+              {activeInsertMode === "pump" &&
+                "Tocá la cañería o el punto donde querés ubicar la bomba."}
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onOpenNodeConnector}
-            style={buttonStyle(nodeConnectOpen, "rgba(234,88,12,0.96)")}
+          <div
+            style={{
+              borderRadius: 12,
+              padding: "10px 11px",
+              background: "rgba(34,197,94,0.10)",
+              border: "1px solid rgba(34,197,94,0.25)",
+              color: "rgba(255,255,255,0.84)",
+              fontSize: 12,
+              lineHeight: 1.35,
+              fontWeight: 800,
+            }}
           >
-            {nodeConnectOpen ? "Nodos: ON" : "Conectar nodos"}
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenIntersectionConnector}
-            style={buttonStyle(intersectionConnectOpen, "rgba(239,68,68,0.96)")}
-          >
-            {intersectionConnectOpen ? "Cancelar cruce" : "Conectar cruce"}
-          </button>
+            Las conexiones de nodos y cruces ahora se hacen automáticamente desde{" "}
+            <b>Editar recorrido</b> al guardar.
+          </div>
         </div>
       </div>
 

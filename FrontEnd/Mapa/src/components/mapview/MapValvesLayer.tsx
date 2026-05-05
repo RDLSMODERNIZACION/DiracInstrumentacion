@@ -1,5 +1,6 @@
 import React from "react";
-import { CircleMarker, Popup } from "react-leaflet";
+import L from "leaflet";
+import { Marker, Popup, Tooltip } from "react-leaflet";
 import {
   fetchMapValves,
   updateMapValveState,
@@ -18,6 +19,98 @@ function valveLabel(v: MapValveLive) {
 function fmt(n: number | null | undefined, digits = 0) {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return Number(n).toFixed(digits);
+}
+
+function buildValveIcon(v: MapValveLive, busy = false) {
+  const color = valveColor(v);
+  const leverRotate = v.is_open ? "-35deg" : "45deg";
+
+  return L.divIcon({
+    className: "map-valve-marker",
+    html: `
+      <div style="position:relative;width:44px;height:44px;display:grid;place-items:center;">
+        <div
+          style="
+            position:absolute;
+            inset:8px;
+            border-radius:999px;
+            background:${color};
+            opacity:.18;
+            transform:scale(1.35);
+            filter:blur(1px);
+          "
+        ></div>
+
+        <div
+          style="
+            position:absolute;
+            width:24px;
+            height:24px;
+            transform:rotate(45deg);
+            background:#ffffff;
+            border:3px solid #0f172a;
+            border-radius:6px;
+            box-shadow:
+              0 0 0 4px rgba(255,255,255,.70),
+              0 10px 24px rgba(0,0,0,.30);
+          "
+        ></div>
+
+        <div
+          style="
+            position:absolute;
+            width:18px;
+            height:4px;
+            border-radius:999px;
+            background:#0f172a;
+            transform:rotate(${leverRotate});
+            box-shadow:0 0 0 1px rgba(255,255,255,.35);
+          "
+        ></div>
+
+        <div
+          style="
+            position:absolute;
+            bottom:4px;
+            right:4px;
+            width:13px;
+            height:13px;
+            border-radius:999px;
+            background:${color};
+            border:2px solid #fff;
+            box-shadow:0 4px 10px rgba(0,0,0,.20);
+          "
+        ></div>
+
+        ${
+          busy
+            ? `
+          <div
+            style="
+              position:absolute;
+              top:-2px;
+              left:-2px;
+              right:-2px;
+              text-align:center;
+              font-size:10px;
+              font-weight:900;
+              color:#0f172a;
+              background:rgba(255,255,255,.92);
+              border:1px solid rgba(15,23,42,.14);
+              border-radius:999px;
+              padding:1px 6px;
+            "
+          >...</div>
+        `
+            : ""
+        }
+      </div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -18],
+    tooltipAnchor: [0, -18],
+  });
 }
 
 export default function MapValvesLayer({
@@ -99,23 +192,23 @@ export default function MapValvesLayer({
         const isBusy = updatingId === v.valve_id;
 
         return (
-          <CircleMarker
+          <Marker
             key={v.valve_id}
-            center={[Number(v.lat), Number(v.lng)]}
-            radius={v.is_open ? 7 : 9}
-            pathOptions={{
-              color: "#111827",
-              weight: 2.5,
-              fillColor: color,
-              fillOpacity: 0.96,
-              opacity: 1,
-            }}
+            position={[Number(v.lat), Number(v.lng)]}
+            icon={buildValveIcon(v, isBusy)}
+            zIndexOffset={2200}
+            riseOnHover
           >
+            <Tooltip direction="top" opacity={0.98} sticky>
+              <div style={{ fontWeight: 900 }}>{v.name}</div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                {v.map_pipe_id ? "Válvula sobre cañería" : "Válvula sobre nodo"}
+              </div>
+            </Tooltip>
+
             <Popup>
-              <div style={{ minWidth: 230 }}>
-                <div style={{ fontWeight: 900, fontSize: 15 }}>
-                  {v.name}
-                </div>
+              <div style={{ minWidth: 240 }}>
+                <div style={{ fontWeight: 900, fontSize: 15 }}>{v.name}</div>
 
                 <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>
                   {v.map_pipe_id ? "Válvula sobre cañería" : "Válvula sobre nodo"}
@@ -162,13 +255,18 @@ export default function MapValvesLayer({
                   )}
 
                   {v.notes && (
-                    <div style={{ marginTop: 6, opacity: 0.8 }}>
-                      {v.notes}
-                    </div>
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>{v.notes}</div>
                   )}
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
                   <button
                     onClick={() => toggleValve(v)}
                     disabled={isBusy}
@@ -205,14 +303,22 @@ export default function MapValvesLayer({
                 </div>
               </div>
             </Popup>
-          </CircleMarker>
+          </Marker>
         );
       })}
 
       {err && (
-        <CircleMarker center={[-37.4, -68.93]} radius={0}>
+        <Marker
+          position={[-37.4, -68.93]}
+          icon={L.divIcon({
+            className: "map-error-marker",
+            html: `<div style="background:#ef4444;color:white;padding:6px 10px;border-radius:10px;font-weight:900;">Error válvulas</div>`,
+            iconSize: [100, 24],
+            iconAnchor: [50, 12],
+          })}
+        >
           <Popup>{err}</Popup>
-        </CircleMarker>
+        </Marker>
       )}
     </>
   );

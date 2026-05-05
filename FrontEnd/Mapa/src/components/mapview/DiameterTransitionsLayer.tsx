@@ -1,5 +1,6 @@
 import React from "react";
-import { CircleMarker, Tooltip } from "react-leaflet";
+import L from "leaflet";
+import { Marker, Tooltip } from "react-leaflet";
 import {
   fetchDiameterTransitions,
   type DiameterTransition,
@@ -22,6 +23,86 @@ function severityLabel(sev?: string | null) {
 function fmt(n: number | null | undefined, digits = 1) {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return Number(n).toFixed(digits);
+}
+
+function buildTransitionIcon(x: DiameterTransition) {
+  const color = severityColor(x.severity);
+  const badge =
+    x.severity === "CRITICAL"
+      ? "!"
+      : x.severity === "HIGH"
+        ? "▲"
+        : x.severity === "MEDIUM"
+          ? "•"
+          : "Ø";
+
+  return L.divIcon({
+    className: "map-diameter-transition-marker",
+    html: `
+      <div style="position:relative;width:42px;height:42px;display:grid;place-items:center;">
+        <div
+          style="
+            position:absolute;
+            inset:7px;
+            border-radius:999px;
+            background:${color};
+            opacity:.16;
+            transform:scale(1.25);
+            filter:blur(1px);
+          "
+        ></div>
+
+        <div
+          style="
+            width:28px;
+            height:28px;
+            border-radius:999px;
+            background:rgba(255,255,255,.96);
+            border:4px solid ${color};
+            box-shadow:
+              0 0 0 4px rgba(255,255,255,.70),
+              0 10px 24px rgba(0,0,0,.25);
+          "
+        ></div>
+
+        <div
+          style="
+            position:absolute;
+            inset:0;
+            display:grid;
+            place-items:center;
+            color:#0f172a;
+            font-size:14px;
+            font-weight:950;
+            line-height:1;
+          "
+        >Ø</div>
+
+        <div
+          style="
+            position:absolute;
+            top:1px;
+            right:1px;
+            min-width:14px;
+            height:14px;
+            padding:0 4px;
+            border-radius:999px;
+            background:${color};
+            color:#0f172a;
+            border:2px solid white;
+            display:grid;
+            place-items:center;
+            font-size:10px;
+            font-weight:950;
+            box-shadow:0 4px 10px rgba(0,0,0,.16);
+          "
+        >${badge}</div>
+      </div>
+    `,
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+    tooltipAnchor: [0, -18],
+  });
 }
 
 export default function DiameterTransitionsLayer({
@@ -75,17 +156,12 @@ export default function DiameterTransitionsLayer({
         const color = severityColor(x.severity);
 
         return (
-          <CircleMarker
+          <Marker
             key={x.node_id}
-            center={[Number(x.lat), Number(x.lng)]}
-            radius={x.severity === "CRITICAL" ? 9 : x.severity === "HIGH" ? 8 : 7}
-            pathOptions={{
-              color: "#111827",
-              weight: 2.5,
-              fillColor: color,
-              fillOpacity: 0.95,
-              opacity: 1,
-            }}
+            position={[Number(x.lat), Number(x.lng)]}
+            icon={buildTransitionIcon(x)}
+            zIndexOffset={1400}
+            riseOnHover
           >
             <Tooltip sticky direction="top" opacity={0.98}>
               <div style={{ minWidth: 260 }}>
@@ -128,7 +204,13 @@ export default function DiameterTransitionsLayer({
                   <b>Cota</b>: {fmt(x.elev_m, 0)} m
                 </div>
 
-                <hr style={{ border: 0, borderTop: "1px solid rgba(0,0,0,.15)", margin: "8px 0" }} />
+                <hr
+                  style={{
+                    border: 0,
+                    borderTop: "1px solid rgba(0,0,0,.15)",
+                    margin: "8px 0",
+                  }}
+                />
 
                 <div style={{ fontWeight: 900, marginBottom: 4 }}>
                   Cañerías conectadas
@@ -137,7 +219,8 @@ export default function DiameterTransitionsLayer({
                 <div style={{ display: "grid", gap: 4 }}>
                   {(x.pipes || []).slice(0, 8).map((p) => (
                     <div key={p.pipe_id} style={{ fontSize: 12 }}>
-                      • Ø {fmt(p.diam_mm, 0)} mm · {p.layer_name || p.pipe_id.slice(0, 8)}
+                      • Ø {fmt(p.diam_mm, 0)} mm ·{" "}
+                      {p.layer_name || p.pipe_id.slice(0, 8)}
                     </div>
                   ))}
                 </div>
@@ -149,7 +232,7 @@ export default function DiameterTransitionsLayer({
                 )}
               </div>
             </Tooltip>
-          </CircleMarker>
+          </Marker>
         );
       })}
     </>

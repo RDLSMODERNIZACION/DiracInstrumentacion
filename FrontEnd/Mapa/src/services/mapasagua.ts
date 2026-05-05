@@ -36,12 +36,20 @@ export type NodeKind = "JUNCTION" | "VALVE" | "SOURCE" | "PUMP" | "DEMAND";
 export type NodeDTO = {
   id: string;
   kind: NodeKind | string;
+
   elev_m?: number | null;
+  head_m?: number | null;
+  demand_lps?: number | null;
+  is_source?: boolean | null;
+
   label?: string;
   props?: Record<string, any>;
+
   lng?: number;
   lat?: number;
+
   created_at?: string;
+  updated_at?: string;
 };
 
 export type NodesListResponse = {
@@ -57,7 +65,14 @@ export type NodeCreateInput = {
   props?: Record<string, any>;
 };
 
-export type NodeUpdateInput = Partial<NodeCreateInput>;
+export type NodeUpdateInput = {
+  lat?: number;
+  lng?: number;
+  kind?: NodeKind | string;
+  label?: string;
+  elev_m?: number | null;
+  props?: Record<string, any>;
+};
 
 /* =========================
    ACTIVOS REALES DEL MAPA
@@ -644,12 +659,14 @@ export type DiameterTransitionsResponse = {
   items: DiameterTransition[];
 };
 
-export async function fetchDiameterTransitions(params: {
-  min_delta_mm?: number;
-  min_ratio?: number;
-  severity?: string;
-  limit?: number;
-} = {}): Promise<DiameterTransition[]> {
+export async function fetchDiameterTransitions(
+  params: {
+    min_delta_mm?: number;
+    min_ratio?: number;
+    severity?: string;
+    limit?: number;
+  } = {}
+): Promise<DiameterTransition[]> {
   const qs = new URLSearchParams();
 
   if (params.min_delta_mm != null) qs.set("min_delta_mm", String(params.min_delta_mm));
@@ -810,10 +827,77 @@ export async function updateMapValveState(
   });
 }
 
-export async function deleteMapValve(valveId: string): Promise<{ ok: boolean; valve_id: string }> {
+export async function deleteMapValve(
+  valveId: string
+): Promise<{ ok: boolean; valve_id: string }> {
   const url = `${API_BASE}/mapa/valves/${encodeURIComponent(valveId)}`;
 
   return fetchJSON(url, {
     method: "DELETE",
   });
+}
+
+/* =========================
+   COTAS / CURVAS DE NIVEL
+========================= */
+
+export type FillNodeElevationsParams = {
+  preview?: boolean;
+  max_distance_m?: number;
+};
+
+export type FillNodeElevationsResponse = {
+  preview: boolean;
+  max_distance_m: number;
+  updated_nodes?: number;
+  nodes_that_would_update?: number;
+  min_new_elev_m?: number | null;
+  max_new_elev_m?: number | null;
+  avg_distance_m?: number | null;
+  count?: number;
+  items?: any[];
+  [key: string]: any;
+};
+
+export async function fillNodeElevations(
+  params: FillNodeElevationsParams = {}
+): Promise<FillNodeElevationsResponse> {
+  const qs = new URLSearchParams();
+
+  qs.set("preview", String(params.preview ?? false));
+  qs.set("max_distance_m", String(params.max_distance_m ?? 500));
+
+  const url = `${API_BASE}/mapa/contours/fill-node-elevations?${qs.toString()}`;
+
+  return fetchJSON<FillNodeElevationsResponse>(url, {
+    method: "POST",
+  });
+}
+
+export type SampleNearestContourResponse = {
+  found: boolean;
+  lat: number;
+  lng: number;
+  max_distance_m: number;
+  contour_id?: string;
+  elev_m?: number | null;
+  distance_m?: number | null;
+  props?: Record<string, any>;
+  [key: string]: any;
+};
+
+export async function sampleNearestContour(input: {
+  lat: number;
+  lng: number;
+  max_distance_m?: number;
+}): Promise<SampleNearestContourResponse> {
+  const qs = new URLSearchParams();
+
+  qs.set("lat", String(input.lat));
+  qs.set("lng", String(input.lng));
+  qs.set("max_distance_m", String(input.max_distance_m ?? 500));
+
+  const url = `${API_BASE}/mapa/contours/sample?${qs.toString()}`;
+
+  return fetchJSON<SampleNearestContourResponse>(url);
 }

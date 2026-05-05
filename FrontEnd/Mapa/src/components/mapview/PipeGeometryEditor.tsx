@@ -1,12 +1,22 @@
 import React from "react";
 import L from "leaflet";
 import { createPortal } from "react-dom";
-import { patchPipeGeometry, fetchPipeById } from "../../services/mapasagua";
+import {
+  patchPipeGeometry,
+  fetchPipeById,
+  connectPipesAtIntersection,
+} from "../../services/mapasagua";
 
 type Props = {
   open: boolean;
   pipeId: string | null;
   pipeLayer: L.Layer | null;
+
+  /**
+   * Mapa Leaflet real capturado desde MapViewScreen con useMap().
+   * Esto evita depender de pipeLayer._map, que a veces viene vacío.
+   */
+  map?: L.Map | null;
 
   /**
    * Importante:
@@ -238,11 +248,98 @@ function cleanGeometryForSave(geom: any): SupportedGeometry {
   };
 }
 
+function endpointKey(p: { lat: number; lng: number }) {
+  return `${p.lat.toFixed(7)},${p.lng.toFixed(7)}`;
+}
+
+function coordToEndpoint(c: any): { lat: number; lng: number } | null {
+  if (!Array.isArray(c) || c.length < 2) return null;
+
+  const lng = Number(c[0]);
+  const lat = Number(c[1]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return { lat, lng };
+}
+
+function getGeometryEndpoints(geom: SupportedGeometry) {
+  const points: Array<{ lat: number; lng: number }> = [];
+  const seen = new Set<string>();
+
+  function addPoint(c: any) {
+    const p = coordToEndpoint(c);
+    if (!p) return;
+
+    const key = endpointKey(p);
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    points.push(p);
+  }
+
+  if (geom.type === "LineString") {
+    const coords = geom.coordinates;
+
+    if (coords.length >= 2) {
+      addPoint(coords[0]);
+      addPoint(coords[coords.length - 1]);
+    }
+
+    return points;
+  }
+
+  for (const segment of geom.coordinates || []) {
+    if (!Array.isArray(segment) || segment.length < 2) continue;
+
+    addPoint(segment[0]);
+    addPoint(segment[segment.length - 1]);
+  }
+
+  return points;
+}
+
+async function autoConnectGeometryEndpoints(geom: SupportedGeometry) {
+  const endpoints = getGeometryEndpoints(geom);
+
+  const results: Array<{
+    point: { lat: number; lng: number };
+    ok: boolean;
+    result?: any;
+    error?: any;
+  }> = [];
+
+  for (const point of endpoints) {
+    try {
+      const result = await connectPipesAtIntersection({
+        lat: point.lat,
+        lng: point.lng,
+        tolerance_m: 2,
+        apply: true,
+      });
+
+      results.push({ point, ok: true, result });
+    } catch (error) {
+      // No frenamos el guardado del recorrido si una punta queda aislada.
+      // La conexión automática es una mejora, pero la geometría debe guardarse igual.
+      results.push({ point, ok: false, error });
+
+      console.warn("No se pudo autoconectar una punta del recorrido", {
+        point,
+        error,
+      });
+    }
+  }
+
+  return results;
+}
+
 export default function PipeGeometryEditor({
   open,
   pipeId,
   pipeLayer,
   pipeFeature,
+  map,
   onClose,
   onSaved,
 }: Props) {
@@ -260,7 +357,7 @@ export default function PipeGeometryEditor({
     return document.body;
   }, []);
 
-  const canPrepare = !!pipeId && !!pipeLayer;
+  const canPrepare = !!pipeId && (!!map || !!pipeLayer);
 
   const cleanupTempLayer = React.useCallback(() => {
     const editLayer = editLayerRef.current;
@@ -291,11 +388,12 @@ export default function PipeGeometryEditor({
 
       dbg("[GEOM] close/reset", {
         pipeId,
+        hasDirectMap: !!map,
         pipeLayer: layerInfo(pipeLayer as any),
         base: layerInfo(base),
       });
     }
-  }, [open, pipeLayer, pipeId, cleanupTempLayer]);
+  }, [open, pipeLayer, pipeId, map, cleanupTempLayer]);
 
   React.useEffect(() => {
     return () => {
@@ -334,20 +432,22 @@ export default function PipeGeometryEditor({
     try {
       cleanupTempLayer();
 
-      const map = resolveMapFromLayer(pipeLayer as any);
+      const mapToUse = map ?? resolveMapFromLayer(pipeLayer as any);
 
-      if (!map) {
+      if (!mapToUse) {
         throw new Error(
-          "No se pudo obtener el mapa desde la capa seleccionada. Cerrá el editor, seleccioná otra vez la cañería y volvé a intentar."
+          "No se pudo obtener el mapa para editar. Probá recargar la página y seleccionar nuevamente la cañería."
         );
       }
 
-      mapRef.current = map;
+      mapRef.current = mapToUse;
 
       const geom = await loadGeometry();
 
       if (!isSupportedGeometry(geom)) {
-        throw new Error("La geometría no es editable. Solo se admite LineString o MultiLineString.");
+        throw new Error(
+          "La geometría no es editable. Solo se admite LineString o MultiLineString."
+        );
       }
 
       const latlngs = latLngsFromGeometry(geom);
@@ -367,7 +467,7 @@ export default function PipeGeometryEditor({
         pane: "overlayPane",
       });
 
-      editableLine.addTo(map);
+      editableLine.addTo(mapToUse);
       editableLine.bringToFront();
 
       editLayerRef.current = editableLine;
@@ -378,7 +478,7 @@ export default function PipeGeometryEditor({
 
       if (bounds?.isValid?.()) {
         try {
-          map.fitBounds(bounds, {
+          mapToUse.fitBounds(bounds, {
             padding: [80, 80],
             maxZoom: 19,
           });
@@ -408,6 +508,7 @@ export default function PipeGeometryEditor({
         geometryType: geom.type,
         vertexCount: n,
         heavy,
+        hasDirectMap: !!map,
         layer: layerInfo(editableLine),
       });
     } catch (e: any) {
@@ -445,6 +546,8 @@ export default function PipeGeometryEditor({
       const geom = cleanGeometryForSave(rawGeom);
 
       const updated = await patchPipeGeometry(pipeId, geom);
+
+      await autoConnectGeometryEndpoints(geom);
 
       const updatedGeom = updated?.geometry ?? geom;
 
@@ -577,7 +680,7 @@ export default function PipeGeometryEditor({
               >
                 Al tocar <b>Editar recorrido</b>, se crea una línea blanca temporal arriba de la
                 cañería. Esa línea sí muestra los vértices aunque la cañería original sea GeoJSON o
-                MultiLineString.
+                MultiLineString. Al guardar, las puntas intentan conectarse automáticamente a la red.
               </div>
             )}
 
@@ -594,7 +697,8 @@ export default function PipeGeometryEditor({
                 }}
               >
                 Mové los vértices blancos sobre el mapa. También podés usar los puntos intermedios
-                para agregar nuevos vértices. Cuando termines, tocá <b>Guardar</b>.
+                para agregar nuevos vértices. Cuando termines, tocá <b>Guardar</b>. Si una punta cae sobre
+                una cañería existente, se intenta crear el nodo y conectar automáticamente.
               </div>
             )}
 
@@ -682,7 +786,7 @@ export default function PipeGeometryEditor({
                     opacity: busy ? 0.7 : 1,
                   }}
                 >
-                  {busy ? "Guardando…" : "Guardar"}
+                  {busy ? "Guardando y conectando…" : "Guardar"}
                 </button>
               </>
             )}
