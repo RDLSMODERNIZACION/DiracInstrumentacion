@@ -6,6 +6,7 @@ export type SimPressureKind =
   | "MANUAL"
   | "CALC"
   | "MIXED"
+  | "BLOCKED"
   | string;
 
 export type SimSource = {
@@ -13,18 +14,27 @@ export type SimSource = {
   source_type?: string | null;
   source_group?: string | null;
   pressure_kind?: SimPressureKind | null;
+
   asset_link_id?: string | null;
   asset_type?: string | null;
   asset_id?: string | null;
+
   label?: string | null;
   head_m?: number | null;
+
   pressure_bar_real?: number | null;
   level_pct?: number | null;
   tank_height_m?: number | null;
   water_height_m?: number | null;
+
+  pressure_mca_at_node?: number | null;
+  pressure_bar_at_node?: number | null;
+  delta_to_dominant_m?: number | null;
+
   online?: boolean | null;
   age_sec?: number | null;
   live_status?: string | null;
+
   props?: Record<string, any> | null;
 };
 
@@ -33,19 +43,24 @@ export type SimNode = {
   elev_m?: number | null;
   pressure_mca?: number | null;
   pressure_bar: number | null;
+
   blocked?: boolean;
+  valve_closed?: boolean;
+
   kind?: string;
   label?: string | null;
   reached?: boolean;
 
   is_source?: boolean;
   pressure_kind?: SimPressureKind | null;
+
   source?: SimSource | null;
   dominant_source?: SimSource | null;
   origin_source?: SimSource | null;
 
   sources_reaching?: SimSource[];
   sources_reaching_count?: number;
+
   source_mix?: string | null;
   warnings?: string[];
 
@@ -57,13 +72,17 @@ export type SimPipe = {
   q_lps: number;
   abs_q_lps: number;
   dir: 1 | -1;
+
   dH_m?: number | null;
   blocked?: boolean;
-  u?: string;
-  v?: string;
-  R?: number;
-  length_m?: number;
-  diam_mm?: number;
+  valve_closed?: boolean;
+
+  u?: string | null;
+  v?: string | null;
+
+  R?: number | null;
+  length_m?: number | null;
+  diam_mm?: number | null;
 
   pressure_mca_u?: number | null;
   pressure_mca_v?: number | null;
@@ -86,6 +105,7 @@ export type SimPipe = {
 
   sources_reaching?: SimSource[];
   sources_reaching_count?: number;
+
   source_mix?: string | null;
   warnings?: string[];
 
@@ -95,10 +115,46 @@ export type SimPipe = {
 
 export type SimRunResponse = {
   model: "SIMPLE" | "LINEAR" | string;
+
   nodes?: Record<string, SimNode>;
   pipes?: Record<string, SimPipe>;
   sources?: SimSource[];
-  meta?: Record<string, any>;
+
+  meta?: {
+    n_nodes?: number;
+    n_pipes_used?: number;
+    n_sources?: number;
+
+    pipes_count?: number;
+    nodes_count?: number;
+    sources_count?: number;
+    sources_valid?: number;
+    sources_invalid?: number;
+    sources_blocked?: number;
+
+    pipes_unconnected?: number;
+    pipes_closed?: number;
+    pipes_closed_by_valve?: number;
+    pipes_blocked_by_valve?: number;
+
+    valves_total?: number;
+    valves_on_nodes?: number;
+    valves_on_pipes?: number;
+    closed_node_valves?: number;
+    closed_pipe_valves?: number;
+
+    demands_ignored?: boolean;
+    pressure_formula?: string;
+    sources_origin?: string;
+    source_mix_logic?: string;
+
+    valve_logic?: Record<string, any>;
+    pressure_kinds?: Record<string, string>;
+    source_mix_types?: Record<string, string>;
+    warnings_catalog?: Record<string, string>;
+
+    [key: string]: any;
+  };
 };
 
 export type PipeConnectivityStats = {
@@ -112,7 +168,14 @@ export type PipeLayerProps = {
   useBBox?: boolean;
   debounceMs?: number;
 
-  onSelect?: (pipeId: string, layer: L.Layer, label?: string | null, feature?: any) => void;
+  onSelect?: (
+    pipeId: string,
+    layer: L.Layer,
+    label?: string | null,
+    feature?: any,
+    latlng?: L.LatLng
+  ) => void | Promise<void>;
+
   onCount?: (n: number) => void;
   onConnectivityStats?: (stats: PipeConnectivityStats) => void;
 

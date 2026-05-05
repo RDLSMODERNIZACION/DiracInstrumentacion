@@ -157,7 +157,13 @@ export default function PipesGeoJsonLayer({
 
       const sp = sim.pipes?.[id];
       if (!sp) return false;
-      if (sp.blocked) return false;
+
+      /*
+        Importante:
+        - Si una cañería queda bloqueada por válvula, queremos verla.
+        - Si filtramos todos los blocked, la válvula parecería desaparecer.
+      */
+      if (sp.blocked && !sp.valve_closed) return false;
 
       return true;
     });
@@ -267,7 +273,12 @@ export default function PipesGeoJsonLayer({
       weight = Math.max(weight, weightFromAbsQ(absQ));
       dashArray = undefined;
 
-      if (ps.blocked) {
+      if (ps.valve_closed) {
+        color = "#ef4444";
+        opacity = 1;
+        weight = Math.max(weight + 2, 7);
+        dashArray = "3 8";
+      } else if (ps.blocked) {
         color = "#ef4444";
         opacity = 0.82;
         dashArray = "3 8";
@@ -320,6 +331,117 @@ export default function PipesGeoJsonLayer({
             pointer-events: none;
             mix-blend-mode: normal;
           }
+
+          .leaflet-tooltip.pipeTooltipDark {
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            padding: 0;
+          }
+
+          .leaflet-tooltip.pipeTooltipDark::before {
+            display: none;
+          }
+
+          .pipeTooltipCard {
+            min-width: 240px;
+            max-width: 340px;
+            background: rgba(15, 23, 42, 0.96);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 14px;
+            padding: 10px 11px;
+            box-shadow: 0 16px 34px rgba(0,0,0,0.35);
+            backdrop-filter: blur(8px);
+            font-size: 12px;
+            line-height: 1.35;
+          }
+
+          .pipeTooltipCard__title {
+            font-weight: 950;
+            font-size: 13px;
+            margin-bottom: 2px;
+          }
+
+          .pipeTooltipCard__id {
+            opacity: 0.55;
+            font-size: 10px;
+            margin-bottom: 6px;
+          }
+
+          .pipeTooltipCard__badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 6px 0;
+          }
+
+          .pipeTooltipCard__badges span {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 7px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 900;
+          }
+
+          .pipeTooltipCard__badges .ok {
+            background: #16a34a;
+            color: #fff;
+          }
+
+          .pipeTooltipCard__badges .warn {
+            background: #f59e0b;
+            color: #111827;
+          }
+
+          .pipeTooltipCard__row {
+            margin-top: 4px;
+            font-size: 12px;
+          }
+
+          .pipeTooltipCard__muted {
+            margin-top: 5px;
+            font-size: 11px;
+            opacity: 0.72;
+          }
+
+          .pipeTooltipCard__mutedSmall {
+            margin-top: 3px;
+            font-size: 10px;
+            opacity: 0.65;
+          }
+
+          .pipeTooltipCard__warning {
+            margin-top: 7px;
+            padding: 7px 8px;
+            border-radius: 10px;
+            background: rgba(249,115,22,0.16);
+            border: 1px solid rgba(249,115,22,0.34);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+          }
+
+          .pipeTooltipCard__sourceBox {
+            margin-top: 7px;
+            padding: 7px 8px;
+            border-radius: 10px;
+            background: rgba(59,130,246,0.14);
+            border: 1px solid rgba(59,130,246,0.28);
+            color: #fff;
+            font-size: 11px;
+          }
+
+          .pipeTooltipCard__alsoBox {
+            margin-top: 7px;
+            padding: 7px 8px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: #fff;
+            font-size: 11px;
+          }
         `}
       </style>
 
@@ -362,12 +484,14 @@ export default function PipesGeoJsonLayer({
                   geometryType: gtype,
                   layerType,
                   hasPm,
+                  latlng: e?.latlng,
                 });
               } catch {}
             }
 
             if (!id) return;
-            onSelect?.(id, layer, label, feature);
+
+            onSelect?.(id, layer, label, feature, e?.latlng);
           });
         }}
       />

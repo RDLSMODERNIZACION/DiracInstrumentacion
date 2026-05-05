@@ -385,7 +385,11 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                     ),
                     st_lineinterpolatepoint(e.line_geom, e.frac)
                   from elevations e
-                  returning id, id::text as id_text
+                  returning
+                    id,
+                    id::text as id_text,
+                    elev_m,
+                    geom
                 ),
 
                 pipe_a as (
@@ -481,7 +485,7 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                   (select frac from elevations) as frac_on_pipe,
                   st_y((select geom from valve_node))::double precision as valve_lat,
                   st_x((select geom from valve_node))::double precision as valve_lng,
-                  (select valve_elev_m from elevations)::double precision as valve_elev_m
+                  (select elev_m from valve_node)::double precision as valve_elev_m
                 """,
                 (
                     body.lng,

@@ -45,7 +45,7 @@ import {
   fetchMapAssetsLive,
   linkMapAsset,
   unlinkMapAsset,
-  createMapValve,
+  insertValveOnPipePoint,
   type MapAssetLive,
 } from "../../services/mapasagua";
 
@@ -134,6 +134,8 @@ export function MapView(props: {
 
   const [pipesReloadKey, setPipesReloadKey] = React.useState(0);
   const [valvesReloadKey, setValvesReloadKey] = React.useState(0);
+  const [valveInsertMode, setValveInsertMode] = React.useState(false);
+  const [valveInsertBusy, setValveInsertBusy] = React.useState(false);
 
   const [connectOpen, setConnectOpen] = React.useState(false);
   const [nodesLite, setNodesLite] = React.useState<NodeLite[]>([]);
@@ -179,6 +181,22 @@ export function MapView(props: {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (!valveInsertMode) return;
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        setValveInsertMode(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [valveInsertMode]);
+
   const connHint = React.useMemo(
     () => pipeConnHintFromFeature(selectedPipeFeature),
     [selectedPipeFeature]
@@ -203,6 +221,18 @@ export function MapView(props: {
     setNodeConnectOpen(false);
     setIntersectionConnectOpen(false);
     setAssetLinkMode("none");
+  }
+
+  function startValveInsertMode() {
+    closeEditionTools();
+    clearPipeSelection();
+    setShowValves(true);
+    setValveInsertMode(true);
+  }
+
+  function stopValveInsertMode() {
+    if (valveInsertBusy) return;
+    setValveInsertMode(false);
   }
 
   async function ensureNodes() {
@@ -275,6 +305,7 @@ export function MapView(props: {
 
     closeEditionTools();
     clearPipeSelection();
+    setValveInsertMode(false);
 
     if (mode === "node") {
       await ensureNodes();
@@ -364,6 +395,7 @@ export function MapView(props: {
     setConnectOpen(false);
     setIntersectionConnectOpen(false);
     setAssetLinkMode("none");
+    setValveInsertMode(false);
     setNodeConnectOpen(true);
 
     await ensureNodes();
@@ -382,6 +414,7 @@ export function MapView(props: {
     setConnectOpen(false);
     setNodeConnectOpen(false);
     setAssetLinkMode("none");
+    setValveInsertMode(false);
     setIntersectionConnectOpen((v) => !v);
   }
 
@@ -422,7 +455,24 @@ export function MapView(props: {
     setIntersectionConnectOpen(false);
     setConnectOpen(false);
     setAssetLinkMode("none");
+    setValveInsertMode(false);
     setCreatingPipe((v) => !v);
+  }
+
+  function handleAddTank() {
+    closeEditionTools();
+    clearPipeSelection();
+    setValveInsertMode(false);
+    setShowMapAssets(true);
+    setAssetsPanelOpen(true);
+  }
+
+  function handleAddPump() {
+    closeEditionTools();
+    clearPipeSelection();
+    setValveInsertMode(false);
+    setShowMapAssets(true);
+    setAssetsPanelOpen(true);
   }
 
   async function handleDeleteSelectedPipe() {
@@ -441,32 +491,47 @@ export function MapView(props: {
     }
   }
 
-  async function handleCreateValveOnSelectedPipe() {
-    if (!selectedPipeId) return;
+  async function handleInsertValveOnPipeClick(args: {
+    pipeId: string;
+    lat: number;
+    lng: number;
+    label?: string | null;
+  }) {
+    if (valveInsertBusy) return;
 
-    const defaultName = `Válvula ${selectedPipeLabel ?? selectedPipeId.slice(0, 8)}`;
+    const defaultName = `Válvula ${args.label ?? args.pipeId.slice(0, 8)}`;
     const name = prompt("Nombre de la válvula:", defaultName);
 
     if (name === null) return;
 
+    setValveInsertBusy(true);
+
     try {
-      await createMapValve({
+      await insertValveOnPipePoint({
+        pipe_id: args.pipeId,
+        lat: args.lat,
+        lng: args.lng,
         name: name.trim() || defaultName,
-        map_pipe_id: selectedPipeId,
         is_open: true,
         valve_type: "MANUAL",
         source: "MANUAL",
-        notes: "Creada desde el mapa sobre cañería",
+        notes: "Insertada desde el mapa sobre punto de cañería",
+        block_side: "to",
       });
 
+      setValveInsertMode(false);
       setShowValves(true);
       setValvesReloadKey((k) => k + 1);
+      setPipesReloadKey((k) => k + 1);
+      clearPipeSelection();
 
       if (sim) {
-        runSimulation();
+        await runSimulation();
       }
     } catch (e: any) {
-      alert(e?.message ?? "No se pudo crear la válvula");
+      alert(e?.message ?? "No se pudo insertar la válvula");
+    } finally {
+      setValveInsertBusy(false);
     }
   }
 
@@ -486,6 +551,16 @@ export function MapView(props: {
             <MapFloatingControls
               creatingPipe={creatingPipe}
               onToggleCreatingPipe={toggleCreatingPipe}
+              valveInsertMode={valveInsertMode}
+              onToggleValveInsert={() => {
+                if (valveInsertMode) {
+                  stopValveInsertMode();
+                } else {
+                  startValveInsertMode();
+                }
+              }}
+              onAddTank={handleAddTank}
+              onAddPump={handleAddPump}
               nodeConnectOpen={nodeConnectOpen}
               onOpenNodeConnector={openNodeConnector}
               intersectionConnectOpen={intersectionConnectOpen}
@@ -547,6 +622,53 @@ export function MapView(props: {
           onUnlink={handleUnlinkSelectedAsset}
         />
 
+        {valveInsertMode && (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: 18,
+              transform: "translateX(-50%)",
+              zIndex: 5000,
+              background: "rgba(15,23,42,0.96)",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.16)",
+              borderRadius: 16,
+              padding: "12px 14px",
+              boxShadow: "0 16px 36px rgba(0,0,0,0.35)",
+              fontWeight: 900,
+              pointerEvents: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              maxWidth: "calc(100% - 32px)",
+            }}
+          >
+            <span>
+              {valveInsertBusy
+                ? "Insertando válvula..."
+                : "Insertar válvula: tocá el punto exacto sobre una cañería"}
+            </span>
+
+            <button
+              onClick={stopValveInsertMode}
+              disabled={valveInsertBusy}
+              style={{
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(239,68,68,0.88)",
+                color: "#fff",
+                borderRadius: 11,
+                padding: "7px 10px",
+                fontWeight: 900,
+                cursor: valveInsertBusy ? "default" : "pointer",
+                opacity: valveInsertBusy ? 0.55 : 1,
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+
         {showLegend && (
           <MapLegendOverlay simActive={!!sim} showPressureNodes={showPressureNodes} />
         )}
@@ -574,6 +696,7 @@ export function MapView(props: {
           <MapClickClear
             onClear={clearPipeSelection}
             enabled={
+              !valveInsertMode &&
               !editingPipeId &&
               !editingGeomOpen &&
               !connectOpen &&
@@ -672,8 +795,28 @@ export function MapView(props: {
               sim={sim}
               showOnlySimulated={!!sim}
               onConnectivityStats={setPipeConnectivityStats}
-              onSelect={(id, layer, label, feature) => {
+              onSelect={async (id, layer, label, feature, latlng) => {
                 if (intersectionConnectOpen) return;
+
+                if (valveInsertMode) {
+                  if (
+                    !latlng ||
+                    typeof latlng.lat !== "number" ||
+                    typeof latlng.lng !== "number"
+                  ) {
+                    alert("No pude detectar el punto exacto del click sobre la cañería.");
+                    return;
+                  }
+
+                  await handleInsertValveOnPipeClick({
+                    pipeId: id,
+                    lat: latlng.lat,
+                    lng: latlng.lng,
+                    label,
+                  });
+
+                  return;
+                }
 
                 if (assetLinkMode === "pipe" && selectedMapAsset) {
                   handleLinkSelectedAssetToPipe(id);
@@ -733,6 +876,7 @@ export function MapView(props: {
           !connectOpen &&
           !nodeConnectOpen &&
           !intersectionConnectOpen &&
+          !valveInsertMode &&
           assetLinkMode === "none" && (
             <PipePopup
               selectedPipeId={selectedPipeId}
@@ -747,6 +891,7 @@ export function MapView(props: {
                 setConnectOpen(false);
                 setNodeConnectOpen(false);
                 setAssetLinkMode("none");
+                setValveInsertMode(false);
                 setEditingPipeId(selectedPipeId);
               }}
               onEditGeometry={() => {
@@ -761,6 +906,7 @@ export function MapView(props: {
                 setNodeConnectOpen(false);
                 setIntersectionConnectOpen(false);
                 setAssetLinkMode("none");
+                setValveInsertMode(false);
                 setEditingGeomOpen(true);
               }}
               onConnect={async () => {
@@ -773,10 +919,11 @@ export function MapView(props: {
 
                 setIntersectionConnectOpen(false);
                 setAssetLinkMode("none");
+                setValveInsertMode(false);
                 await ensureNodes();
                 setConnectOpen(true);
               }}
-              onCreateValve={handleCreateValveOnSelectedPipe}
+              onCreateValve={startValveInsertMode}
               onDelete={handleDeleteSelectedPipe}
               onClose={clearPipeSelection}
             />

@@ -742,6 +742,60 @@ export async function createMapValve(input: {
   });
 }
 
+export type InsertValveOnPipeInput = {
+  pipe_id: string;
+  lat: number;
+  lng: number;
+  name?: string | null;
+  is_open?: boolean;
+  valve_type?: string;
+  location_id?: number | null;
+  source?: string;
+  tag?: string | null;
+  notes?: string | null;
+  block_side?: "from" | "to";
+};
+
+export type InsertValveOnPipeResponse = {
+  ok: boolean;
+  valve: MapValveLive;
+  split: {
+    original_pipe_id: string;
+    valve_node_id: string;
+    pipe_from_id: string;
+    pipe_to_id: string;
+    blocked_pipe_id: string;
+    block_side: "from" | "to";
+    frac_on_pipe: number;
+    lat: number;
+    lng: number;
+    elev_m?: number | null;
+  };
+};
+
+export async function insertValveOnPipePoint(
+  input: InsertValveOnPipeInput
+): Promise<InsertValveOnPipeResponse> {
+  const url = `${API_BASE}/mapa/valves/insert-on-pipe`;
+
+  return fetchJSON<InsertValveOnPipeResponse>(url, {
+    method: "POST",
+    body: JSON.stringify({
+      pipe_id: input.pipe_id,
+      lat: input.lat,
+      lng: input.lng,
+      name: input.name ?? null,
+      is_open: input.is_open ?? true,
+      valve_type: input.valve_type ?? "MANUAL",
+      location_id: input.location_id ?? null,
+      source: input.source ?? "MANUAL",
+      tag: input.tag ?? null,
+      notes: input.notes ?? "Insertada desde el mapa",
+      block_side: input.block_side ?? "to",
+    }),
+  });
+}
+
 export async function updateMapValveState(
   valveId: string,
   isOpen: boolean

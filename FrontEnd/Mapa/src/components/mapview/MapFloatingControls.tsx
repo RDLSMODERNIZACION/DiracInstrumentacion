@@ -67,6 +67,12 @@ export default function MapFloatingControls({
   creatingPipe,
   onToggleCreatingPipe,
 
+  valveInsertMode,
+  onToggleValveInsert,
+
+  onAddTank,
+  onAddPump,
+
   nodeConnectOpen,
   onOpenNodeConnector,
 
@@ -109,6 +115,12 @@ export default function MapFloatingControls({
 }: {
   creatingPipe: boolean;
   onToggleCreatingPipe: () => void;
+
+  valveInsertMode: boolean;
+  onToggleValveInsert: () => void;
+
+  onAddTank?: () => void;
+  onAddPump?: () => void;
 
   nodeConnectOpen: boolean;
   onOpenNodeConnector: () => void;
@@ -165,12 +177,41 @@ export default function MapFloatingControls({
         <SectionTitle>Herramientas</SectionTitle>
 
         <div style={{ display: "grid", gap: 8 }}>
-          <button
-            onClick={onToggleCreatingPipe}
-            style={buttonStyle(creatingPipe, "rgba(37,99,235,0.96)")}
-          >
-            {creatingPipe ? "Cancelar cañería" : "+ Cañería"}
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <button
+              onClick={onToggleCreatingPipe}
+              style={buttonStyle(creatingPipe, "rgba(37,99,235,0.96)")}
+              title="Dibujar una nueva cañería"
+            >
+              {creatingPipe ? "Cancelar" : "+ Cañería"}
+            </button>
+
+            <button
+              onClick={onToggleValveInsert}
+              style={buttonStyle(valveInsertMode, "rgba(239,68,68,0.96)")}
+              title="Insertar una válvula en un punto exacto de una cañería"
+            >
+              {valveInsertMode ? "Cancelar" : "+ Válvula"}
+            </button>
+
+            <button
+              onClick={onAddTank}
+              disabled={!onAddTank}
+              style={buttonStyle(false, "rgba(6,182,212,0.96)", !onAddTank)}
+              title="Ubicar o agregar un tanque en el mapa"
+            >
+              + Tanque
+            </button>
+
+            <button
+              onClick={onAddPump}
+              disabled={!onAddPump}
+              style={buttonStyle(false, "rgba(168,85,247,0.96)", !onAddPump)}
+              title="Ubicar o agregar una bomba en el mapa"
+            >
+              + Bomba
+            </button>
+          </div>
 
           <button
             onClick={onOpenNodeConnector}
