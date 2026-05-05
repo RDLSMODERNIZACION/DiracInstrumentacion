@@ -5,6 +5,7 @@ import type { SimMode } from "./mapTypes";
 import type { PipeConnectivityStats } from "./PipesLayer";
 
 type BoolSetter = (updater: (v: boolean) => boolean) => void;
+type InsertMode = "none" | "valve" | "tank" | "pump";
 
 function buttonStyle(active: boolean, activeBg: string, disabled = false): CSSProperties {
   return {
@@ -19,6 +20,19 @@ function buttonStyle(active: boolean, activeBg: string, disabled = false): CSSPr
     opacity: disabled ? 0.58 : 1,
     textAlign: "center",
     transition: "all 0.15s ease",
+    userSelect: "none",
+  };
+}
+
+function toolButtonStyle(active: boolean, activeBg: string, disabled = false): CSSProperties {
+  return {
+    ...buttonStyle(active, activeBg, disabled),
+    minHeight: 58,
+    padding: "10px 8px",
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: 3,
   };
 }
 
@@ -63,12 +77,58 @@ function StatusDot({ color }: { color: string }) {
   );
 }
 
+function ToolButton({
+  active,
+  disabled,
+  color,
+  icon,
+  label,
+  activeLabel,
+  title,
+  onClick,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  color: string;
+  icon: string;
+  label: string;
+  activeLabel?: string;
+  title?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={toolButtonStyle(active, color, disabled)}
+    >
+      <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: 12, lineHeight: 1.1 }}>
+        {active ? activeLabel ?? "Cancelar" : label}
+      </span>
+    </button>
+  );
+}
+
 export default function MapFloatingControls({
   creatingPipe,
   onToggleCreatingPipe,
 
-  valveInsertMode,
+  /**
+   * Compatibilidad con MapView actual.
+   * Más adelante se puede reemplazar por insertMode/onSelectInsertMode.
+   */
+  valveInsertMode = false,
   onToggleValveInsert,
+
+  /**
+   * Nuevo modo unificado opcional.
+   * Si MapView lo pasa, estos tienen prioridad para + Válvula/+ Tanque/+ Bomba.
+   */
+  insertMode,
+  onSelectInsertMode,
 
   onAddTank,
   onAddPump,
@@ -116,8 +176,11 @@ export default function MapFloatingControls({
   creatingPipe: boolean;
   onToggleCreatingPipe: () => void;
 
-  valveInsertMode: boolean;
-  onToggleValveInsert: () => void;
+  valveInsertMode?: boolean;
+  onToggleValveInsert?: () => void;
+
+  insertMode?: InsertMode;
+  onSelectInsertMode?: (mode: InsertMode) => void;
 
   onAddTank?: () => void;
   onAddPump?: () => void;
@@ -162,6 +225,30 @@ export default function MapFloatingControls({
   pipeConnectivityStats?: PipeConnectivityStats | null;
   simErr?: string | null;
 }) {
+  const activeInsertMode: InsertMode =
+    insertMode ?? (valveInsertMode ? "valve" : "none");
+
+  function toggleInsert(mode: InsertMode) {
+    if (onSelectInsertMode) {
+      onSelectInsertMode(activeInsertMode === mode ? "none" : mode);
+      return;
+    }
+
+    if (mode === "valve" && onToggleValveInsert) {
+      onToggleValveInsert();
+      return;
+    }
+
+    if (mode === "tank") {
+      onAddTank?.();
+      return;
+    }
+
+    if (mode === "pump") {
+      onAddPump?.();
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div>
@@ -178,42 +265,70 @@ export default function MapFloatingControls({
 
         <div style={{ display: "grid", gap: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <button
-              onClick={onToggleCreatingPipe}
-              style={buttonStyle(creatingPipe, "rgba(37,99,235,0.96)")}
+            <ToolButton
+              active={creatingPipe}
+              color="rgba(37,99,235,0.96)"
+              icon="➕"
+              label="+ Cañería"
+              activeLabel="Cancelar"
               title="Dibujar una nueva cañería"
-            >
-              {creatingPipe ? "Cancelar" : "+ Cañería"}
-            </button>
+              onClick={onToggleCreatingPipe}
+            />
 
-            <button
-              onClick={onToggleValveInsert}
-              style={buttonStyle(valveInsertMode, "rgba(239,68,68,0.96)")}
+            <ToolButton
+              active={activeInsertMode === "valve"}
+              color="rgba(239,68,68,0.96)"
+              icon="🚧"
+              label="+ Válvula"
+              activeLabel="Ubicando..."
               title="Insertar una válvula en un punto exacto de una cañería"
-            >
-              {valveInsertMode ? "Cancelar" : "+ Válvula"}
-            </button>
+              onClick={() => toggleInsert("valve")}
+            />
 
-            <button
-              onClick={onAddTank}
-              disabled={!onAddTank}
-              style={buttonStyle(false, "rgba(6,182,212,0.96)", !onAddTank)}
-              title="Ubicar o agregar un tanque en el mapa"
-            >
-              + Tanque
-            </button>
+            <ToolButton
+              active={activeInsertMode === "tank"}
+              disabled={!onSelectInsertMode && !onAddTank}
+              color="rgba(6,182,212,0.96)"
+              icon="🛢️"
+              label="+ Tanque"
+              activeLabel="Ubicando..."
+              title="Insertar o ubicar un tanque"
+              onClick={() => toggleInsert("tank")}
+            />
 
-            <button
-              onClick={onAddPump}
-              disabled={!onAddPump}
-              style={buttonStyle(false, "rgba(168,85,247,0.96)", !onAddPump)}
-              title="Ubicar o agregar una bomba en el mapa"
-            >
-              + Bomba
-            </button>
+            <ToolButton
+              active={activeInsertMode === "pump"}
+              disabled={!onSelectInsertMode && !onAddPump}
+              color="rgba(168,85,247,0.96)"
+              icon="⚙️"
+              label="+ Bomba"
+              activeLabel="Ubicando..."
+              title="Insertar o ubicar una bomba"
+              onClick={() => toggleInsert("pump")}
+            />
           </div>
 
+          {activeInsertMode !== "none" && (
+            <div
+              style={{
+                borderRadius: 12,
+                padding: "9px 10px",
+                background: "rgba(255,255,255,0.055)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                color: "rgba(255,255,255,0.82)",
+                fontSize: 12,
+                lineHeight: 1.3,
+                fontWeight: 800,
+              }}
+            >
+              {activeInsertMode === "valve" && "Tocá la cañería en el punto exacto donde va la válvula."}
+              {activeInsertMode === "tank" && "Tocá la cañería o el punto donde querés ubicar el tanque."}
+              {activeInsertMode === "pump" && "Tocá la cañería o el punto donde querés ubicar la bomba."}
+            </div>
+          )}
+
           <button
+            type="button"
             onClick={onOpenNodeConnector}
             style={buttonStyle(nodeConnectOpen, "rgba(234,88,12,0.96)")}
           >
@@ -221,6 +336,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={onOpenIntersectionConnector}
             style={buttonStyle(intersectionConnectOpen, "rgba(239,68,68,0.96)")}
           >
@@ -234,6 +350,7 @@ export default function MapFloatingControls({
 
         <div style={{ display: "grid", gap: 8 }}>
           <button
+            type="button"
             onClick={() => setShowContours((v) => !v)}
             style={buttonStyle(showContours, "rgba(14,165,233,0.96)")}
           >
@@ -242,6 +359,7 @@ export default function MapFloatingControls({
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
             <button
+              type="button"
               onClick={() => setShowMapAssets((v) => !v)}
               style={buttonStyle(showMapAssets, "rgba(168,85,247,0.96)")}
               title="Mostrar u ocultar los activos en el mapa"
@@ -250,6 +368,7 @@ export default function MapFloatingControls({
             </button>
 
             <button
+              type="button"
               onClick={() => {
                 setAssetsPanelOpen((v) => !v);
 
@@ -276,6 +395,7 @@ export default function MapFloatingControls({
           </div>
 
           <button
+            type="button"
             onClick={() => setShowValves((v) => !v)}
             style={buttonStyle(showValves, "rgba(239,68,68,0.96)")}
             title="Mostrar válvulas manuales y su estado abierto/cerrado"
@@ -284,6 +404,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={() => setShowPressureNodes((v) => !v)}
             style={buttonStyle(showPressureNodes, "rgba(20,184,166,0.96)")}
           >
@@ -291,6 +412,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={() => setShowElevationNodes((v) => !v)}
             style={buttonStyle(showElevationNodes, "rgba(234,179,8,0.96)")}
           >
@@ -298,6 +420,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={() => setShowDiameterTransitions((v) => !v)}
             style={buttonStyle(showDiameterTransitions, "rgba(249,115,22,0.96)")}
             title="Mostrar conexiones entre cañerías de distinto diámetro"
@@ -306,6 +429,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={() => setShowLegend((v) => !v)}
             style={buttonStyle(showLegend, "rgba(100,116,139,0.95)")}
           >
@@ -319,6 +443,7 @@ export default function MapFloatingControls({
 
         <div style={{ display: "grid", gap: 8 }}>
           <button
+            type="button"
             onClick={onToggleSimMode}
             style={buttonStyle(
               true,
@@ -331,6 +456,7 @@ export default function MapFloatingControls({
           </button>
 
           <button
+            type="button"
             onClick={onToggleSim}
             disabled={simBusy}
             style={buttonStyle(simActive, "rgba(34,197,94,0.96)", simBusy)}

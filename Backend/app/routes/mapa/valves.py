@@ -321,7 +321,10 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                   select
                     p.*,
                     st_linemerge(p.geom) as line_geom,
-                    st_setsrid(st_makepoint(%s, %s), 4326) as click_geom
+                    st_setsrid(
+                      st_makepoint(%s::double precision, %s::double precision),
+                      4326
+                    ) as click_geom
                   from "MapasAgua"."pipes" p
                   where p.id = %s::uuid
                     and p.from_node is not null
@@ -375,7 +378,7 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                     'VALVE',
                     e.valve_elev_m,
                     jsonb_build_object(
-                      'label', %s,
+                      'label', %s::text,
                       'auto_created', true,
                       'created_by', 'insert_valve_on_pipe',
                       'original_pipe_id', e.id::text,
@@ -471,7 +474,7 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                       || jsonb_build_object(
                         'inactive_reason', 'split_for_valve',
                         'split_for_valve_at', now(),
-                        'split_valve_name', %s
+                        'split_valve_name', %s::text
                       )
                   where p.id = %s::uuid
                   returning p.id::text as original_pipe_id
@@ -548,15 +551,15 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                   %s,
                   jsonb_build_object(
                     'inserted_on_pipe_point', true,
-                    'original_pipe_id', %s,
-                    'pipe_from_id', %s,
-                    'pipe_to_id', %s,
-                    'blocked_pipe_id', %s,
-                    'block_side', %s,
-                    'frac_on_pipe', %s,
-                    'valve_lat', %s,
-                    'valve_lng', %s,
-                    'valve_elev_m', %s
+                    'original_pipe_id', %s::text,
+                    'pipe_from_id', %s::text,
+                    'pipe_to_id', %s::text,
+                    'blocked_pipe_id', %s::text,
+                    'block_side', %s::text,
+                    'frac_on_pipe', %s::double precision,
+                    'valve_lat', %s::double precision,
+                    'valve_lng', %s::double precision,
+                    'valve_elev_m', %s::double precision
                   )
                 )
                 returning id::text
@@ -590,7 +593,7 @@ def insert_valve_on_pipe(body: ValveInsertOnPipeBody):
                 """
                 update "MapasAgua"."pipes"
                 set props = coalesce(props, '{}'::jsonb)
-                  || jsonb_build_object('split_valve_id', %s)
+                  || jsonb_build_object('split_valve_id', %s::text)
                 where id = %s::uuid
                 """,
                 (valve_id, body.pipe_id),

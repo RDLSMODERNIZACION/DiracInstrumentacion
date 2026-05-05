@@ -7,4 +7,9 @@ export default PipesGeoJsonLayer;
 export type {
   SimRunResponse,
   PipeConnectivityStats,
+  PipeLayerProps,
+  PipeConnHint,
+  SimPipe,
+  SimNode,
+  SimSource,
 } from "./pipes/types";
