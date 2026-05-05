@@ -416,20 +416,14 @@ def _read_valves(cur, conn) -> tuple[Dict[str, bool], Dict[str, bool], int]:
     """
     Lee válvulas de MapasAgua.valves.
 
-    Soporta dos modelos:
-      Nuevo:
-        map_node_id
-        map_pipe_id
-        is_open
+    Regla importante:
+      - Si la válvula tiene map_pipe_id, bloquea SOLO esa cañería.
+      - Si NO tiene map_pipe_id y sí tiene map_node_id, bloquea el nodo completo.
 
-      Viejo:
-        node_id
-        is_open
-
-    Devuelve:
-      valve_node_open: node_id -> is_open
-      valve_pipe_open: pipe_id -> is_open
-      valves_total
+    Esto permite que una válvula insertada en un punto exacto tenga:
+      map_node_id = ubicación física de la válvula
+      map_pipe_id = tramo que se corta
+    sin bloquear todo el nodo.
     """
     valve_node_open: Dict[str, bool] = {}
     valve_pipe_open: Dict[str, bool] = {}
@@ -451,11 +445,18 @@ def _read_valves(cur, conn) -> tuple[Dict[str, bool], Dict[str, bool], int]:
             valves_total += 1
             is_open = bool(r.get("is_open"))
 
-            if r.get("node_id"):
-                valve_node_open[r["node_id"]] = is_open
+            pipe_id = r.get("pipe_id")
+            node_id = r.get("node_id")
 
-            if r.get("pipe_id"):
-                valve_pipe_open[r["pipe_id"]] = is_open
+            # Prioridad: si tiene pipe_id, es válvula de cañería.
+            # El node_id queda solo como posición física para dibujar la válvula.
+            if pipe_id:
+                valve_pipe_open[pipe_id] = is_open
+                continue
+
+            # Solo bloquea nodo si NO tiene pipe asociado.
+            if node_id:
+                valve_node_open[node_id] = is_open
 
         return valve_node_open, valve_pipe_open, valves_total
 
@@ -645,9 +646,12 @@ def sim_run(body: SimRunRequest):
         * TANK_HEAD
         * PRESSURE_MEASURE
     - Válvula en nodo cerrada:
-        bloquea el nodo.
+        bloquea el nodo completo.
     - Válvula en cañería cerrada:
-        saca esa cañería del grafo.
+        bloquea solo esa cañería.
+    - Válvula insertada en punto:
+        tiene map_node_id para dibujar y map_pipe_id para cortar.
+        La simulación bloquea solo map_pipe_id.
     - Usa elev_m para calcular presión:
         pressure_mca = head_m - elev_m
     """
@@ -1305,6 +1309,7 @@ def sim_run(body: SimRunRequest):
             "valve_logic": {
                 "node_valve_closed": "bloquea todas las cañerías conectadas al nodo",
                 "pipe_valve_closed": "bloquea solo la cañería asociada",
+                "valve_with_node_and_pipe": "el nodo es ubicación física; el pipe es el tramo que se bloquea",
             },
             "pressure_kinds": {
                 "REAL": "Punto con presión real medida por manómetro/manifold",
