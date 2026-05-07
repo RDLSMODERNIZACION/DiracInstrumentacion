@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Optional
 from uuid import UUID
 
@@ -7,8 +8,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 
+# IMPORTANTE:
+# Este router está dentro de app/routes/mapa/__init__.py.
+# Por eso NO debe tener prefix="/mapa/..."
+# Si ponés /mapa acá, queda publicado como /mapa/mapa/...
 router = APIRouter(
-    prefix="/mapa/distribucion/instrumentation",
+    prefix="/distribucion/instrumentation",
     tags=["Mapa - Instrumentación de distribución"],
 )
 
@@ -33,13 +38,20 @@ def get_pool(request: Request):
     )
 
 
-def to_float_or_none(value: Any) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
+def model_to_dict(model: BaseModel, exclude_unset: bool = False) -> dict[str, Any]:
+    """
+    Compatible con Pydantic v1 y v2.
+    """
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_unset=exclude_unset)
+    return model.dict(exclude_unset=exclude_unset)
+
+
+def jsonb(value: Any) -> str:
+    """
+    asyncpg normalmente espera string para json/jsonb si no hay codec personalizado.
+    """
+    return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
 
 
 def pressure_bar_to_mca(bar: Optional[float]) -> Optional[float]:
@@ -183,6 +195,9 @@ async def create_instrumentation_point(
         async with conn.transaction():
             map_node_id = payload.map_node_id
 
+            # ------------------------------------------------------------
+            # Crear nodo en el mapa si no viene uno existente
+            # ------------------------------------------------------------
             if map_node_id is None:
                 node_kind = "PRESSURE_SENSOR" if payload.meter_type == "pressure" else "FLOW_SENSOR"
 
@@ -203,16 +218,22 @@ async def create_instrumentation_point(
                     node_kind,
                     payload.lng,
                     payload.lat,
-                    {
-                        "created_from": "distribution_instrumentation",
-                        "meter_type": payload.meter_type,
-                        "name": payload.name,
-                        "tag": payload.tag,
-                        "map_pipe_id": str(payload.map_pipe_id) if payload.map_pipe_id else None,
-                    },
+                    jsonb(
+                        {
+                            "created_from": "distribution_instrumentation",
+                            "meter_type": payload.meter_type,
+                            "name": payload.name,
+                            "tag": payload.tag,
+                            "map_pipe_id": str(payload.map_pipe_id) if payload.map_pipe_id else None,
+                        }
+                    ),
                 )
+
                 map_node_id = row["id"]
 
+            # ------------------------------------------------------------
+            # Crear manómetro
+            # ------------------------------------------------------------
             if payload.meter_type == "pressure":
                 meter = await conn.fetchrow(
                     """
@@ -268,7 +289,7 @@ async def create_instrumentation_point(
                     payload.device_id,
                     payload.topic,
                     payload.stale_after_sec,
-                    payload.props,
+                    jsonb(payload.props),
                     payload.notes,
                 )
 
@@ -309,11 +330,13 @@ async def create_instrumentation_point(
                     meter["map_node_id"],
                     meter["map_pipe_id"],
                     meter["hydraulic_position"],
-                    {
-                        "tag": meter["tag"],
-                        "meter_type": "pressure",
-                        "device_id": meter["device_id"],
-                    },
+                    jsonb(
+                        {
+                            "tag": meter["tag"],
+                            "meter_type": "pressure",
+                            "device_id": meter["device_id"],
+                        }
+                    ),
                     meter["notes"],
                 )
 
@@ -335,6 +358,9 @@ async def create_instrumentation_point(
                     "latest": dict(latest) if latest else None,
                 }
 
+            # ------------------------------------------------------------
+            # Crear caudalímetro
+            # ------------------------------------------------------------
             meter = await conn.fetchrow(
                 """
                 INSERT INTO "MapasAgua".distribution_flow_meters (
@@ -394,7 +420,7 @@ async def create_instrumentation_point(
                 payload.device_id,
                 payload.topic,
                 payload.stale_after_sec,
-                payload.props,
+                jsonb(payload.props),
                 payload.notes,
             )
 
@@ -435,11 +461,13 @@ async def create_instrumentation_point(
                 meter["map_node_id"],
                 meter["map_pipe_id"],
                 meter["hydraulic_position"],
-                {
-                    "tag": meter["tag"],
-                    "meter_type": "flow",
-                    "device_id": meter["device_id"],
-                },
+                jsonb(
+                    {
+                        "tag": meter["tag"],
+                        "meter_type": "flow",
+                        "device_id": meter["device_id"],
+                    }
+                ),
                 meter["notes"],
             )
 
@@ -476,7 +504,7 @@ async def list_instrumentation_points(
     pool = get_pool(request)
 
     async with pool.acquire() as conn:
-        rows = []
+        rows: list[dict[str, Any]] = []
 
         if meter_type in (None, "pressure"):
             pressure_rows = await conn.fetch(
@@ -593,7 +621,7 @@ async def update_instrumentation_point(
         else '"MapasAgua".distribution_flow_meters'
     )
 
-    data = payload.model_dump(exclude_unset=True)
+    data = model_to_dict(payload, exclude_unset=True)
 
     if not data:
         raise HTTPException(status_code=400, detail="No hay campos para actualizar")
@@ -611,18 +639,21 @@ async def update_instrumentation_point(
         "notes",
     }
 
-    sets = []
-    values = []
+    sets: list[str] = []
+    values: list[Any] = []
     i = 1
 
     for key, value in data.items():
         if key not in allowed:
             continue
+
         if key == "props":
             sets.append(f"{key} = ${i}::jsonb")
+            values.append(jsonb(value))
         else:
             sets.append(f"{key} = ${i}")
-        values.append(value)
+            values.append(value)
+
         i += 1
 
     if not sets:
@@ -635,14 +666,52 @@ async def update_instrumentation_point(
     UPDATE {table}
     SET {", ".join(sets)}
     WHERE id = ${i}
-    RETURNING id
+    RETURNING id, name, location_id, map_node_id, map_pipe_id, hydraulic_position, active, props, notes
     """
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(sql, *values)
+        async with conn.transaction():
+            row = await conn.fetchrow(sql, *values)
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Punto de medición no encontrado")
+            if not row:
+                raise HTTPException(status_code=404, detail="Punto de medición no encontrado")
+
+            # Sincronizar asset_links
+            asset_type = "PRESSURE_SENSOR" if meter_type == "pressure" else "FLOW_SENSOR"
+            source_table = (
+                "MapasAgua.distribution_pressure_meters"
+                if meter_type == "pressure"
+                else "MapasAgua.distribution_flow_meters"
+            )
+
+            await conn.execute(
+                """
+                UPDATE "MapasAgua".asset_links
+                SET asset_name = $1,
+                    location_id = $2,
+                    map_node_id = $3,
+                    map_pipe_id = $4,
+                    hydraulic_position = $5,
+                    enabled = $6,
+                    props = $7::jsonb,
+                    notes = $8,
+                    updated_at = now()
+                WHERE asset_type = $9
+                  AND source_table = $10
+                  AND asset_id = $11
+                """,
+                row["name"],
+                row["location_id"],
+                row["map_node_id"],
+                row["map_pipe_id"],
+                row["hydraulic_position"],
+                row["active"],
+                jsonb(row["props"]),
+                row["notes"],
+                asset_type,
+                source_table,
+                str(row["id"]),
+            )
 
     return {
         "ok": True,
@@ -669,20 +738,42 @@ async def deactivate_instrumentation_point(
         else '"MapasAgua".distribution_flow_meters'
     )
 
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""
-            UPDATE {table}
-            SET active = false,
-                updated_at = now()
-            WHERE id = $1
-            RETURNING id
-            """,
-            meter_id,
-        )
+    asset_type = "PRESSURE_SENSOR" if meter_type == "pressure" else "FLOW_SENSOR"
+    source_table = (
+        "MapasAgua.distribution_pressure_meters"
+        if meter_type == "pressure"
+        else "MapasAgua.distribution_flow_meters"
+    )
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Punto de medición no encontrado")
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {table}
+                SET active = false,
+                    updated_at = now()
+                WHERE id = $1
+                RETURNING id
+                """,
+                meter_id,
+            )
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Punto de medición no encontrado")
+
+            await conn.execute(
+                """
+                UPDATE "MapasAgua".asset_links
+                SET enabled = false,
+                    updated_at = now()
+                WHERE asset_type = $1
+                  AND source_table = $2
+                  AND asset_id = $3
+                """,
+                asset_type,
+                source_table,
+                str(meter_id),
+            )
 
     return {
         "ok": True,
@@ -761,7 +852,7 @@ async def insert_pressure_reading(
             payload.signal_rssi,
             payload.quality,
             payload.measured_at,
-            payload.raw_payload,
+            jsonb(payload.raw_payload),
         )
 
         latest = await conn.fetchrow(
@@ -851,7 +942,7 @@ async def insert_flow_reading(
             payload.signal_rssi,
             payload.quality,
             payload.measured_at,
-            payload.raw_payload,
+            jsonb(payload.raw_payload),
         )
 
         latest = await conn.fetchrow(
