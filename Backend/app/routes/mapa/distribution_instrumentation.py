@@ -22,19 +22,86 @@ router = APIRouter(
 # Helpers
 # ============================================================
 
+def _looks_like_pool(obj: Any) -> bool:
+    """
+    Detecta si el objeto parece un pool asyncpg o similar.
+    """
+    return obj is not None and hasattr(obj, "acquire") and callable(getattr(obj, "acquire", None))
+
+
 def get_pool(request: Request):
     """
-    Intenta tomar el pool de distintas formas porque en tu backend
-    puede estar guardado como app.state.pool, app.state.db_pool, etc.
+    Busca el pool real de base de datos en app.state o request.state.
+
+    Esto evita depender de un único nombre como app.state.pool,
+    porque tu backend ya tiene otros routers funcionando y probablemente
+    guarda el pool con otro nombre.
     """
-    for attr in ("pool", "db_pool", "database_pool"):
-        pool = getattr(request.app.state, attr, None)
-        if pool is not None:
-            return pool
+
+    candidate_names = (
+        "pool",
+        "db_pool",
+        "database_pool",
+        "pg_pool",
+        "postgres_pool",
+        "asyncpg_pool",
+        "conn_pool",
+        "connection_pool",
+        "db",
+        "database",
+        "postgres",
+    )
+
+    # 1) Buscar por nombres conocidos en app.state
+    for attr in candidate_names:
+        obj = getattr(request.app.state, attr, None)
+
+        if _looks_like_pool(obj):
+            return obj
+
+        nested = getattr(obj, "pool", None)
+        if _looks_like_pool(nested):
+            return nested
+
+        nested = getattr(obj, "db_pool", None)
+        if _looks_like_pool(nested):
+            return nested
+
+    # 2) Buscar por nombres conocidos en request.state
+    for attr in candidate_names:
+        obj = getattr(request.state, attr, None)
+
+        if _looks_like_pool(obj):
+            return obj
+
+        nested = getattr(obj, "pool", None)
+        if _looks_like_pool(nested):
+            return nested
+
+    # 3) Inspección general de app.state
+    app_state_dict = getattr(request.app.state, "_state", {}) or {}
+
+    for key, obj in app_state_dict.items():
+        if _looks_like_pool(obj):
+            return obj
+
+        nested = getattr(obj, "pool", None)
+        if _looks_like_pool(nested):
+            return nested
+
+        nested = getattr(obj, "db_pool", None)
+        if _looks_like_pool(nested):
+            return nested
+
+    available_keys = list(app_state_dict.keys())
 
     raise HTTPException(
         status_code=500,
-        detail="No se encontró pool de base de datos en app.state.pool / app.state.db_pool / app.state.database_pool",
+        detail={
+            "message": "No se encontró el pool de base de datos.",
+            "available_app_state_keys": available_keys,
+            "hint": "Revisar cómo los otros routers obtienen la conexión. Buscar request.app.state o pool en valves.py, nodes.py, mapasagua.py o assets.py.",
+        },
     )
 
 
