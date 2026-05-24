@@ -285,13 +285,26 @@ export default function Landing() {
           padding: 0 18px;
           font-size: 14px;
           font-weight: 750;
-          transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+          transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, background 0.18s ease;
         }
 
         .dirac-secondary-btn:hover {
           border-color: var(--blue);
           color: var(--blue);
           transform: translateY(-1px);
+        }
+
+        .dirac-hero .dirac-secondary-btn {
+          background: rgba(255, 255, 255, 0.08);
+          color: #e0f2fe;
+          border-color: rgba(226, 232, 240, 0.24);
+          backdrop-filter: blur(10px);
+        }
+
+        .dirac-hero .dirac-secondary-btn:hover {
+          background: rgba(255, 255, 255, 0.14);
+          color: white;
+          border-color: rgba(125, 211, 252, 0.55);
         }
 
         .dirac-hero {
@@ -939,6 +952,7 @@ export default function Landing() {
         }
 
         .dirac-dashboard {
+          margin-top: 34px;
           border: 1px solid var(--line);
           border-radius: 20px;
           background: white;
@@ -1036,38 +1050,6 @@ export default function Landing() {
           to { transform: scaleY(1); transform-origin: bottom; }
         }
 
-        .dirac-split {
-          display: grid;
-          grid-template-columns: minmax(0, 0.86fr) minmax(360px, 0.74fr);
-          gap: 42px;
-          align-items: center;
-        }
-
-        .dirac-list {
-          display: grid;
-          gap: 14px;
-          margin-top: 24px;
-        }
-
-        .dirac-list-item {
-          display: grid;
-          grid-template-columns: 28px 1fr;
-          gap: 12px;
-          color: #475569;
-          line-height: 1.55;
-        }
-
-        .dirac-check {
-          width: 28px;
-          height: 28px;
-          border-radius: 999px;
-          background: #dcfce7;
-          color: #15803d;
-          display: grid;
-          place-items: center;
-          font-weight: 900;
-        }
-
         .dirac-sector-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1147,8 +1129,7 @@ export default function Landing() {
 
           .dirac-hero-grid,
           .dirac-section-head,
-          .dirac-feature-grid,
-          .dirac-split {
+          .dirac-feature-grid {
             grid-template-columns: 1fr;
           }
 
@@ -1192,11 +1173,18 @@ export default function Landing() {
           }
 
           .dirac-hero-grid {
-            padding: 52px 0 285px;
+            grid-template-columns: 1fr;
+            padding: 48px 0 230px;
+            gap: 34px;
           }
 
           .dirac-hero h1 {
-            font-size: 44px;
+            font-size: 42px;
+            line-height: 1;
+          }
+
+          .dirac-lead {
+            font-size: 16px;
           }
 
           .dirac-actions {
@@ -1209,28 +1197,52 @@ export default function Landing() {
           }
 
           .dirac-tech-visual {
-            min-height: 410px;
+            min-height: 360px;
+            margin-top: 8px;
+            overflow: visible;
+          }
+
+          .dirac-orb {
+            width: 210px;
+            height: 210px;
+            right: 4px;
+            top: 8px;
+            opacity: 0.75;
           }
 
           .dirac-panel-array {
-            width: 285px;
-            height: 190px;
-            left: -6px;
+            width: 270px;
+            height: 178px;
+            left: 50%;
+            top: 34px;
+            transform: translateX(-50%) perspective(760px) rotateX(10deg) rotateZ(-4deg);
+          }
+
+          .dirac-panel-stand {
+            left: 50%;
+            top: 198px;
+            height: 92px;
           }
 
           .dirac-control-card {
-            width: 172px;
-            right: 4px;
-            bottom: 48px;
+            width: min(230px, calc(100% - 32px));
+            right: 16px;
+            bottom: 6px;
           }
 
           .dirac-floating-metrics {
             display: none;
           }
 
+          .dirac-node,
+          .dirac-field-line {
+            display: none;
+          }
+
           .dirac-hero-stats {
             grid-template-columns: 1fr 1fr;
             gap: 18px;
+            bottom: 26px;
           }
 
           .dirac-hero-stat strong {
@@ -1279,7 +1291,7 @@ export default function Landing() {
 
           <div className="dirac-links">
             <a href="#servicios">Servicios</a>
-            <a href="#cargaderos">Cargaderos</a>
+            <a href="#solar">Solar</a>
             <a href="#sectores">Sectores</a>
           </div>
 
@@ -1427,6 +1439,46 @@ export default function Landing() {
                 </article>
               ))}
             </div>
+
+            <div className="dirac-dashboard">
+              <div className="dirac-dashboard-head">
+                <strong>DIRAC - Telemetría operativa</strong>
+                <span className="dirac-live">En vivo</span>
+              </div>
+
+              <div className="dirac-metrics">
+                <div className="dirac-metric">
+                  <span>Generación solar</span>
+                  <strong>4.8 kW</strong>
+                </div>
+                <div className="dirac-metric">
+                  <span>Demanda actual</span>
+                  <strong>186 kW</strong>
+                </div>
+                <div className="dirac-metric">
+                  <span>Caudal cargadero</span>
+                  <strong>42 m³/h</strong>
+                </div>
+                <div className="dirac-metric">
+                  <span>Ahorro estimado</span>
+                  <strong>14%</strong>
+                </div>
+              </div>
+
+              <div className="dirac-bars">
+                {chartBars.map((value, index) => (
+                  <i
+                    key={index}
+                    style={
+                      {
+                        "--h": `${value}%`,
+                        "--delay": `${index * 0.035}s`,
+                      } as CSSProperties
+                    }
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -1470,74 +1522,6 @@ export default function Landing() {
                     <p>Estado de batería, consumo, disponibilidad, eventos y alarmas.</p>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="dirac-section" id="cargaderos">
-          <div className="dirac-shell dirac-split">
-            <div>
-              <div className="dirac-kicker">Cargaderos automatizados</div>
-              <h2>Control, permisos y trazabilidad en cada carga.</h2>
-              <p className="dirac-section-text">
-                Automatizamos cargaderos de agua o insumos para reducir errores, ordenar
-                usuarios, registrar volúmenes y evitar rebalses.
-              </p>
-
-              <div className="dirac-list">
-                <div className="dirac-list-item">
-                  <span className="dirac-check">✓</span>
-                  <span>Identificación de usuarios, empresas, vehículos o permisos.</span>
-                </div>
-                <div className="dirac-list-item">
-                  <span className="dirac-check">✓</span>
-                  <span>Control de bombas, válvulas, caudalímetros y sensores de nivel.</span>
-                </div>
-                <div className="dirac-list-item">
-                  <span className="dirac-check">✓</span>
-                  <span>Historial de cargas, horarios, volúmenes, alarmas y eventos.</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="dirac-dashboard">
-              <div className="dirac-dashboard-head">
-                <strong>DIRAC - Telemetría operativa</strong>
-                <span className="dirac-live">En vivo</span>
-              </div>
-
-              <div className="dirac-metrics">
-                <div className="dirac-metric">
-                  <span>Generación solar</span>
-                  <strong>4.8 kW</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Demanda actual</span>
-                  <strong>186 kW</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Caudal cargadero</span>
-                  <strong>42 m³/h</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Ahorro estimado</span>
-                  <strong>14%</strong>
-                </div>
-              </div>
-
-              <div className="dirac-bars">
-                {chartBars.map((value, index) => (
-                  <i
-                    key={index}
-                    style={
-                      {
-                        "--h": `${value}%`,
-                        "--delay": `${index * 0.035}s`,
-                      } as CSSProperties
-                    }
-                  />
-                ))}
               </div>
             </div>
           </div>
