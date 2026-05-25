@@ -42,6 +42,18 @@ const services = [
     description:
       "Mantenimiento, inspección y diagnóstico de transformadores para mejorar disponibilidad y seguridad.",
   },
+  {
+    number: "07",
+    title: "Semáforos inteligentes",
+    description:
+      "Instalación, control, sincronización y mantenimiento de semáforos inteligentes para tránsito urbano.",
+  },
+  {
+    number: "08",
+    title: "Banco de capacitores",
+    description:
+      "Instalación de bancos de capacitores para corrección de energía reactiva y mejora del factor de potencia.",
+  },
 ];
 
 const tickerItems = [
@@ -53,6 +65,8 @@ const tickerItems = [
   "Municipalidades",
   "Industrias",
   "Transformadores",
+  "Semáforos inteligentes",
+  "Banco de capacitores",
 ];
 
 const heroSolutions = [
@@ -104,6 +118,51 @@ const heroSolutions = [
     description: "Inspección, diagnóstico y mantenimiento preventivo para mayor disponibilidad.",
     images: ["/img/mantenimiento-transformadores.jpg", "/img/mantenimiento-transformadores.jpeg"],
   },
+  {
+    number: "07",
+    title: "Semáforos inteligentes",
+    description: "Instalación, control y mantenimiento de semáforos inteligentes.",
+    images: [
+      "/img/semaforos-inteligentes.jpg",
+      "/img/semaforos-inteligentes.jpeg",
+      "/img/semaforos-inteligentes.png",
+      "/img/scada-preview.png",
+    ],
+  },
+  {
+    number: "08",
+    title: "Banco de capacitores",
+    description: "Corrección de energía reactiva y mejora del factor de potencia.",
+    images: [
+      "/img/banco-capacitores.jpg",
+      "/img/banco-capacitores.jpeg",
+      "/img/banco-capacitores.png",
+      "/img/eficiencia-energetica.jpg",
+      "/img/correccion-energia-reactiva.jpg",
+      "/img/scada-preview.png",
+    ],
+  },
+];
+
+const fleetVehicles = [
+  {
+    title: "Hidrogrúa equipada",
+    eyebrow: "Altura y montaje",
+    description:
+      "Unidad preparada para trabajos en luminaria, semáforos, tableros, columnas, tendidos y asistencia en campo.",
+    image: "/img/hidrogrua-dirac.jpg",
+    uploadHint: "Subí la foto como hidrogrua-dirac.jpg",
+    specs: ["Trabajo en altura", "Herramientas", "Seguridad"],
+  },
+  {
+    title: "Camioneta de servicio",
+    eyebrow: "Soporte técnico",
+    description:
+      "Movilidad operativa con instrumental, protecciones, repuestos y herramientas para instalaciones y mantenimiento.",
+    image: "/img/camioneta-dirac.jpg",
+    uploadHint: "Subí la foto como camioneta-dirac.jpg",
+    specs: ["Full equipada", "Instrumental", "Respuesta rápida"],
+  },
 ];
 
 function HeroSolutionShowcase() {
@@ -137,8 +196,8 @@ function HeroSolutionShowcase() {
       </div>
 
       <div className="dirac-solution-stage">
-        <div className="dirac-solution-selector" aria-label="Secuencia de soluciones">
-          {heroSolutions.map((item, index) => (
+        <div className="dirac-solution-selector left" aria-label="Secuencia de soluciones principales">
+          {heroSolutions.slice(0, 4).map((item, index) => (
             <article
               key={item.title}
               className={`dirac-solution-item ${index === activeSolution ? "active" : ""}`}
@@ -175,8 +234,73 @@ function HeroSolutionShowcase() {
             }}
           />
         </div>
+
+        <div className="dirac-solution-selector right" aria-label="Secuencia de soluciones complementarias">
+          {heroSolutions.slice(4).map((item, offsetIndex) => {
+            const index = offsetIndex + 4;
+
+            return (
+              <article
+                key={item.title}
+                className={`dirac-solution-item ${index === activeSolution ? "active" : ""}`}
+              >
+                <span>{item.number}</span>
+                <strong>{item.title}</strong>
+                <small>{item.description}</small>
+              </article>
+            );
+          })}
+        </div>
       </div>
     </div>
+  );
+}
+
+function FleetSection() {
+  return (
+    <section className="dirac-fleet-section" id="vehiculos">
+      <div className="dirac-shell">
+        <div className="dirac-fleet-head">
+          <div>
+            <div className="dirac-kicker">Nuestra movilidad</div>
+            <h2>Vehículos full equipados para trabajar en campo.</h2>
+          </div>
+          <p>
+            Contamos con unidades preparadas para instalaciones, mantenimiento, montaje eléctrico,
+            luminaria, automatización y asistencia técnica en municipalidades e industrias.
+          </p>
+        </div>
+
+        <div className="dirac-fleet-grid">
+          {fleetVehicles.map((vehicle) => (
+            <article className="dirac-fleet-card" key={vehicle.title}>
+              <div className="dirac-fleet-media">
+                <img
+                  src={vehicle.image}
+                  alt={vehicle.title}
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                    event.currentTarget.parentElement?.classList.add("is-missing");
+                  }}
+                />
+                <span>{vehicle.uploadHint}</span>
+              </div>
+
+              <div className="dirac-fleet-content">
+                <small>{vehicle.eyebrow}</small>
+                <h3>{vehicle.title}</h3>
+                <p>{vehicle.description}</p>
+                <div className="dirac-fleet-specs">
+                  {vehicle.specs.map((spec) => (
+                    <b key={spec}>{spec}</b>
+                  ))}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -499,6 +623,7 @@ export default function Landing() {
         .dirac-hero > .dirac-shell {
           position: relative;
           z-index: 2;
+          width: min(1320px, calc(100% - 32px));
         }
 
         .dirac-hero-showcase {
@@ -537,10 +662,10 @@ export default function Landing() {
 
         .dirac-solution-stage {
           position: relative;
-          min-height: 560px;
+          min-height: 620px;
           display: grid;
-          grid-template-columns: minmax(310px, 360px) minmax(0, 1fr);
-          gap: 32px;
+          grid-template-columns: minmax(210px, 0.46fr) minmax(0, 1.45fr) minmax(210px, 0.46fr);
+          gap: clamp(14px, 1.7vw, 24px);
           align-items: center;
           isolation: isolate;
         }
@@ -571,18 +696,24 @@ export default function Landing() {
           display: grid;
           grid-template-columns: 1fr;
           gap: 10px;
+          align-content: center;
           transform: none;
+        }
+
+        .dirac-solution-selector.right {
+          grid-template-columns: 1fr;
+          align-content: center;
         }
 
         .dirac-solution-item {
           --lift: 0px;
-          min-height: 84px;
+          min-height: 112px;
           display: grid;
-          grid-template-columns: 38px 1fr;
+          grid-template-columns: 34px 1fr;
           align-content: start;
           align-items: center;
           gap: 5px 13px;
-          padding: 16px;
+          padding: 15px;
           border: 1px solid rgba(226, 232, 240, 0.16);
           border-radius: 18px;
           position: relative;
@@ -623,8 +754,8 @@ export default function Landing() {
 
         .dirac-solution-item span {
           grid-row: 1 / 3;
-          width: 34px;
-          height: 34px;
+          width: 31px;
+          height: 31px;
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -639,7 +770,7 @@ export default function Landing() {
 
         .dirac-solution-item strong {
           color: white;
-          font-size: 19px;
+          font-size: 17px;
           line-height: 1.05;
           letter-spacing: -0.03em;
         }
@@ -647,7 +778,7 @@ export default function Landing() {
         .dirac-solution-item small {
           max-width: 330px;
           color: rgba(226, 232, 240, 0.68);
-          font-size: 12px;
+          font-size: 11.5px;
           line-height: 1.42;
         }
 
@@ -659,6 +790,11 @@ export default function Landing() {
         .dirac-solution-item.active {
           box-shadow: inset 4px 0 0 var(--green), 0 24px 58px rgba(0, 0, 0, 0.26);
           transform: translateX(6px) translateY(var(--lift));
+        }
+
+        .dirac-solution-selector.right .dirac-solution-item.active {
+          box-shadow: inset -4px 0 0 var(--green), 0 24px 58px rgba(0, 0, 0, 0.26);
+          transform: translateX(-6px) translateY(var(--lift));
         }
 
         .dirac-solution-item.active span {
@@ -685,7 +821,7 @@ export default function Landing() {
         .dirac-solution-preview {
           min-width: 0;
           width: 100%;
-          min-height: 540px;
+          min-height: 600px;
           margin-left: 0;
           display: grid;
           grid-template-rows: auto 1fr;
@@ -741,7 +877,7 @@ export default function Landing() {
           display: block;
           width: 100%;
           height: 100%;
-          min-height: 360px;
+          min-height: 430px;
           object-fit: contain;
           background: white;
           animation: dirac-preview-slide 0.72s ease both;
@@ -756,6 +892,175 @@ export default function Landing() {
             opacity: 1;
             transform: translateX(0) scale(1);
           }
+        }
+
+        .dirac-fleet-section {
+          position: relative;
+          padding: 84px 0;
+          background:
+            radial-gradient(circle at 15% 10%, rgba(34, 197, 94, 0.1), transparent 34%),
+            radial-gradient(circle at 85% 20%, rgba(37, 99, 235, 0.09), transparent 34%),
+            #f8fafc;
+          border-bottom: 1px solid var(--line);
+          overflow: hidden;
+        }
+
+        .dirac-fleet-section::before {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 0;
+          height: 1px;
+          background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.45), rgba(37, 99, 235, 0.35), transparent);
+        }
+
+        .dirac-fleet-head {
+          display: grid;
+          grid-template-columns: minmax(0, 0.95fr) minmax(280px, 0.7fr);
+          gap: 34px;
+          align-items: end;
+          margin-bottom: 32px;
+        }
+
+        .dirac-fleet-head h2 {
+          margin: 0;
+          max-width: 760px;
+          color: #071426;
+          font-size: clamp(34px, 4.4vw, 58px);
+          line-height: 1;
+          letter-spacing: -0.045em;
+        }
+
+        .dirac-fleet-head p {
+          margin: 0;
+          color: #475569;
+          font-size: 16px;
+          line-height: 1.7;
+        }
+
+        .dirac-fleet-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 22px;
+        }
+
+        .dirac-fleet-card {
+          display: grid;
+          grid-template-rows: minmax(290px, 1fr) auto;
+          overflow: hidden;
+          border-radius: 28px;
+          background: white;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.1);
+        }
+
+        .dirac-fleet-media {
+          position: relative;
+          min-height: 290px;
+          display: grid;
+          place-items: center;
+          overflow: hidden;
+          background:
+            linear-gradient(135deg, rgba(15, 23, 42, 0.06), rgba(34, 197, 94, 0.08)),
+            repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.14) 0 1px, transparent 1px 18px),
+            #eef6f1;
+        }
+
+        .dirac-fleet-media img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+          transition: transform 0.45s ease;
+        }
+
+        .dirac-fleet-card:hover .dirac-fleet-media img {
+          transform: scale(1.035);
+        }
+
+        .dirac-fleet-media span {
+          position: absolute;
+          left: 22px;
+          right: 22px;
+          bottom: 20px;
+          min-height: 44px;
+          display: none;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          border: 1px dashed rgba(37, 99, 235, 0.35);
+          background: rgba(255, 255, 255, 0.78);
+          color: #1e3a8a;
+          font-size: 13px;
+          font-weight: 850;
+          text-align: center;
+          backdrop-filter: blur(14px);
+        }
+
+        .dirac-fleet-media.is-missing span {
+          display: inline-flex;
+        }
+
+        .dirac-fleet-media.is-missing::before {
+          content: "";
+          width: 92px;
+          height: 92px;
+          border-radius: 28px;
+          border: 1px solid rgba(34, 197, 94, 0.24);
+          background:
+            linear-gradient(135deg, rgba(34, 197, 94, 0.14), rgba(37, 99, 235, 0.08)),
+            #ffffff;
+          box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+        }
+
+        .dirac-fleet-content {
+          padding: 24px;
+        }
+
+        .dirac-fleet-content small {
+          display: block;
+          color: var(--blue);
+          font-size: 12px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.09em;
+          margin-bottom: 10px;
+        }
+
+        .dirac-fleet-content h3 {
+          margin: 0;
+          color: #071426;
+          font-size: 28px;
+          line-height: 1.05;
+          letter-spacing: -0.035em;
+        }
+
+        .dirac-fleet-content p {
+          margin: 14px 0 0;
+          color: #475569;
+          font-size: 15px;
+          line-height: 1.65;
+        }
+
+        .dirac-fleet-specs {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 20px;
+        }
+
+        .dirac-fleet-specs b {
+          min-height: 32px;
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          background: #ecfdf5;
+          color: #047857;
+          border: 1px solid #bbf7d0;
+          padding: 0 11px;
+          font-size: 12px;
+          font-weight: 850;
         }
 
         .dirac-kicker {
@@ -1616,6 +1921,7 @@ export default function Landing() {
 
           .dirac-hero-grid,
           .dirac-section-head,
+          .dirac-fleet-head,
           .dirac-feature-grid {
             grid-template-columns: 1fr;
           }
@@ -1652,9 +1958,15 @@ export default function Landing() {
             order: 2;
           }
 
+          .dirac-solution-selector.right {
+            order: 3;
+            grid-template-columns: 1fr;
+          }
+
           .dirac-solution-item,
           .dirac-solution-item:nth-child(n),
-          .dirac-solution-item.active {
+          .dirac-solution-item.active,
+          .dirac-solution-selector.right .dirac-solution-item.active {
             transform: none;
           }
 
@@ -1674,6 +1986,10 @@ export default function Landing() {
 
           .dirac-service-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .dirac-fleet-grid {
+            grid-template-columns: 1fr;
           }
 
           .dirac-scada-photo-body {
@@ -1751,6 +2067,15 @@ export default function Landing() {
             backdrop-filter: none;
           }
 
+          .dirac-solution-selector.right {
+            grid-template-columns: 1fr;
+          }
+
+          .dirac-solution-selector.right .dirac-solution-item {
+            min-height: 92px;
+            grid-template-columns: 42px 1fr;
+          }
+
           .dirac-solution-item {
             min-height: 92px;
             display: grid;
@@ -1775,6 +2100,10 @@ export default function Landing() {
             background: rgba(96, 165, 250, 0.12);
             color: #93c5fd;
             border: 1px solid rgba(147, 197, 253, 0.22);
+          }
+
+          .dirac-solution-selector.right .dirac-solution-item span {
+            grid-row: 1 / 3;
           }
 
           .dirac-solution-item strong {
@@ -1885,8 +2214,41 @@ export default function Landing() {
           }
 
           .dirac-section,
+          .dirac-fleet-section,
           .dirac-feature {
             padding: 70px 0;
+          }
+
+          .dirac-fleet-head {
+            gap: 16px;
+            margin-bottom: 22px;
+          }
+
+          .dirac-fleet-head h2 {
+            font-size: 34px;
+            line-height: 1.04;
+          }
+
+          .dirac-fleet-head p {
+            font-size: 15px;
+            line-height: 1.6;
+          }
+
+          .dirac-fleet-card {
+            grid-template-rows: minmax(220px, auto) auto;
+            border-radius: 22px;
+          }
+
+          .dirac-fleet-media {
+            min-height: 220px;
+          }
+
+          .dirac-fleet-content {
+            padding: 20px;
+          }
+
+          .dirac-fleet-content h3 {
+            font-size: 24px;
           }
 
           .dirac-feature-panel {
@@ -1948,6 +2310,7 @@ export default function Landing() {
           <div className="dirac-links">
             <a href="#servicios">Servicios</a>
             <a href="#solar">Solar</a>
+            <a href="#vehiculos">Vehículos</a>
             <a href="#sectores">Sectores</a>
           </div>
 
@@ -1963,6 +2326,8 @@ export default function Landing() {
             <HeroSolutionShowcase />
           </div>
         </section>
+
+        <FleetSection />
 
         <div className="dirac-ticker" aria-hidden="true">
           <div className="dirac-ticker-track">
