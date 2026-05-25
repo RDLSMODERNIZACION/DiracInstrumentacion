@@ -132,23 +132,21 @@ function HeroSolutionShowcase() {
           Soluciones eléctricas, solares y de control para <span>operar mejor</span>
         </h1>
         <p>
-          Seleccioná una solución y mirá el tipo de trabajo que realizamos para municipalidades e industrias.
+          La secuencia recorre las áreas principales de trabajo para municipalidades e industrias.
         </p>
       </div>
 
       <div className="dirac-solution-stage">
-        <div className="dirac-solution-selector" aria-label="Seleccionar solución">
+        <div className="dirac-solution-selector" aria-label="Secuencia de soluciones">
           {heroSolutions.map((item, index) => (
-            <button
+            <article
               key={item.title}
-              type="button"
-              className={index === activeSolution ? "active" : ""}
-              onClick={() => setActiveSolution(index)}
+              className={`dirac-solution-item ${index === activeSolution ? "active" : ""}`}
             >
               <span>{item.number}</span>
               <strong>{item.title}</strong>
               <small>{item.description}</small>
-            </button>
+            </article>
           ))}
         </div>
 
@@ -576,7 +574,7 @@ export default function Landing() {
           transform: none;
         }
 
-        .dirac-solution-selector button {
+        .dirac-solution-item {
           --lift: 0px;
           min-height: 84px;
           display: grid;
@@ -587,7 +585,9 @@ export default function Landing() {
           padding: 16px;
           border: 1px solid rgba(226, 232, 240, 0.16);
           border-radius: 18px;
-          cursor: pointer;
+          position: relative;
+          overflow: hidden;
+          cursor: default;
           background: rgba(16, 37, 63, 0.76);
           color: white;
           text-align: left;
@@ -596,32 +596,32 @@ export default function Landing() {
           transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
         }
 
-        .dirac-solution-selector button:nth-child(2) {
+        .dirac-solution-item:nth-child(2) {
           --lift: 0px;
           transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button:nth-child(3) {
+        .dirac-solution-item:nth-child(3) {
           --lift: 0px;
           transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button:nth-child(4) {
+        .dirac-solution-item:nth-child(4) {
           --lift: 0px;
           transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button:nth-child(5) {
+        .dirac-solution-item:nth-child(5) {
           --lift: 0px;
           transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button:nth-child(6) {
+        .dirac-solution-item:nth-child(6) {
           --lift: 0px;
           transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button span {
+        .dirac-solution-item span {
           grid-row: 1 / 3;
           width: 34px;
           height: 34px;
@@ -637,33 +637,49 @@ export default function Landing() {
           letter-spacing: 0.12em;
         }
 
-        .dirac-solution-selector button strong {
+        .dirac-solution-item strong {
           color: white;
           font-size: 19px;
           line-height: 1.05;
           letter-spacing: -0.03em;
         }
 
-        .dirac-solution-selector button small {
+        .dirac-solution-item small {
           max-width: 330px;
           color: rgba(226, 232, 240, 0.68);
           font-size: 12px;
           line-height: 1.42;
         }
 
-        .dirac-solution-selector button:hover,
-        .dirac-solution-selector button.active {
+        .dirac-solution-item.active {
           background: rgba(21, 53, 86, 0.92);
           border-color: rgba(125, 211, 252, 0.36);
         }
 
-        .dirac-solution-selector button.active {
+        .dirac-solution-item.active {
           box-shadow: inset 4px 0 0 var(--green), 0 24px 58px rgba(0, 0, 0, 0.26);
           transform: translateX(6px) translateY(var(--lift));
         }
 
-        .dirac-solution-selector button.active span {
+        .dirac-solution-item.active span {
           color: var(--green);
+        }
+
+        .dirac-solution-item.active::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 3px;
+          background: linear-gradient(90deg, var(--green), var(--sky));
+          transform-origin: left center;
+          animation: dirac-solution-progress 4.5s linear both;
+        }
+
+        @keyframes dirac-solution-progress {
+          from { transform: scaleX(0); }
+          to { transform: scaleX(1); }
         }
 
         .dirac-solution-preview {
@@ -728,6 +744,18 @@ export default function Landing() {
           min-height: 360px;
           object-fit: contain;
           background: white;
+          animation: dirac-preview-slide 0.72s ease both;
+        }
+
+        @keyframes dirac-preview-slide {
+          from {
+            opacity: 0;
+            transform: translateX(18px) scale(1.015);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0) scale(1);
+          }
         }
 
         .dirac-kicker {
@@ -1624,9 +1652,9 @@ export default function Landing() {
             order: 2;
           }
 
-          .dirac-solution-selector button,
-          .dirac-solution-selector button:nth-child(n),
-          .dirac-solution-selector button.active {
+          .dirac-solution-item,
+          .dirac-solution-item:nth-child(n),
+          .dirac-solution-item.active {
             transform: none;
           }
 
@@ -1723,7 +1751,7 @@ export default function Landing() {
             backdrop-filter: none;
           }
 
-          .dirac-solution-selector button {
+          .dirac-solution-item {
             min-height: 92px;
             display: grid;
             grid-template-columns: 42px 1fr;
@@ -1736,7 +1764,7 @@ export default function Landing() {
             box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
           }
 
-          .dirac-solution-selector button span {
+          .dirac-solution-item span {
             grid-row: 1 / 3;
             width: 38px;
             height: 38px;
@@ -1749,23 +1777,23 @@ export default function Landing() {
             border: 1px solid rgba(147, 197, 253, 0.22);
           }
 
-          .dirac-solution-selector button strong {
+          .dirac-solution-item strong {
             font-size: 19px;
             line-height: 1.05;
           }
 
-          .dirac-solution-selector button small {
+          .dirac-solution-item small {
             font-size: 13px;
             line-height: 1.45;
           }
 
-          .dirac-solution-selector button.active {
+          .dirac-solution-item.active {
             background: linear-gradient(135deg, rgba(20, 83, 45, 0.92), rgba(21, 53, 86, 0.94));
             border-color: rgba(134, 239, 172, 0.34);
             box-shadow: inset 4px 0 0 var(--green), 0 18px 44px rgba(0, 0, 0, 0.24);
           }
 
-          .dirac-solution-selector button.active span {
+          .dirac-solution-item.active span {
             color: #052e16;
             background: var(--mint);
             border-color: transparent;
