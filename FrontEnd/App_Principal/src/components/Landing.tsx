@@ -538,47 +538,99 @@ export default function Landing() {
         }
 
         .dirac-solution-stage {
+          position: relative;
+          min-height: 560px;
           display: grid;
-          grid-template-columns: minmax(520px, 0.92fr) minmax(420px, 1fr);
-          gap: 22px;
-          align-items: stretch;
+          grid-template-columns: minmax(310px, 360px) minmax(0, 1fr);
+          gap: 32px;
+          align-items: center;
+          isolation: isolate;
+        }
+
+        .dirac-solution-stage::before {
+          content: "";
+          position: absolute;
+          left: -18px;
+          right: -18px;
+          top: 32px;
+          bottom: 32px;
+          border-radius: 38px;
+          background:
+            radial-gradient(circle at 18% 32%, rgba(34, 197, 94, 0.18), transparent 34%),
+            radial-gradient(circle at 82% 20%, rgba(56, 189, 248, 0.18), transparent 34%),
+            rgba(255, 255, 255, 0.045);
+          border: 1px solid rgba(226, 232, 240, 0.1);
+          pointer-events: none;
+          z-index: -1;
         }
 
         .dirac-solution-selector {
+          position: relative;
+          left: auto;
+          top: auto;
+          z-index: 4;
+          width: 100%;
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          border: 1px solid rgba(226, 232, 240, 0.18);
-          border-radius: 22px;
-          overflow: hidden;
-          background: rgba(255, 255, 255, 0.06);
-          backdrop-filter: blur(18px);
+          grid-template-columns: 1fr;
+          gap: 10px;
+          transform: none;
         }
 
         .dirac-solution-selector button {
-          min-height: 168px;
+          --lift: 0px;
+          min-height: 84px;
           display: grid;
+          grid-template-columns: 38px 1fr;
           align-content: start;
-          gap: 12px;
-          padding: 26px;
-          border: 0;
-          border-right: 1px solid rgba(226, 232, 240, 0.16);
-          border-bottom: 1px solid rgba(226, 232, 240, 0.16);
+          align-items: center;
+          gap: 5px 13px;
+          padding: 16px;
+          border: 1px solid rgba(226, 232, 240, 0.16);
+          border-radius: 18px;
           cursor: pointer;
-          background: rgba(255, 255, 255, 0.035);
+          background: rgba(16, 37, 63, 0.76);
           color: white;
           text-align: left;
-          transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.18);
+          backdrop-filter: blur(18px);
+          transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
         }
 
-        .dirac-solution-selector button:nth-child(2n) {
-          border-right: 0;
+        .dirac-solution-selector button:nth-child(2) {
+          --lift: 0px;
+          transform: translateY(var(--lift));
         }
 
-        .dirac-solution-selector button:nth-last-child(-n + 2) {
-          border-bottom: 0;
+        .dirac-solution-selector button:nth-child(3) {
+          --lift: 0px;
+          transform: translateY(var(--lift));
+        }
+
+        .dirac-solution-selector button:nth-child(4) {
+          --lift: 0px;
+          transform: translateY(var(--lift));
+        }
+
+        .dirac-solution-selector button:nth-child(5) {
+          --lift: 0px;
+          transform: translateY(var(--lift));
+        }
+
+        .dirac-solution-selector button:nth-child(6) {
+          --lift: 0px;
+          transform: translateY(var(--lift));
         }
 
         .dirac-solution-selector button span {
+          grid-row: 1 / 3;
+          width: 34px;
+          height: 34px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          background: rgba(96, 165, 250, 0.1);
+          border: 1px solid rgba(147, 197, 253, 0.18);
           color: #60a5fa;
           font-size: 12px;
           font-weight: 950;
@@ -587,7 +639,7 @@ export default function Landing() {
 
         .dirac-solution-selector button strong {
           color: white;
-          font-size: 24px;
+          font-size: 19px;
           line-height: 1.05;
           letter-spacing: -0.03em;
         }
@@ -595,17 +647,19 @@ export default function Landing() {
         .dirac-solution-selector button small {
           max-width: 330px;
           color: rgba(226, 232, 240, 0.68);
-          font-size: 14px;
-          line-height: 1.55;
+          font-size: 12px;
+          line-height: 1.42;
         }
 
         .dirac-solution-selector button:hover,
         .dirac-solution-selector button.active {
-          background: rgba(255, 255, 255, 0.11);
+          background: rgba(21, 53, 86, 0.92);
+          border-color: rgba(125, 211, 252, 0.36);
         }
 
         .dirac-solution-selector button.active {
-          box-shadow: inset 4px 0 0 var(--green);
+          box-shadow: inset 4px 0 0 var(--green), 0 24px 58px rgba(0, 0, 0, 0.26);
+          transform: translateX(6px) translateY(var(--lift));
         }
 
         .dirac-solution-selector button.active span {
@@ -614,13 +668,16 @@ export default function Landing() {
 
         .dirac-solution-preview {
           min-width: 0;
+          width: 100%;
+          min-height: 540px;
+          margin-left: 0;
           display: grid;
           grid-template-rows: auto 1fr;
           overflow: hidden;
-          border-radius: 22px;
+          border-radius: 34px;
           border: 1px solid rgba(226, 232, 240, 0.18);
           background: rgba(255, 255, 255, 0.94);
-          box-shadow: 0 26px 80px rgba(0, 0, 0, 0.28);
+          box-shadow: 0 34px 100px rgba(0, 0, 0, 0.34);
         }
 
         .dirac-solution-preview-head {
@@ -1499,12 +1556,29 @@ export default function Landing() {
         .dirac-footer-inner {
           display: flex;
           justify-content: space-between;
+          align-items: center;
           gap: 16px;
           flex-wrap: wrap;
         }
 
         .dirac-footer strong {
           color: #0f172a;
+        }
+
+        .dirac-footer-contact {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .dirac-footer-contact a {
+          color: #0f172a;
+          font-weight: 700;
+        }
+
+        .dirac-footer-contact a:hover {
+          color: var(--blue);
         }
 
         @media (max-width: 980px) {
@@ -1528,7 +1602,38 @@ export default function Landing() {
           }
 
           .dirac-solution-stage {
+            min-height: auto;
+            display: grid;
             grid-template-columns: 1fr;
+            gap: 18px;
+          }
+
+          .dirac-solution-stage::before {
+            left: 0;
+            right: 0;
+            top: 6%;
+            bottom: 6%;
+          }
+
+          .dirac-solution-selector {
+            position: relative;
+            left: auto;
+            top: auto;
+            width: 100%;
+            transform: none;
+            order: 2;
+          }
+
+          .dirac-solution-selector button,
+          .dirac-solution-selector button:nth-child(n),
+          .dirac-solution-selector button.active {
+            transform: none;
+          }
+
+          .dirac-solution-preview {
+            width: 100%;
+            min-height: auto;
+            order: 1;
           }
 
           .dirac-tech-visual {
@@ -1578,52 +1683,96 @@ export default function Landing() {
 
           .dirac-hero-showcase {
             padding: 42px 0 54px;
-            gap: 24px;
+            gap: 22px;
           }
 
           .dirac-hero .dirac-hero-showcase-head h1 {
-            font-size: 38px;
-            line-height: 1.02;
+            font-size: 34px;
+            line-height: 1.03;
+            letter-spacing: -0.035em;
           }
 
           .dirac-hero-showcase-head p {
             font-size: 15px;
+            line-height: 1.55;
+          }
+
+          .dirac-solution-stage {
+            display: block;
+          }
+
+          .dirac-solution-stage::before {
+            left: -18px;
+            right: -18px;
+            top: -12px;
+            bottom: -12px;
+            border-radius: 26px;
+            background:
+              radial-gradient(circle at 12% 10%, rgba(34, 197, 94, 0.16), transparent 42%),
+              radial-gradient(circle at 88% 20%, rgba(56, 189, 248, 0.14), transparent 40%),
+              rgba(255, 255, 255, 0.035);
           }
 
           .dirac-solution-selector {
             grid-template-columns: 1fr;
-            border-radius: 18px;
+            gap: 10px;
+            order: 1;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            backdrop-filter: none;
           }
 
           .dirac-solution-selector button {
-            min-height: auto;
-            padding: 20px;
-            border-right: 0;
+            min-height: 92px;
+            display: grid;
+            grid-template-columns: 42px 1fr;
+            gap: 7px 13px;
+            align-content: center;
+            padding: 16px;
+            border-radius: 18px;
+            background: rgba(16, 37, 63, 0.82);
+            border-color: rgba(226, 232, 240, 0.14);
+            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.18);
           }
 
-          .dirac-solution-selector button:nth-last-child(-n + 2) {
-            border-bottom: 1px solid rgba(226, 232, 240, 0.16);
-          }
-
-          .dirac-solution-selector button:last-child {
-            border-bottom: 0;
+          .dirac-solution-selector button span {
+            grid-row: 1 / 3;
+            width: 38px;
+            height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            background: rgba(96, 165, 250, 0.12);
+            color: #93c5fd;
+            border: 1px solid rgba(147, 197, 253, 0.22);
           }
 
           .dirac-solution-selector button strong {
-            font-size: 21px;
+            font-size: 19px;
+            line-height: 1.05;
+          }
+
+          .dirac-solution-selector button small {
+            font-size: 13px;
+            line-height: 1.45;
+          }
+
+          .dirac-solution-selector button.active {
+            background: linear-gradient(135deg, rgba(20, 83, 45, 0.92), rgba(21, 53, 86, 0.94));
+            border-color: rgba(134, 239, 172, 0.34);
+            box-shadow: inset 4px 0 0 var(--green), 0 18px 44px rgba(0, 0, 0, 0.24);
+          }
+
+          .dirac-solution-selector button.active span {
+            color: #052e16;
+            background: var(--mint);
+            border-color: transparent;
           }
 
           .dirac-solution-preview {
-            border-radius: 18px;
-          }
-
-          .dirac-solution-preview-head {
-            display: grid;
-            padding: 18px;
-          }
-
-          .dirac-solution-preview img {
-            min-height: 240px;
+            display: none;
           }
 
           .dirac-hero h1 {
@@ -1915,8 +2064,18 @@ export default function Landing() {
 
       <footer className="dirac-footer">
         <div className="dirac-shell dirac-footer-inner">
-          <strong>DIRAC</strong>
-          <span>Energía solar · Telemetría · Automatización · Eficiencia energética</span>
+          <div>
+            <strong>DIRAC</strong>
+            <span> · Energía solar · Telemetría · Automatización · Eficiencia energética</span>
+          </div>
+          <div className="dirac-footer-contact">
+            <span>Contacto:</span>
+            <a href="tel:+542993251398">(299) 3251398</a>
+            <a href="tel:+542994292985">(299) 4292985</a>
+            <a href="mailto:administracion@diracserviciosenergia.com">
+              administracion@diracserviciosenergia.com
+            </a>
+          </div>
         </div>
       </footer>
     </div>
