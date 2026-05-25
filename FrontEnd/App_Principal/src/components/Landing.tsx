@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 const LOGO_SRC = "/img/logodirac.jpeg";
+const SCADA_PREVIEW_SRC = "/img/scada-preview.png";
 
 const services = [
   {
@@ -25,9 +26,9 @@ const services = [
   },
   {
     number: "04",
-    title: "Cargaderos",
+    title: "Luminaria solar",
     description:
-      "Control de usuarios, permisos, caudalímetros, válvulas, bombas, turnos y trazabilidad.",
+      "Luminarias solares, columnas, cámaras 4G y autonomía para accesos, predios y espacios públicos.",
   },
   {
     number: "05",
@@ -37,9 +38,9 @@ const services = [
   },
   {
     number: "06",
-    title: "Municipios e industrias",
+    title: "Transformadores",
     description:
-      "Soluciones para servicios públicos, plantas de agua, predios industriales y sistemas remotos.",
+      "Mantenimiento, inspección y diagnóstico de transformadores para mejorar disponibilidad y seguridad.",
   },
 ];
 
@@ -47,13 +48,139 @@ const tickerItems = [
   "Energía solar",
   "Telemetría",
   "Automatización",
-  "Cargaderos",
+  "Luminaria solar",
   "Eficiencia energética",
   "Municipalidades",
   "Industrias",
+  "Transformadores",
 ];
 
-const chartBars = [42, 58, 66, 54, 72, 86, 62, 92, 78, 70, 88, 96, 74, 84, 68, 90];
+const heroSolutions = [
+  {
+    number: "01",
+    title: "Energía solar",
+    description: "Paneles, baterías, luminarias solares y energía para puntos remotos.",
+    images: ["/img/paneles-solares.jpg", "/img/paneles-solares.jpeg"],
+  },
+  {
+    number: "02",
+    title: "Telemetría",
+    description: "Monitoreo remoto de energía, presión, nivel, caudal, alarmas y estados.",
+    images: ["/img/scada-preview.png"],
+  },
+  {
+    number: "03",
+    title: "Automatización",
+    description: "PLC, HMI, sensores, tableros y lógica de control para procesos críticos.",
+    images: ["/img/tableros-electricos.jpg", "/img/tableros-electricos.jpeg"],
+  },
+  {
+    number: "04",
+    title: "Luminaria solar",
+    description: "Iluminación autónoma para calles, caminos, plazas, predios y accesos.",
+    images: [
+      "/img/luminaria-solar.jpg",
+      "/img/luminaria-solar.jpeg",
+      "/img/luminaria-solar.png",
+      "/img/scada-preview.png",
+    ],
+  },
+  {
+    number: "05",
+    title: "Eficiencia energética",
+    description: "Medición de consumos, demanda, factor de potencia y oportunidades de ahorro.",
+    images: [
+      "/img/eficiencia-energetica.jpg",
+      "/img/eficiencia-energetica.jpeg",
+      "/img/eficiencia-energetica.png",
+      "/img/correccion-energia-reactiva.jpg",
+      "/img/correccion-energia-reactiva.jpeg",
+      "/img/correccion-energia-reactiva.png",
+    ],
+  },
+  {
+    number: "06",
+    title: "Mantenimiento de transformadores",
+    description: "Inspección, diagnóstico y mantenimiento preventivo para mayor disponibilidad.",
+    images: ["/img/mantenimiento-transformadores.jpg", "/img/mantenimiento-transformadores.jpeg"],
+  },
+];
+
+function HeroSolutionShowcase() {
+  const [activeSolution, setActiveSolution] = useState(0);
+  const [imageSourceIndex, setImageSourceIndex] = useState(0);
+  const solution = heroSolutions[activeSolution];
+  const imageSource = solution.images[imageSourceIndex] ?? SCADA_PREVIEW_SRC;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveSolution((current) => (current + 1) % heroSolutions.length);
+    }, 4500);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setImageSourceIndex(0);
+  }, [activeSolution]);
+
+  return (
+    <div className="dirac-hero-showcase">
+      <div className="dirac-hero-showcase-head">
+        <div className="dirac-kicker">Qué hacemos</div>
+        <h1>
+          Soluciones eléctricas, solares y de control para <span>operar mejor</span>
+        </h1>
+        <p>
+          Seleccioná una solución y mirá el tipo de trabajo que realizamos para municipalidades e industrias.
+        </p>
+      </div>
+
+      <div className="dirac-solution-stage">
+        <div className="dirac-solution-selector" aria-label="Seleccionar solución">
+          {heroSolutions.map((item, index) => (
+            <button
+              key={item.title}
+              type="button"
+              className={index === activeSolution ? "active" : ""}
+              onClick={() => setActiveSolution(index)}
+            >
+              <span>{item.number}</span>
+              <strong>{item.title}</strong>
+              <small>{item.description}</small>
+            </button>
+          ))}
+        </div>
+
+        <div className="dirac-solution-preview">
+          <div className="dirac-solution-preview-head">
+            <div>
+              <strong>{solution.title}</strong>
+              <span>{solution.description}</span>
+            </div>
+            <em>Solución</em>
+          </div>
+
+          <img
+            key={`${activeSolution}-${imageSourceIndex}`}
+            src={imageSource}
+            alt={solution.title}
+            onError={(event) => {
+              if (imageSourceIndex < solution.images.length - 1) {
+                setImageSourceIndex((current) => current + 1);
+                return;
+              }
+
+              if (event.currentTarget.src !== window.location.origin + SCADA_PREVIEW_SRC) {
+                event.currentTarget.src = SCADA_PREVIEW_SRC;
+              }
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Landing() {
   const sparkA = useRef<HTMLDivElement | null>(null);
@@ -62,38 +189,55 @@ export default function Landing() {
   useEffect(() => {
     let mouseX = window.innerWidth / 2;
     let mouseY = window.innerHeight / 2;
-    let separatedUntil = 0;
+    let centerX = mouseX;
+    let centerY = mouseY;
+    let movement = 0;
     let frame = 0;
 
-    const p1 = { x: mouseX - 180, y: mouseY - 110 };
-    const p2 = { x: mouseX + 180, y: mouseY + 110 };
+    const p1 = { x: mouseX - 80, y: mouseY - 40 };
+    const p2 = { x: mouseX + 80, y: mouseY + 40 };
 
     const onMove = (event: MouseEvent) => {
+      const delta = Math.hypot(event.clientX - mouseX, event.clientY - mouseY);
       mouseX = event.clientX;
       mouseY = event.clientY;
-      separatedUntil = performance.now() + 620;
+      movement = Math.min(1, movement + delta / 220);
     };
 
     const animate = () => {
-      const now = performance.now();
-      const separated = now < separatedUntil;
+      const t = performance.now() / 1000;
 
-      const target1X = separated ? mouseX - 180 : mouseX - 12;
-      const target1Y = separated ? mouseY - 110 : mouseY - 10;
-      const target2X = separated ? mouseX + 180 : mouseX + 12;
-      const target2Y = separated ? mouseY + 110 : mouseY + 10;
+      centerX += (mouseX - centerX) * 0.09;
+      centerY += (mouseY - centerY) * 0.09;
+      movement *= 0.965;
 
-      p1.x += (target1X - p1.x) * 0.075;
-      p1.y += (target1Y - p1.y) * 0.075;
-      p2.x += (target2X - p2.x) * 0.065;
-      p2.y += (target2Y - p2.y) * 0.065;
+      const meet = (Math.sin(t * 1.7) + 1) / 2;
+      const pulse = (Math.sin(t * 3.1) + Math.cos(t * 2.35)) * 0.5;
+      const distance = 22 + movement * 130 + (1 - meet) * 82 + pulse * 16;
+      const wobbleA = 24 + Math.sin(t * 2.8) * 18 + Math.cos(t * 4.1) * 9;
+      const wobbleB = 24 + Math.cos(t * 2.4) * 18 + Math.sin(t * 3.7) * 9;
+
+      const angle = t * 1.35 + Math.sin(t * 0.9) * 1.1;
+      const angleB = angle + Math.PI + Math.cos(t * 1.15) * 0.85;
+
+      const target1X = centerX + Math.cos(angle) * distance + Math.sin(t * 5.2) * wobbleA;
+      const target1Y = centerY + Math.sin(angle) * (distance * 0.72) + Math.cos(t * 4.4) * wobbleA;
+      const target2X = centerX + Math.cos(angleB) * (distance * 0.92) + Math.cos(t * 4.7) * wobbleB;
+      const target2Y = centerY + Math.sin(angleB) * (distance * 0.78) + Math.sin(t * 5.6) * wobbleB;
+
+      p1.x += (target1X - p1.x) * 0.085;
+      p1.y += (target1Y - p1.y) * 0.085;
+      p2.x += (target2X - p2.x) * 0.078;
+      p2.y += (target2Y - p2.y) * 0.078;
 
       if (sparkA.current) {
         sparkA.current.style.transform = `translate3d(${p1.x}px, ${p1.y}px, 0)`;
+        sparkA.current.style.opacity = `${0.72 + meet * 0.22}`;
       }
 
       if (sparkB.current) {
         sparkB.current.style.transform = `translate3d(${p2.x}px, ${p2.y}px, 0)`;
+        sparkB.current.style.opacity = `${0.68 + (1 - meet) * 0.24}`;
       }
 
       frame = requestAnimationFrame(animate);
@@ -354,6 +498,181 @@ export default function Landing() {
           padding: 72px 0 112px;
         }
 
+        .dirac-hero > .dirac-shell {
+          position: relative;
+          z-index: 2;
+        }
+
+        .dirac-hero-showcase {
+          min-height: calc(100svh - 74px);
+          display: grid;
+          align-content: center;
+          gap: 34px;
+          padding: 70px 0 76px;
+        }
+
+        .dirac-hero-showcase-head {
+          max-width: 980px;
+        }
+
+        .dirac-hero .dirac-hero-showcase-head h1 {
+          margin: 0;
+          max-width: 980px;
+          color: white;
+          font-size: clamp(42px, 5.4vw, 76px);
+          line-height: 0.98;
+          letter-spacing: -0.045em;
+          font-weight: 900;
+        }
+
+        .dirac-hero .dirac-hero-showcase-head h1 span {
+          color: #93c5fd;
+        }
+
+        .dirac-hero-showcase-head p {
+          margin: 18px 0 0;
+          max-width: 680px;
+          color: rgba(226, 232, 240, 0.72);
+          font-size: 17px;
+          line-height: 1.65;
+        }
+
+        .dirac-solution-stage {
+          display: grid;
+          grid-template-columns: minmax(520px, 0.92fr) minmax(420px, 1fr);
+          gap: 22px;
+          align-items: stretch;
+        }
+
+        .dirac-solution-selector {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          border: 1px solid rgba(226, 232, 240, 0.18);
+          border-radius: 22px;
+          overflow: hidden;
+          background: rgba(255, 255, 255, 0.06);
+          backdrop-filter: blur(18px);
+        }
+
+        .dirac-solution-selector button {
+          min-height: 168px;
+          display: grid;
+          align-content: start;
+          gap: 12px;
+          padding: 26px;
+          border: 0;
+          border-right: 1px solid rgba(226, 232, 240, 0.16);
+          border-bottom: 1px solid rgba(226, 232, 240, 0.16);
+          cursor: pointer;
+          background: rgba(255, 255, 255, 0.035);
+          color: white;
+          text-align: left;
+          transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .dirac-solution-selector button:nth-child(2n) {
+          border-right: 0;
+        }
+
+        .dirac-solution-selector button:nth-last-child(-n + 2) {
+          border-bottom: 0;
+        }
+
+        .dirac-solution-selector button span {
+          color: #60a5fa;
+          font-size: 12px;
+          font-weight: 950;
+          letter-spacing: 0.12em;
+        }
+
+        .dirac-solution-selector button strong {
+          color: white;
+          font-size: 24px;
+          line-height: 1.05;
+          letter-spacing: -0.03em;
+        }
+
+        .dirac-solution-selector button small {
+          max-width: 330px;
+          color: rgba(226, 232, 240, 0.68);
+          font-size: 14px;
+          line-height: 1.55;
+        }
+
+        .dirac-solution-selector button:hover,
+        .dirac-solution-selector button.active {
+          background: rgba(255, 255, 255, 0.11);
+        }
+
+        .dirac-solution-selector button.active {
+          box-shadow: inset 4px 0 0 var(--green);
+        }
+
+        .dirac-solution-selector button.active span {
+          color: var(--green);
+        }
+
+        .dirac-solution-preview {
+          min-width: 0;
+          display: grid;
+          grid-template-rows: auto 1fr;
+          overflow: hidden;
+          border-radius: 22px;
+          border: 1px solid rgba(226, 232, 240, 0.18);
+          background: rgba(255, 255, 255, 0.94);
+          box-shadow: 0 26px 80px rgba(0, 0, 0, 0.28);
+        }
+
+        .dirac-solution-preview-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 20px 22px;
+          border-bottom: 1px solid #e2e8f0;
+        }
+
+        .dirac-solution-preview-head strong {
+          display: block;
+          color: #020617;
+          font-size: 18px;
+          line-height: 1.1;
+        }
+
+        .dirac-solution-preview-head span {
+          display: block;
+          margin-top: 4px;
+          color: #64748b;
+          font-size: 13px;
+          line-height: 1.4;
+        }
+
+        .dirac-solution-preview-head em {
+          min-height: 34px;
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          background: #f0fdf4;
+          color: #15803d;
+          border: 1px solid #bbf7d0;
+          padding: 0 12px;
+          font-size: 12px;
+          font-style: normal;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          white-space: nowrap;
+        }
+
+        .dirac-solution-preview img {
+          display: block;
+          width: 100%;
+          height: 100%;
+          min-height: 360px;
+          object-fit: contain;
+          background: white;
+        }
+
         .dirac-kicker {
           display: inline-flex;
           align-items: center;
@@ -378,8 +697,8 @@ export default function Landing() {
           margin: 0;
           max-width: 760px;
           color: white;
-          font-size: clamp(48px, 7vw, 92px);
-          line-height: 0.92;
+          font-size: clamp(42px, 5.8vw, 78px);
+          line-height: 0.96;
           letter-spacing: -0.04em;
           font-weight: 900;
         }
@@ -865,6 +1184,171 @@ export default function Landing() {
           line-height: 1.62;
         }
 
+        .dirac-scada-photo {
+          margin-top: 34px;
+          border: 1px solid var(--line);
+          border-radius: 24px;
+          background: white;
+          padding: 18px;
+          box-shadow: 0 26px 70px rgba(15, 23, 42, 0.1);
+          overflow: hidden;
+        }
+
+        .dirac-scada-photo-head {
+          min-height: 54px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          padding: 0 4px 16px;
+          border-bottom: 1px solid var(--line);
+          margin-bottom: 18px;
+        }
+
+        .dirac-scada-photo-head strong {
+          display: block;
+          color: #020617;
+          font-size: 18px;
+        }
+
+        .dirac-scada-photo-head span {
+          display: block;
+          margin-top: 3px;
+          color: var(--muted);
+          font-size: 13px;
+        }
+
+        .dirac-scada-photo-live {
+          min-height: 34px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border-radius: 999px;
+          background: #f0fdf4;
+          color: #15803d;
+          border: 1px solid #bbf7d0;
+          padding: 0 12px;
+          font-size: 12px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          white-space: nowrap;
+        }
+
+        .dirac-scada-photo-live::before {
+          content: "";
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--green);
+          box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.14);
+        }
+
+        .dirac-scada-photo-frame {
+          position: relative;
+          aspect-ratio: 16 / 9;
+          border-radius: 18px;
+          overflow: hidden;
+          background: white;
+          border: 1px solid #e2e8f0;
+        }
+
+        .dirac-scada-photo-frame img {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          object-position: center;
+          position: relative;
+          z-index: 2;
+        }
+
+        .dirac-scada-photo-body {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 270px;
+          gap: 16px;
+          align-items: stretch;
+        }
+
+        .dirac-showcase-controls {
+          display: grid;
+          align-content: start;
+          gap: 10px;
+        }
+
+        .dirac-showcase-controls button {
+          width: 100%;
+          min-height: 58px;
+          display: grid;
+          grid-template-columns: 34px 1fr;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border: 1px solid #dbe4ee;
+          border-radius: 14px;
+          cursor: pointer;
+          background: #f8fafc;
+          color: #334155;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1.25;
+          text-align: left;
+          transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+        }
+
+        .dirac-showcase-controls button span {
+          width: 30px;
+          height: 30px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 10px;
+          background: white;
+          color: var(--blue);
+          border: 1px solid #dbe4ee;
+          font-size: 11px;
+          font-weight: 950;
+          line-height: 1;
+        }
+
+        .dirac-showcase-controls button.active {
+          color: #0f172a;
+          background: #eef6ff;
+          border-color: #93c5fd;
+          transform: translateX(-2px);
+        }
+
+        .dirac-showcase-controls button.active span {
+          color: white;
+          background: linear-gradient(135deg, var(--blue), var(--green));
+          border-color: transparent;
+        }
+
+        .dirac-scada-glow {
+          position: absolute;
+          width: 180px;
+          height: 180px;
+          border-radius: 50%;
+          filter: blur(34px);
+          opacity: 0.42;
+          pointer-events: none;
+          z-index: 3;
+          mix-blend-mode: screen;
+        }
+
+        .dirac-scada-glow.one {
+          left: 12%;
+          bottom: 12%;
+          background: rgba(56, 189, 248, 0.55);
+        }
+
+        .dirac-scada-glow.two {
+          right: 14%;
+          top: 18%;
+          background: rgba(34, 197, 94, 0.42);
+        }
+
         .dirac-feature {
           background: #0b1f3a;
           color: white;
@@ -949,105 +1433,6 @@ export default function Landing() {
           color: rgba(226, 232, 240, 0.68);
           font-size: 14px;
           line-height: 1.65;
-        }
-
-        .dirac-dashboard {
-          margin-top: 34px;
-          border: 1px solid var(--line);
-          border-radius: 20px;
-          background: white;
-          padding: 24px;
-          box-shadow: 0 20px 54px rgba(15, 23, 42, 0.08);
-        }
-
-        .dirac-dashboard-head {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          border-bottom: 1px solid var(--line);
-          padding-bottom: 18px;
-          margin-bottom: 20px;
-        }
-
-        .dirac-dashboard-head strong {
-          color: #0f172a;
-        }
-
-        .dirac-live {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          color: #16a34a;
-          font-size: 12px;
-          font-weight: 850;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-
-        .dirac-live::before {
-          content: "";
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--green);
-          box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.14);
-        }
-
-        .dirac-metrics {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .dirac-metric {
-          background: #f8fafc;
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          padding: 16px;
-        }
-
-        .dirac-metric span {
-          display: block;
-          color: var(--muted);
-          font-size: 11px;
-          font-weight: 850;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          margin-bottom: 9px;
-        }
-
-        .dirac-metric strong {
-          display: block;
-          color: var(--blue);
-          font-size: 27px;
-          line-height: 1;
-          letter-spacing: -0.03em;
-        }
-
-        .dirac-bars {
-          height: 128px;
-          display: flex;
-          align-items: end;
-          gap: 7px;
-          padding-top: 12px;
-          border-top: 1px solid var(--line);
-        }
-
-        .dirac-bars i {
-          flex: 1;
-          height: var(--h);
-          min-width: 6px;
-          border-radius: 6px 6px 0 0;
-          background: linear-gradient(180deg, #60a5fa, var(--blue));
-          animation: dirac-bar-rise 0.7s ease both;
-          animation-delay: var(--delay);
-        }
-
-        @keyframes dirac-bar-rise {
-          from { transform: scaleY(0); transform-origin: bottom; }
-          to { transform: scaleY(1); transform-origin: bottom; }
         }
 
         .dirac-sector-grid {
@@ -1137,6 +1522,15 @@ export default function Landing() {
             padding-bottom: 210px;
           }
 
+          .dirac-hero-showcase {
+            min-height: auto;
+            padding: 56px 0 64px;
+          }
+
+          .dirac-solution-stage {
+            grid-template-columns: 1fr;
+          }
+
           .dirac-tech-visual {
             min-height: 460px;
           }
@@ -1149,8 +1543,12 @@ export default function Landing() {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .dirac-metrics {
-            grid-template-columns: repeat(2, 1fr);
+          .dirac-scada-photo-body {
+            grid-template-columns: 1fr;
+          }
+
+          .dirac-showcase-controls {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 
@@ -1176,6 +1574,56 @@ export default function Landing() {
             grid-template-columns: 1fr;
             padding: 48px 0 230px;
             gap: 34px;
+          }
+
+          .dirac-hero-showcase {
+            padding: 42px 0 54px;
+            gap: 24px;
+          }
+
+          .dirac-hero .dirac-hero-showcase-head h1 {
+            font-size: 38px;
+            line-height: 1.02;
+          }
+
+          .dirac-hero-showcase-head p {
+            font-size: 15px;
+          }
+
+          .dirac-solution-selector {
+            grid-template-columns: 1fr;
+            border-radius: 18px;
+          }
+
+          .dirac-solution-selector button {
+            min-height: auto;
+            padding: 20px;
+            border-right: 0;
+          }
+
+          .dirac-solution-selector button:nth-last-child(-n + 2) {
+            border-bottom: 1px solid rgba(226, 232, 240, 0.16);
+          }
+
+          .dirac-solution-selector button:last-child {
+            border-bottom: 0;
+          }
+
+          .dirac-solution-selector button strong {
+            font-size: 21px;
+          }
+
+          .dirac-solution-preview {
+            border-radius: 18px;
+          }
+
+          .dirac-solution-preview-head {
+            display: grid;
+            padding: 18px;
+          }
+
+          .dirac-solution-preview img {
+            min-height: 240px;
           }
 
           .dirac-hero h1 {
@@ -1250,8 +1698,7 @@ export default function Landing() {
           }
 
           .dirac-service-grid,
-          .dirac-sector-grid,
-          .dirac-metrics {
+          .dirac-sector-grid {
             grid-template-columns: 1fr;
           }
 
@@ -1267,6 +1714,38 @@ export default function Landing() {
 
           .dirac-feature-panel {
             height: 300px;
+          }
+
+          .dirac-scada-photo {
+            padding: 14px;
+            border-radius: 18px;
+          }
+
+          .dirac-scada-photo-head {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .dirac-scada-photo-frame {
+            aspect-ratio: 4 / 3;
+            border-radius: 14px;
+          }
+
+          .dirac-scada-photo-frame img {
+            height: 100%;
+            object-fit: contain;
+          }
+
+          .dirac-showcase-controls {
+            grid-template-columns: 1fr;
+          }
+
+          .dirac-showcase-controls button.active {
+            transform: none;
+          }
+
+          .dirac-scada-glow {
+            display: none;
           }
 
           .dirac-cta-inner {
@@ -1303,109 +1782,8 @@ export default function Landing() {
 
       <main id="inicio">
         <section className="dirac-hero">
-          <div className="dirac-shell dirac-hero-grid">
-            <div>
-              <div className="dirac-kicker">Energía limpia & tecnología operativa</div>
-
-              <h1>
-                Infraestructura conectada para <span>operar mejor</span>
-              </h1>
-
-              <p className="dirac-lead">
-                DIRAC integra energía solar, telemetría, automatización de cargaderos y
-                eficiencia energética para municipalidades e industrias.
-              </p>
-
-              <div className="dirac-actions">
-                <Link className="dirac-primary-btn" to="/login">
-                  Iniciar sesión
-                </Link>
-                <a className="dirac-secondary-btn" href="#servicios">
-                  Ver soluciones
-                </a>
-              </div>
-
-              <div className="dirac-tags">
-                <span className="dirac-tag green">Energía solar</span>
-                <span className="dirac-tag">Telemetría</span>
-                <span className="dirac-tag">Automatización</span>
-                <span className="dirac-tag">Eficiencia energética</span>
-              </div>
-            </div>
-
-            <div className="dirac-tech-visual" aria-label="Sistema solar y telemetría">
-              <div className="dirac-orb" />
-
-              <div className="dirac-panel-array">
-                {Array.from({ length: 24 }).map((_, index) => (
-                  <i
-                    className="dirac-panel-cell"
-                    key={index}
-                    style={{ "--delay": `${(index % 6) * 0.16}s` } as CSSProperties}
-                  />
-                ))}
-              </div>
-
-              <div className="dirac-panel-stand" />
-
-              <div className="dirac-node one" />
-              <div className="dirac-node green two" />
-              <div className="dirac-node three" />
-              <div className="dirac-field-line a" />
-              <div className="dirac-field-line b" />
-
-              <div className="dirac-control-card">
-                <div className="dirac-control-screen" />
-                <div className="dirac-light-row">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-                <div className="dirac-mini-line">
-                  <span />
-                </div>
-                <div className="dirac-mini-line">
-                  <span style={{ width: "48%" }} />
-                </div>
-                <div className="dirac-mini-line">
-                  <span style={{ width: "82%", background: "#22c55e" }} />
-                </div>
-              </div>
-
-              <div className="dirac-floating-metrics">
-                <div>
-                  <span>Solar</span>
-                  <strong>4.8 kW</strong>
-                </div>
-                <div>
-                  <span>Caudal</span>
-                  <strong>42 m³/h</strong>
-                </div>
-                <div>
-                  <span>Ahorro</span>
-                  <strong>14%</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="dirac-hero-stats">
-            <div className="dirac-hero-stat">
-              <strong>24/7</strong>
-              <span>Monitoreo remoto</span>
-            </div>
-            <div className="dirac-hero-stat">
-              <strong>kWh</strong>
-              <span>Eficiencia energética</span>
-            </div>
-            <div className="dirac-hero-stat">
-              <strong>m³</strong>
-              <span>Control de cargaderos</span>
-            </div>
-            <div className="dirac-hero-stat">
-              <strong>Solar</strong>
-              <span>Autonomía en campo</span>
-            </div>
+          <div className="dirac-shell">
+            <HeroSolutionShowcase />
           </div>
         </section>
 
@@ -1421,12 +1799,11 @@ export default function Landing() {
           <div className="dirac-shell">
             <div className="dirac-section-head">
               <div>
-                <div className="dirac-kicker">Soluciones</div>
-                <h2>Medir, controlar y ahorrar con una arquitectura simple.</h2>
+                <div className="dirac-kicker">Qué hacemos</div>
+                <h2>Energía solar, tableros, telemetría y eficiencia energética.</h2>
               </div>
               <p className="dirac-section-text">
-                Unimos campo, tableros, comunicaciones, datos y mantenimiento para que
-                la operación sea visible y trazable.
+                Instalamos, automatizamos y monitoreamos sistemas eléctricos para municipios e industrias.
               </p>
             </div>
 
@@ -1438,46 +1815,6 @@ export default function Landing() {
                   <p>{service.description}</p>
                 </article>
               ))}
-            </div>
-
-            <div className="dirac-dashboard">
-              <div className="dirac-dashboard-head">
-                <strong>DIRAC - Telemetría operativa</strong>
-                <span className="dirac-live">En vivo</span>
-              </div>
-
-              <div className="dirac-metrics">
-                <div className="dirac-metric">
-                  <span>Generación solar</span>
-                  <strong>4.8 kW</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Demanda actual</span>
-                  <strong>186 kW</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Caudal cargadero</span>
-                  <strong>42 m³/h</strong>
-                </div>
-                <div className="dirac-metric">
-                  <span>Ahorro estimado</span>
-                  <strong>14%</strong>
-                </div>
-              </div>
-
-              <div className="dirac-bars">
-                {chartBars.map((value, index) => (
-                  <i
-                    key={index}
-                    style={
-                      {
-                        "--h": `${value}%`,
-                        "--delay": `${index * 0.035}s`,
-                      } as CSSProperties
-                    }
-                  />
-                ))}
-              </div>
             </div>
           </div>
         </section>
@@ -1511,7 +1848,7 @@ export default function Landing() {
                   <div className="dirac-dot" />
                   <div>
                     <h3>Iluminación y seguridad</h3>
-                    <p>Luminarias solares y cámaras 4G para accesos, predios y cargaderos.</p>
+                    <p>Luminarias solares y cámaras 4G para accesos, predios, caminos y espacios públicos.</p>
                   </div>
                 </div>
 
@@ -1544,7 +1881,7 @@ export default function Landing() {
               <article className="dirac-sector">
                 <h3>Municipalidades</h3>
                 <p>
-                  Telemetría de agua, cargaderos automatizados, bombeos, tanques,
+                  Telemetría de agua, bombeos, tanques, luminaria solar,
                   cámaras solares, alumbrado, tableros, reportes y eficiencia energética.
                 </p>
               </article>
@@ -1565,7 +1902,7 @@ export default function Landing() {
             <div>
               <h2>Ingresar al panel DIRAC</h2>
               <p>
-                Accedé al monitoreo de telemetría, energía, cargaderos y activos operativos.
+                Accedé al monitoreo de telemetría, energía y activos operativos.
               </p>
             </div>
 
