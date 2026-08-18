@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -105,8 +105,8 @@ function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
 
 function halfByType(t?: string) {
   const tt = (t || "").toLowerCase();
-  if (tt === "tank") return 66;
-  if (tt === "pump") return 26;
+  if (tt === "tank") return 145;
+  if (tt === "pump") return 30;
   if (tt === "manifold") return 55;
   if (tt === "valve") return 14;
   return 20;
@@ -114,8 +114,8 @@ function halfByType(t?: string) {
 
 function heightByType(t?: string) {
   const tt = (t || "").toLowerCase();
-  if (tt === "tank") return 92;
-  if (tt === "pump") return 52;
+  if (tt === "tank") return 210;
+  if (tt === "pump") return 60;
   if (tt === "manifold") return 74;
   if (tt === "valve") return 28;
   return 40;
@@ -335,6 +335,7 @@ export default function InfraDiagram() {
       level_pct: toNumber(n.level_pct),
       alarma: n.alarma ?? null,
       in_maintenance: (n as any).in_maintenance ?? false,
+      orientacion: (n as any).orientacion ?? null,
       location_id: (n as any).location_id ?? null,
       location_name: (n as any).location_name ?? null,
 
@@ -441,7 +442,7 @@ export default function InfraDiagram() {
     return Object.values(groups)
       .filter((g) => g.nodes.length > 0)
       .map((g) => {
-        const bbox = computeBBox(g.nodes, 80);
+        const bbox = computeBBox(g.nodes, 48);
         return { key: g.key, name: g.name, bbox, location_id: g.location_id };
       });
   }, [nodes]);
@@ -622,6 +623,15 @@ export default function InfraDiagram() {
     setLocationDrawerOpen(true);
   }, []);
 
+  const valveNodeIds = useMemo(
+    () => new Set(nodes.filter((n) => n.type === "valve").map((n) => n.id)),
+    [nodes]
+  );
+
+  const visibleNodes = useMemo(
+    () => nodes.filter((n) => n.type !== "valve"),
+    [nodes]
+  );
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
     return simulateFlow(edges, nodesById);
   }, [edges, nodesById]);
@@ -719,7 +729,7 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={4.0} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+          <TransformWrapper initialScale={3.35} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -773,8 +783,8 @@ export default function InfraDiagram() {
                   </linearGradient>
                 </defs>
 
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.6} />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#f3f6f9" />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.03} />
 
                 {locationGroups.map((g) => (
                   <g
@@ -792,16 +802,17 @@ export default function InfraDiagram() {
                       height={g.bbox.h}
                       rx={18}
                       ry={18}
-                      fill="#f8fafc"
-                      stroke="#cbd5e1"
-                      strokeWidth={1}
+                      fill="#f8fafc" fillOpacity={0.38} fillOpacity={0.55}
+                      fillOpacity={0.62}
+                      stroke="#d6dee8"
+                      strokeWidth={1.2}
                     />
                     <text
                       x={g.bbox.minx + 16}
                       y={g.bbox.miny + 24}
-                      style={{ fontSize: 12, fontWeight: 600, fill: "#64748b", pointerEvents: "none" }}
+                      style={{ fontSize: 14, fontWeight: 800, fill: "#334155", pointerEvents: "none" }}
                     >
-                      {g.name}
+                      {g.name === "Sin ubicación" ? "" : g.name}
                     </text>
                   </g>
                 ))}
@@ -823,7 +834,7 @@ export default function InfraDiagram() {
                   />
                 ))}
 
-                {nodes.map((n) =>
+                {visibleNodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
                       key={n.id}
@@ -889,7 +900,7 @@ export default function InfraDiagram() {
 
                 {editMode &&
                   connectMode &&
-                  nodes.map((n) => {
+                  visibleNodes.map((n) => {
                     const { inPorts, outPorts } = buildPorts(n);
                     return (
                       <g key={`ports-${n.id}`}>
@@ -967,3 +978,10 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
+
+
+
+
+
+

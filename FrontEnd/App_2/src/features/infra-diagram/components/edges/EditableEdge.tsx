@@ -1,4 +1,4 @@
-// src/features/infra-diagram/components/edges/EditableEdge.tsx
+﻿// src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 
@@ -37,7 +37,7 @@ function clamp(n: number, lo: number, hi: number) {
 /* =========================
    DEBUG / LOGS
 ========================= */
-const DEBUG_EDGE = true; // 👈 dejalo true para ver qué pasa, luego pasalo a false
+const DEBUG_EDGE = false; // 👈 dejalo true para ver qué pasa, luego pasalo a false
 
 function logEdge(tag: string, payload?: any) {
   if (!DEBUG_EDGE) return;
@@ -113,16 +113,16 @@ function getDefaultPort(n: UINode, side: Side) {
   let y = (n as any).y;
 
   if (t === "pump") {
-    const rOuter = 26;
-    const portOffset = 6;
+    const rOuter = 30;
+    const portOffset = 16;
     x = side === "in" ? (n as any).x - rOuter - portOffset : (n as any).x + rOuter + portOffset;
     y = (n as any).y;
     return { x, y };
   }
 
   if (t === "tank") {
-    const halfW = 66;
-    const portOffset = 6;
+    const halfW = 145;
+    const portOffset = 16;
     x = side === "in" ? (n as any).x - halfW - portOffset : (n as any).x + halfW + portOffset;
     y = (n as any).y;
     return { x, y };
@@ -130,7 +130,7 @@ function getDefaultPort(n: UINode, side: Side) {
 
  if (t === "manifold") {
   const W = 230;     // mismo que el nodo
-  const portOffset = 6;
+  const portOffset = 16;
   x = side === "in" ? (n as any).x - W / 2 - portOffset : (n as any).x + W / 2 + portOffset;
   y = (n as any).y;  // ✅ centro
   return { x, y };
@@ -160,8 +160,8 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   const pid = String(portId);
 
   if ((n as any).type === "tank") {
-    const W = 132;
-    const H = 100;
+    const W = 290;
+    const H = 210;
     const OUT = 6;
 
     const leftX = (n as any).x - W / 2 - OUT;
@@ -192,10 +192,10 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   }
 
   if ((n as any).type === "pump") {
-    const rOuter = 26;
-    const portOffset = 6;
-    if (pid.startsWith("L")) return { x: (n as any).x - rOuter - portOffset, y: (n as any).y };
-    if (pid.startsWith("R")) return { x: (n as any).x + rOuter + portOffset, y: (n as any).y };
+    const rOuter = 30;
+    const portOffset = 16;
+    if (pid.startsWith("L")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x - 84, y: (n as any).y } : { x: (n as any).x - 58, y: (n as any).y + 16 }; }
+    if (pid.startsWith("R")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x + 84, y: (n as any).y } : { x: (n as any).x + 58, y: (n as any).y - 3 }; }
     if (pid === "T1") return { x: (n as any).x, y: (n as any).y - rOuter - portOffset };
     if (pid === "B1") return { x: (n as any).x, y: (n as any).y + rOuter + portOffset };
     return getDefaultPort(n, side);
@@ -815,3 +815,10 @@ export default function EditableEdge({
     </g>
   );
 }
+
+
+
+
+
+
+

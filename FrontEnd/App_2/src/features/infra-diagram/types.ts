@@ -1,4 +1,4 @@
-// =======================
+﻿// =======================
 // Tipos backend (DTO)
 // =======================
 
@@ -101,6 +101,7 @@ export type CombinedNodeDTO = {
   state?: string | null;
   level_pct?: number | string | null;
   alarma?: string | null;
+  orientacion?: "vertical" | "horizontal" | null;
 
   // ✅ meta viene solo en valves (pero lo declaramos opcional)
   meta?: ValveMeta | null;
@@ -143,6 +144,7 @@ type BaseExtras = {
   state?: string | null;
   level_pct?: number | null;
   alarma?: string | null;
+  orientacion?: "vertical" | "horizontal" | null;
 };
 
 // Nodo base UI
@@ -303,3 +305,4 @@ export type Tip = {
   x: number;
   y: number;
 };
+

@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { PumpNode } from "../../types";
 
@@ -26,7 +26,6 @@ export default function PumpNodeView({
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
 
   const orientation: PumpOrientation =
-    ((n as any).orientacion as PumpOrientation) ||
     ((n as any).meta?.orientation as PumpOrientation) ||
     ((n as any).orientation as PumpOrientation) ||
     "vertical";
@@ -132,4 +131,3 @@ export default function PumpNodeView({
     </g>
   );
 }
-

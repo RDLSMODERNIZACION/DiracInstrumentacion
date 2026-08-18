@@ -24,8 +24,9 @@ export default function TankNodeView({
 }) {
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
 
-  const W = 290;
-  const H = 210;
+  const W = 280;
+  const H = 200;
+
   const isOnline = n.online === true;
   const rawAlarm = String(n.alarma || "").toLowerCase();
   const critical = ["critico", "crítico", "critical"].includes(rawAlarm);
@@ -36,25 +37,24 @@ export default function TankNodeView({
   const level = Math.max(0, Math.min(100, levelRaw ?? 0));
   const tankName = n.name?.trim() || `Tanque ${n.id}`;
 
-  const bodyX = 18;
-  const bodyY = 42;
-  const bodyW = W - 36;
-  const bodyH = H - 62;
-  const topR = 18;
+  const bodyX = 12;
+  const bodyY = 36;
+  const bodyW = W - 24;
+  const bodyH = H - 50;
   const waterH = bodyH * level / 100;
   const waterY = bodyY + bodyH - waterH;
-  const clipId = `tank-v7-${String(n.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  const clipId = `tank-industrial-v5-${String(n.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 
   const border = !isOnline ? "#94a3b8" : critical ? "#ef4444" : warning ? "#f59e0b" : "#3b82f6";
   const ports = n.ports ?? getNodePorts("tank");
 
   const portPos = (pid: PortId) => {
     switch (pid) {
-      case "L1": return { x: 0, y: H / 2 - 18 };
-      case "L2": return { x: 0, y: H / 2 + 36 };
-      case "R1": return { x: W, y: H / 2 - 36 };
+      case "L1": return { x: 0, y: H / 2 };
+      case "L2": return { x: 0, y: H - 38 };
+      case "R1": return { x: W, y: 58 };
       case "R2": return { x: W, y: H / 2 };
-      case "R3": return { x: W, y: H / 2 + 36 };
+      case "R3": return { x: W, y: H - 38 };
       case "T1": return { x: W / 2, y: 0 };
       case "B1": return { x: W / 2, y: H };
       default: return { x: W, y: H / 2 };
@@ -63,7 +63,7 @@ export default function TankNodeView({
 
   const Port = ({ pid }: { pid: PortId }) => {
     const p = portPos(pid);
-    return <circle cx={p.x} cy={p.y} r={5} fill="#f8fafc" stroke="#64748b" strokeWidth={1.5} opacity={0.9} />;
+    return <circle cx={p.x} cy={p.y} r={5} fill="#f8fafc" stroke="#64748b" strokeWidth={1.5} opacity={0.88} />;
   };
 
   const tipLines = [
@@ -71,7 +71,6 @@ export default function TankNodeView({
     `Nivel: ${level.toFixed(0)}%`,
     `Estado: ${isOnline ? "Online" : "Sin comunicación"}`,
     hasAlarm ? `Alarma: ${n.alarma}` : "Alarma: no",
-    "Entrada superior / salida inferior habilitadas visualmente",
   ];
 
   return (
@@ -89,46 +88,72 @@ export default function TankNodeView({
     >
       <defs>
         <clipPath id={clipId}>
-          <path d={`M ${bodyX + topR} ${bodyY} H ${bodyX + bodyW - topR} Q ${bodyX + bodyW} ${bodyY} ${bodyX + bodyW} ${bodyY + topR} V ${bodyY + bodyH - topR} Q ${bodyX + bodyW} ${bodyY + bodyH} ${bodyX + bodyW - topR} ${bodyY + bodyH} H ${bodyX + topR} Q ${bodyX} ${bodyY + bodyH} ${bodyX} ${bodyY + bodyH - topR} V ${bodyY + topR} Q ${bodyX} ${bodyY} ${bodyX + topR} ${bodyY} Z`} />
+          <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH} rx={18} />
         </clipPath>
       </defs>
 
-      {/* placa */}
-      <rect x={W/2 - 78} y={6} width={156} height={22} rx={6} fill="#e2e8f0" stroke="#cbd5e1" strokeWidth={1} />
-      <text x={W / 2} y={22} textAnchor="middle" fill="#0f172a" style={{ fontSize: 18, fontWeight: 850, pointerEvents: "none" }}>
+      {/* placa de nombre más industrial */}
+      <rect
+        x={W / 2 - 72}
+        y={6}
+        width={144}
+        height={20}
+        rx={6}
+        fill="#e2e8f0"
+        stroke="#cbd5e1"
+        strokeWidth={1}
+      />
+      <text
+        x={W / 2}
+        y={20}
+        textAnchor="middle"
+        fill="#0f172a"
+        style={{ fontSize: 18, fontWeight: 850, pointerEvents: "none" }}
+      >
         {tankName}
       </text>
 
-      {/* conexiones visuales del tanque */}
-      <line x1={W/2} y1={0} x2={W/2} y2={bodyY} stroke="#64748b" strokeWidth={6} strokeLinecap="round" />
-      <line x1={W/2} y1={bodyY + bodyH} x2={W/2} y2={H} stroke="#64748b" strokeWidth={6} strokeLinecap="round" />
-      <line x1={0} y1={H/2 - 18} x2={bodyX} y2={H/2 - 18} stroke="#64748b" strokeWidth={5} strokeLinecap="round" />
-      <line x1={0} y1={H/2 + 36} x2={bodyX} y2={H/2 + 36} stroke="#64748b" strokeWidth={5} strokeLinecap="round" />
-      <line x1={bodyX + bodyW} y1={H/2 - 36} x2={W} y2={H/2 - 36} stroke="#64748b" strokeWidth={5} strokeLinecap="round" />
-      <line x1={bodyX + bodyW} y1={H/2} x2={W} y2={H/2} stroke="#64748b" strokeWidth={5} strokeLinecap="round" />
-      <line x1={bodyX + bodyW} y1={H/2 + 36} x2={W} y2={H/2 + 36} stroke="#64748b" strokeWidth={5} strokeLinecap="round" />
-
-      <path
-        d={`M ${bodyX + topR} ${bodyY} H ${bodyX + bodyW - topR} Q ${bodyX + bodyW} ${bodyY} ${bodyX + bodyW} ${bodyY + topR} V ${bodyY + bodyH - topR} Q ${bodyX + bodyW} ${bodyY + bodyH} ${bodyX + bodyW - topR} ${bodyY + bodyH} H ${bodyX + topR} Q ${bodyX} ${bodyY + bodyH} ${bodyX} ${bodyY + bodyH - topR} V ${bodyY + topR} Q ${bodyX} ${bodyY} ${bodyX + topR} ${bodyY} Z`}
+      {/* cuerpo */}
+      <rect
+        x={bodyX}
+        y={bodyY}
+        width={bodyW}
+        height={bodyH}
+        rx={18}
         fill="#f8fafc"
         stroke={border}
-        strokeWidth={3}
+        strokeWidth={2.9}
       />
 
-      <rect x={bodyX + 3} y={bodyY + 3} width={bodyW - 6} height={18} rx={8} fill="#eef2f7" opacity={0.95} />
+      {/* franja superior técnica */}
+      <rect
+        x={bodyX + 1}
+        y={bodyY + 1}
+        width={bodyW - 2}
+        height={18}
+        rx={10}
+        fill="#eef2f7"
+        opacity={0.95}
+      />
 
       <g clipPath={`url(#${clipId})`}>
         <rect x={bodyX} y={waterY} width={bodyW} height={waterH} fill="#60a5fa" opacity={0.96} />
         <rect x={bodyX} y={waterY} width={bodyW} height={5} fill="#2563eb" opacity={0.68} />
-        <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH * .23} fill="#ffffff" opacity={0.1} />
+        <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH * .24} fill="#ffffff" opacity={0.12} />
       </g>
 
-      <text x={W/2} y={bodyY + bodyH/2 + 15} textAnchor="middle" fill="#0f172a" style={{ fontSize: 42, fontWeight: 950, pointerEvents: "none" }}>
+      <text
+        x={W / 2}
+        y={bodyY + bodyH / 2 + 14}
+        textAnchor="middle"
+        fill="#0f172a"
+        style={{ fontSize: 40, fontWeight: 950, pointerEvents: "none" }}
+      >
         {level.toFixed(0)}%
       </text>
 
-      <circle cx={26} cy={50} r={5.5} fill={isOnline ? "#22c55e" : "#94a3b8"} />
-      {hasAlarm && <circle cx={W - 26} cy={50} r={7} fill={critical ? "#ef4444" : "#f59e0b"} />}
+      <circle cx={24} cy={48} r={5.5} fill={isOnline ? "#22c55e" : "#94a3b8"} />
+      {hasAlarm && <circle cx={W - 24} cy={48} r={7} fill={critical ? "#ef4444" : "#f59e0b"} />}
 
       {(ports.in ?? []).map((pid) => <Port key={`in-${pid}`} pid={pid} />)}
       {(ports.out ?? []).map((pid) => <Port key={`out-${pid}`} pid={pid} />)}
