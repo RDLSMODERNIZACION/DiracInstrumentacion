@@ -1,25 +1,18 @@
-WEB PRINCIPAL -> PROXY /admin
+FIX REWRITE ADMIN - DOMINIO ESTABLE
 
-Este parche se aplica en el proyecto que sirve:
-www.diracserviciosenergia.com
+Reemplaza la URL temporal de deployment por:
+https://dirac-admin.vercel.app
 
-Repo:
-RDLSMODERNIZACION/DiracInstrumentacion
-carpeta:
-FrontEnd/App_Principal
+Aplicar desde:
+DiracInstrumentacion\FrontEnd\App_Principal
 
-Ejemplo:
+.\APLICAR.ps1
 
-.\APLICAR.ps1 -AdminUrl "https://TU-PROYECTO-ADMIN.vercel.app"
-
-Crea vercel.json con:
- /admin        -> admin Vercel /admin
- /admin/:path* -> admin Vercel /admin/:path*
-
-Después:
+Luego:
+git diff
 git add .
-git commit -m "Publicar admin bajo dominio principal"
+git commit -m "Usar dominio estable del admin"
 git push
 
-IMPORTANTE:
-Usá la URL de producción del proyecto admin en Vercel, no una URL de preview con hash.
+Después del deploy, probar:
+https://www.diracserviciosenergia.com/admin

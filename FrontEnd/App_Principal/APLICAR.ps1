@@ -1,12 +1,7 @@
-param(
-  [Parameter(Mandatory=$true)]
-  [string]$AdminUrl
-)
-
 $ErrorActionPreference="Stop"
-
-python ".\tools\aplicar_rewrite_admin.py" $AdminUrl
-
+if (!(Test-Path ".\vercel.json")) {
+  throw "Ejecutá este script desde FrontEnd/App_Principal."
+}
+python ".\tools\aplicar_rewrite_admin_estable.py"
 Write-Host ""
-Write-Host "Rewrite /admin configurado." -ForegroundColor Green
-Write-Host "Ahora hace commit/push de la web principal." -ForegroundColor Cyan
+Write-Host "Rewrite actualizado al dominio estable del admin." -ForegroundColor Green

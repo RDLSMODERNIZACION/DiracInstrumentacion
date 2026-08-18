@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/admin",
-      "destination": "https://dirac-admin-5irp03cir-tecnologiainnovacions-projects.vercel.app/admin"
+      "destination": "https://dirac-admin.vercel.app/admin"
     },
     {
       "source": "/admin/:path*",
-      "destination": "https://dirac-admin-5irp03cir-tecnologiainnovacions-projects.vercel.app/admin/:path*"
+      "destination": "https://dirac-admin.vercel.app/admin/:path*"
     }
   ]
 }
