@@ -81,6 +81,7 @@ export default function ManifoldNodeView({
 
   const hasPressureSignal = pSig != null;
   const hasFlowSignal = qSig != null;
+  const hasAnySignal = hasPressureSignal || hasFlowSignal;
 
   const pUnit = prettyUnit(pSig?.unit, "bar");
   const qUnit = prettyUnit(qSig?.unit, "m³/h");
@@ -167,6 +168,28 @@ export default function ManifoldNodeView({
   const cy = h / 2;
   const showBoth = !!pText && !!qText;
 
+  // Si no tiene ningún sensor configurado, no mostramos nada visible.
+  if (!hasAnySignal) {
+    return (
+      <g
+        transform={`translate(${n.x - w / 2}, ${n.y - h / 2})`}
+        onPointerDown={drag.onPointerDown}
+        onPointerMove={drag.onPointerMove}
+        onPointerUp={drag.onPointerUp}
+        onMouseLeave={hideTip}
+        onClick={onClick}
+        style={{ cursor: enabled ? "move" : "default" }}
+      >
+        <rect
+          width={w}
+          height={h}
+          fill="transparent"
+          style={{ pointerEvents: "all" }}
+        />
+      </g>
+    );
+  }
+
   return (
     <g
       transform={`translate(${n.x - w / 2}, ${n.y - h / 2})`}
@@ -216,62 +239,52 @@ export default function ManifoldNodeView({
         strokeLinecap="round"
       />
 
-      <rect
-        x={18}
-        y={cy - 19}
-        width={w - 36}
-        height={38}
-        rx={8}
-        fill="#ffffff"
-        fillOpacity={0.96}
-      />
-
       {showBoth ? (
         <>
           <g>
             <text
-              x={35}
-              y={cy + 5}
+              x={28}
+              y={cy + 6}
               fill={pAlarm ? "#dc2626" : mutedColor}
-              style={{ fontSize: 12, fontWeight: 800 }}
+              style={{ fontSize: 14, fontWeight: 800 }}
             >
               P
             </text>
 
             <text
-              x={51}
-              y={cy + 5}
+              x={46}
+              y={cy + 6}
               fill={pAlarm ? "#dc2626" : normalColor}
-              style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.1 }}
+              style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0.1 }}
             >
               {pText}
             </text>
           </g>
 
           <line
-            x1={119}
-            y1={cy - 10}
-            x2={119}
-            y2={cy + 10}
+            x1={124}
+            y1={cy - 11}
+            x2={124}
+            y2={cy + 11}
             stroke="#cbd5e1"
             strokeWidth={1}
           />
 
           <g>
             <text
-              x={130}
-              y={cy + 5}
+              x={136}
+              y={cy + 6}
               fill={qAlarm ? "#dc2626" : mutedColor}
-              style={{ fontSize: 12, fontWeight: 800 }}
+              style={{ fontSize: 14, fontWeight: 800 }}
             >
               Q
             </text>
 
             <text
-              x={146}
-              y={cy + 5}
+              x={154}
+              y={cy + 6}
               fill={qAlarm ? "#dc2626" : normalColor}
-              style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.1 }}
+              style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0.1 }}
             >
               {qText}
             </text>
@@ -281,18 +294,18 @@ export default function ManifoldNodeView({
         <>
           <text
             x={70}
-            y={cy + 5}
+            y={cy + 6}
             fill={pAlarm ? "#dc2626" : mutedColor}
-            style={{ fontSize: 12, fontWeight: 800 }}
+            style={{ fontSize: 14, fontWeight: 800 }}
           >
             P
           </text>
 
           <text
-            x={88}
-            y={cy + 5}
+            x={90}
+            y={cy + 6}
             fill={pAlarm ? "#dc2626" : normalColor}
-            style={{ fontSize: 15, fontWeight: 800 }}
+            style={{ fontSize: 18, fontWeight: 800 }}
           >
             {pText}
           </text>
@@ -300,37 +313,27 @@ export default function ManifoldNodeView({
       ) : qText ? (
         <>
           <text
-            x={67}
-            y={cy + 5}
+            x={68}
+            y={cy + 6}
             fill={qAlarm ? "#dc2626" : mutedColor}
-            style={{ fontSize: 12, fontWeight: 800 }}
+            style={{ fontSize: 14, fontWeight: 800 }}
           >
             Q
           </text>
 
           <text
-            x={85}
-            y={cy + 5}
+            x={88}
+            y={cy + 6}
             fill={qAlarm ? "#dc2626" : normalColor}
-            style={{ fontSize: 15, fontWeight: 800 }}
+            style={{ fontSize: 18, fontWeight: 800 }}
           >
             {qText}
           </text>
         </>
-      ) : (
-        <text
-          x={w / 2}
-          y={cy + 5}
-          textAnchor="middle"
-          fill="#94a3b8"
-          style={{ fontSize: 12, fontWeight: 700 }}
-        >
-          SIN INSTRUMENTACIÓN
-        </text>
-      )}
+      ) : null}
 
       <circle
-        cx={w - 25}
+        cx={w - 16}
         cy={cy - 14}
         r={3.5}
         fill={
