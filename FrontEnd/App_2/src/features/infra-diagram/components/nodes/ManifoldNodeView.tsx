@@ -79,15 +79,24 @@ export default function ManifoldNodeView({
   const pSig = (n as any).signals?.pressure ?? null;
   const qSig = (n as any).signals?.flow ?? null;
 
-  const hasPressureSignal = pSig != null;
-  const hasFlowSignal = qSig != null;
+  // Una fila en manifold_signals puede existir como placeholder sin sensor físico configurado.
+  // Solo consideramos que hay sensor si tiene node_id o tag asociado.
+  const hasConfiguredSignal = (sig: any) => {
+    if (!sig) return false;
+    const nodeId = String(sig?.node_id ?? "").trim();
+    const tag = String(sig?.tag ?? "").trim();
+    return nodeId.length > 0 || tag.length > 0;
+  };
+
+  const hasPressureSignal = hasConfiguredSignal(pSig);
+  const hasFlowSignal = hasConfiguredSignal(qSig);
   const hasAnySignal = hasPressureSignal || hasFlowSignal;
 
   const pUnit = prettyUnit(pSig?.unit, "bar");
   const qUnit = prettyUnit(qSig?.unit, "m³/h");
 
-  const pValRaw = pSig?.value ?? pSig?.v ?? null;
-  const qValRaw = qSig?.value ?? qSig?.v ?? null;
+  const pValRaw = hasPressureSignal ? (pSig?.value ?? pSig?.v ?? null) : null;
+  const qValRaw = hasFlowSignal ? (qSig?.value ?? qSig?.v ?? null) : null;
 
   const pVal = formatValue(pValRaw, 1);
   const qVal = formatValue(qValRaw, 1);
