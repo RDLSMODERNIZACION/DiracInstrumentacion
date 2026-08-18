@@ -160,42 +160,40 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   const pid = String(portId);
 
   if ((n as any).type === "tank") {
-    const W = 290;
-    const H = 210;
-    const OUT = 6;
+    const W = 300;
+    const H = 220;
 
-    const leftX = (n as any).x - W / 2 - OUT;
-    const rightX = (n as any).x + W / 2 + OUT;
-
-    const topY = (n as any).y - H * 0.22;
-    const midY = (n as any).y;
-    const botY = (n as any).y + H * 0.22;
+    const leftX = (n as any).x - W / 2;
+    const rightX = (n as any).x + W / 2;
+    const topY = (n as any).y - H / 2;
+    const bottomY = (n as any).y + H / 2;
 
     switch (pid) {
-      case "L1":
-        return { x: leftX, y: midY };
-      case "L2":
-        return { x: leftX, y: botY };
-      case "R1":
-        return { x: rightX, y: topY };
-      case "R2":
-        return { x: rightX, y: midY };
-      case "R3":
-        return { x: rightX, y: botY };
-      case "T1":
-        return { x: (n as any).x, y: (n as any).y - H / 2 - OUT };
-      case "B1":
-        return { x: (n as any).x, y: (n as any).y + H / 2 + OUT };
+      case "L1": return { x: leftX, y: (n as any).y - 45 };
+      case "L2": return { x: leftX, y: (n as any).y };
+      case "L3": return { x: leftX, y: (n as any).y + 45 };
+
+      case "R1": return { x: rightX, y: (n as any).y - 45 };
+      case "R2": return { x: rightX, y: (n as any).y };
+      case "R3": return { x: rightX, y: (n as any).y + 45 };
+
+      case "T1": return { x: (n as any).x - 70, y: topY };
+      case "T2": return { x: (n as any).x, y: topY };
+      case "T3": return { x: (n as any).x + 70, y: topY };
+
+      case "B1": return { x: (n as any).x - 70, y: bottomY };
+      case "B2": return { x: (n as any).x, y: bottomY };
+      case "B3": return { x: (n as any).x + 70, y: bottomY };
+
       default:
         return getDefaultPort(n, side);
     }
   }
-
   if ((n as any).type === "pump") {
     const rOuter = 30;
     const portOffset = 16;
-    if (pid.startsWith("L")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x - 84, y: (n as any).y } : { x: (n as any).x - 58, y: (n as any).y + 16 }; }
-    if (pid.startsWith("R")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x + 84, y: (n as any).y } : { x: (n as any).x + 58, y: (n as any).y - 3 }; }
+    if (pid.startsWith("L")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x + 88, y: (n as any).y + 12 } : { x: (n as any).x + 58, y: (n as any).y + 18 }; }
+    if (pid.startsWith("R")) { const o = ((n as any).orientacion ?? (n as any).meta?.orientation ?? (n as any).orientation ?? "vertical"); return o === "horizontal" ? { x: (n as any).x + 26, y: (n as any).y - 54 } : { x: (n as any).x, y: (n as any).y - 72 }; }
     if (pid === "T1") return { x: (n as any).x, y: (n as any).y - rOuter - portOffset };
     if (pid === "B1") return { x: (n as any).x, y: (n as any).y + rOuter + portOffset };
     return getDefaultPort(n, side);
@@ -815,6 +813,8 @@ export default function EditableEdge({
     </g>
   );
 }
+
+
 
 
 

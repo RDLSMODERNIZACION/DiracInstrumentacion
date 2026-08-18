@@ -18,13 +18,13 @@ export type ValveMeta = {
 // Puertos normalizados (extensible)
 export type PortId =
   | "L1"
-  | "L2"
+  | "L2"`r`n  | "L3"
   | "R1"
   | "R2"
   | "R3"
   | "R4"
-  | "T1"
-  | "B1";
+  | "T1"`r`n  | "T2"`r`n  | "T3"
+  | "B1"`r`n  | "B2"`r`n  | "B3";
 
 // ✅ NUEVO: Señal de manifold (viene dentro de `signals`)
 export type ManifoldSignalDTO = {
@@ -101,6 +101,7 @@ export type CombinedNodeDTO = {
   state?: string | null;
   level_pct?: number | string | null;
   alarma?: string | null;
+  categoria?: "tanque" | "pozo" | null;
   orientacion?: "vertical" | "horizontal" | null;
 
   // ✅ meta viene solo en valves (pero lo declaramos opcional)
@@ -144,6 +145,7 @@ type BaseExtras = {
   state?: string | null;
   level_pct?: number | null;
   alarma?: string | null;
+  categoria?: "tanque" | "pozo" | null;
   orientacion?: "vertical" | "horizontal" | null;
 };
 
@@ -305,4 +307,5 @@ export type Tip = {
   x: number;
   y: number;
 };
+
 

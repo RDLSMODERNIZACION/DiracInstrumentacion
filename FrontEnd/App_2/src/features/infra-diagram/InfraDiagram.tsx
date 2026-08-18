@@ -130,31 +130,68 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 }
 
 function buildPorts(n: UINode) {
+  const { ins, outs } = getNodePorts(n);
+
+  if (n.type === "tank") {
+    const halfW = 150;
+    const halfH = 110;
+
+    const pos: Record<string, { x: number; y: number }> = {
+      L1: { x: n.x - halfW, y: n.y - 45 },
+      L2: { x: n.x - halfW, y: n.y },
+      L3: { x: n.x - halfW, y: n.y + 45 },
+
+      R1: { x: n.x + halfW, y: n.y - 45 },
+      R2: { x: n.x + halfW, y: n.y },
+      R3: { x: n.x + halfW, y: n.y + 45 },
+
+      T1: { x: n.x - 70, y: n.y - halfH },
+      T2: { x: n.x, y: n.y - halfH },
+      T3: { x: n.x + 70, y: n.y - halfH },
+
+      B1: { x: n.x - 70, y: n.y + halfH },
+      B2: { x: n.x, y: n.y + halfH },
+      B3: { x: n.x + 70, y: n.y + halfH },
+    };
+
+    return {
+      inPorts: ins.map((id) => ({
+        portId: id,
+        side: "in" as const,
+        ...(pos[id] ?? { x: n.x - halfW, y: n.y }),
+      })),
+      outPorts: outs.map((id) => ({
+        portId: id,
+        side: "out" as const,
+        ...(pos[id] ?? { x: n.x + halfW, y: n.y }),
+      })),
+    };
+  }
+
   const off = 6;
   const half = halfByType(n.type);
   const h = heightByType(n.type);
   const span = Math.max(18, h * 0.6);
 
-  const { ins, outs } = getNodePorts(n);
   const inOffs = spreadOffsets(ins.length, span);
   const outOffs = spreadOffsets(outs.length, span);
 
-  const inPorts = ins.map((id, i) => ({
+  const inPorts = ins.map((id, idx) => ({
     portId: id,
     side: "in" as const,
     x: n.x - half - off,
-    y: n.y + inOffs[i],
+    y: n.y + inOffs[idx],
   }));
-  const outPorts = outs.map((id, i) => ({
+
+  const outPorts = outs.map((id, idx) => ({
     portId: id,
     side: "out" as const,
     x: n.x + half + off,
-    y: n.y + outOffs[i],
+    y: n.y + outOffs[idx],
   }));
 
   return { inPorts, outPorts };
 }
-
 /** =========================
  *  FLOW SIM (simple, dirigido)
  *  ========================= */
@@ -334,6 +371,7 @@ export default function InfraDiagram() {
       state: n.state ?? null,
       level_pct: toNumber(n.level_pct),
       alarma: n.alarma ?? null,
+      categoria: (n as any).categoria ?? null,
       in_maintenance: (n as any).in_maintenance ?? false,
       orientacion: (n as any).orientacion ?? null,
       location_id: (n as any).location_id ?? null,
@@ -978,6 +1016,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
