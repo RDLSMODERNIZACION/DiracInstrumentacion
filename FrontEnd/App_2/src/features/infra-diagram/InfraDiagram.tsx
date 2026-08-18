@@ -604,7 +604,7 @@ export default function InfraDiagram() {
         setConnectFrom(null);
         setSelectedEdgeId(null);
         setOpsOpen(false);
-        setLocationDrawerOpen(false);
+        /* LocationDrawer desactivado */
         setSelectedLocation(null);
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedEdgeId != null && editMode) {
         e.preventDefault();
@@ -658,7 +658,7 @@ export default function InfraDiagram() {
 
   const handleLocationClick = useCallback((g: LocationGroup) => {
     setSelectedLocation({ id: g.location_id, name: g.name });
-    setLocationDrawerOpen(true);
+    /* LocationDrawer desactivado */
   }, []);
 
   const valveNodeIds = useMemo(
@@ -827,7 +827,7 @@ export default function InfraDiagram() {
                 {locationGroups.map((g) => (
                   <g
                     key={`loc-bg-${g.key}`}
-                    style={{ cursor: "pointer" }}
+                    style={{ cursor: "default" }}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleLocationClick(g);
@@ -974,7 +974,7 @@ export default function InfraDiagram() {
                               e.stopPropagation();
                               setSelectedEdgeId(null);
                               setOpsOpen(false);
-                              setLocationDrawerOpen(false);
+                              /* LocationDrawer desactivado */
                               setConnectFrom({ nodeId: n.id, side: "out", portId: p.portId, x: p.x, y: p.y });
                               const pt = clientToSvgPoint(e);
                               if (pt) setMouseSvg(pt);
@@ -1008,7 +1008,7 @@ export default function InfraDiagram() {
       <LocationDrawer
         open={locationDrawerOpen}
         onClose={() => {
-          setLocationDrawerOpen(false);
+          /* LocationDrawer desactivado */
           setSelectedLocation(null);
         }}
         location={selectedLocation}
@@ -1016,6 +1016,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
