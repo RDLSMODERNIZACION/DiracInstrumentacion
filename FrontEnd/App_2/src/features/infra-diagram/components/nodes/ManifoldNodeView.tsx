@@ -13,46 +13,32 @@ function formatValue(v: any, decimals = 1) {
   return n.toFixed(decimals);
 }
 
-function Flange({
-  x,
-  y,
-  side,
-  r = 10,
-  neck = 10,
-  active,
-  alarm,
-}: {
-  x: number;
-  y: number;
-  side: "left" | "right";
-  r?: number;
-  neck?: number;
-  active: boolean;
-  alarm: boolean;
-}) {
-  const stroke = alarm ? "#ef4444" : active ? "#22c55e" : "#64748b";
-  const neckX = side === "left" ? x : x - neck;
+function prettyUnit(unit: any, fallback: string) {
+  const raw = String(unit ?? fallback).trim();
+  const normalized = raw.toLowerCase();
 
-  return (
-    <g>
-      <rect x={neckX} y={y - 5} width={neck} height={10} rx={3} ry={3} fill="#94a3b8" opacity={0.9} />
-      <circle cx={x} cy={y} r={r} fill="#e5e7eb" stroke={stroke} strokeWidth={2.5} />
-      <circle cx={x} cy={y} r={r - 3.5} fill="none" stroke="#94a3b8" strokeWidth={1.5} opacity={0.9} />
-      {[0, 60, 120, 180, 240, 300].map((a) => {
-        const rad = (a * Math.PI) / 180;
-        return (
-          <circle
-            key={a}
-            cx={x + Math.cos(rad) * (r - 2.6)}
-            cy={y + Math.sin(rad) * (r - 2.6)}
-            r={1.6}
-            fill="#475569"
-            opacity={0.95}
-          />
-        );
-      })}
-    </g>
-  );
+  if (
+    normalized === "mts3/h" ||
+    normalized === "m3/h" ||
+    normalized === "m³/h" ||
+    normalized === "mt3/h"
+  ) {
+    return "m³/h";
+  }
+
+  if (
+    normalized === "mts3/s" ||
+    normalized === "m3/s" ||
+    normalized === "m³/s"
+  ) {
+    return "m³/s";
+  }
+
+  if (normalized === "l/s" || normalized === "lts/s") {
+    return "l/s";
+  }
+
+  return raw;
 }
 
 export default function ManifoldNodeView({
@@ -69,21 +55,35 @@ export default function ManifoldNodeView({
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
-  showTip: (e: React.MouseEvent, content: { title: string; lines: string[] }) => void;
+  showTip: (
+    e: React.MouseEvent,
+    content: { title: string; lines: string[] }
+  ) => void;
   hideTip: () => void;
   enabled?: boolean;
   onClick?: () => void;
 }) {
-  const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
+  const drag = useNodeDragCommon(
+    n,
+    getPos,
+    setPos,
+    onDragEnd,
+    hideTip,
+    enabled
+  );
 
+  // Mantenemos 230x86 para no romper las conexiones actuales.
   const w = 230;
   const h = 86;
 
   const pSig = (n as any).signals?.pressure ?? null;
   const qSig = (n as any).signals?.flow ?? null;
 
-  const pUnit = String(pSig?.unit ?? "bar").trim() || "bar";
-  const qUnit = String(qSig?.unit ?? "mts3/h").trim() || "mts3/h";
+  const hasPressureSignal = pSig != null;
+  const hasFlowSignal = qSig != null;
+
+  const pUnit = prettyUnit(pSig?.unit, "bar");
+  const qUnit = prettyUnit(qSig?.unit, "m³/h");
 
   const pValRaw = pSig?.value ?? pSig?.v ?? null;
   const qValRaw = qSig?.value ?? qSig?.v ?? null;
@@ -91,14 +91,14 @@ export default function ManifoldNodeView({
   const pVal = formatValue(pValRaw, 1);
   const qVal = formatValue(qValRaw, 1);
 
-  const hasValue = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
-  const connected = (n as any).online === true ? true : (n as any).online === false ? false : hasValue;
+  const hasAnyValue = isFiniteNumber(pValRaw) || isFiniteNumber(qValRaw);
 
-  const pTextVal = pVal == null ? `-- ${pUnit}` : `${pVal} ${pUnit}`;
-  const qTextVal = qVal == null ? `-- ${qUnit}` : `${qVal} ${qUnit}`;
-
-  const pTextShow = connected ? pTextVal : `-- ${pUnit}`;
-  const qTextShow = connected ? qTextVal : `-- ${qUnit}`;
+  const connected =
+    (n as any).online === true
+      ? true
+      : (n as any).online === false
+      ? false
+      : hasAnyValue;
 
   const pMin = pSig?.min_value;
   const pMax = pSig?.max_value;
@@ -110,40 +110,62 @@ export default function ManifoldNodeView({
 
   const pAlarm =
     Number.isFinite(pNum) &&
-    ((pMin != null && Number.isFinite(Number(pMin)) && pNum < Number(pMin)) ||
-      (pMax != null && Number.isFinite(Number(pMax)) && pNum > Number(pMax)));
+    ((pMin != null &&
+      Number.isFinite(Number(pMin)) &&
+      pNum < Number(pMin)) ||
+      (pMax != null &&
+        Number.isFinite(Number(pMax)) &&
+        pNum > Number(pMax)));
 
   const qAlarm =
     Number.isFinite(qNum) &&
-    ((qMin != null && Number.isFinite(Number(qMin)) && qNum < Number(qMin)) ||
-      (qMax != null && Number.isFinite(Number(qMax)) && qNum > Number(qMax)));
+    ((qMin != null &&
+      Number.isFinite(Number(qMin)) &&
+      qNum < Number(qMin)) ||
+      (qMax != null &&
+        Number.isFinite(Number(qMax)) &&
+        qNum > Number(qMax)));
 
-  const alarm = !!(pAlarm || qAlarm);
+  const pText = !hasPressureSignal
+    ? null
+    : !connected
+    ? "SIN DATOS"
+    : pVal == null
+    ? "SIN DATOS"
+    : `${pVal} ${pUnit}`;
+
+  const qText = !hasFlowSignal
+    ? null
+    : !connected
+    ? "SIN DATOS"
+    : qVal == null
+    ? "SIN DATOS"
+    : `${qVal} ${qUnit}`;
 
   const tipLines = useMemo(() => {
-    return [
-      `ID: ${n.id ?? "—"}`,
-      `Presión: ${pTextShow}`,
-      `Caudal: ${qTextShow}`,
-    ];
-  }, [n.id, pTextShow, qTextShow]);
+    const lines = [`ID: ${n.id ?? "—"}`];
 
-  const stroke = alarm ? "#ef4444" : connected ? "#22c55e" : "#475569";
-  const strokeW = alarm ? 3 : connected ? 3 : 2;
-  const fill = connected ? "url(#lgSteel)" : "url(#lgSteelDim)";
-  const filterId = alarm ? "glowRed" : connected ? "glowGreen" : undefined;
+    if (hasPressureSignal) {
+      lines.push(`Presión: ${pText ?? "—"}`);
+    }
 
-  const rowH = 28;
-  const gapY = 10;
-  const startY = (h - (rowH * 2 + gapY)) / 2;
+    if (hasFlowSignal) {
+      lines.push(`Caudal: ${qText ?? "—"}`);
+    }
 
-  const leftPad = 18;
-  const badgeW = 36;
-  const badgeH = 22;
-  const valueX = leftPad + badgeW + 12;
+    if (!connected) {
+      lines.push("Estado: Sin comunicación");
+    }
 
-  const valueFont = 19;
-  const badgeFont = 13;
+    return lines;
+  }, [n.id, hasPressureSignal, hasFlowSignal, pText, qText, connected]);
+
+  const normalColor = connected ? "#0f172a" : "#94a3b8";
+  const mutedColor = connected ? "#64748b" : "#cbd5e1";
+  const lineColor = connected ? "#3b82f6" : "#94a3b8";
+
+  const cy = h / 2;
+  const showBoth = !!pText && !!qText;
 
   return (
     <g
@@ -151,146 +173,174 @@ export default function ManifoldNodeView({
       onPointerDown={drag.onPointerDown}
       onPointerMove={drag.onPointerMove}
       onPointerUp={drag.onPointerUp}
-      onMouseEnter={(e) => showTip(e, { title: "P / Q", lines: tipLines })}
-      onMouseMove={(e) => showTip(e, { title: "P / Q", lines: tipLines })}
+      onMouseEnter={(e) =>
+        showTip(e, {
+          title: "Medición de línea",
+          lines: tipLines,
+        })
+      }
+      onMouseMove={(e) =>
+        showTip(e, {
+          title: "Medición de línea",
+          lines: tipLines,
+        })
+      }
       onMouseLeave={hideTip}
       onClick={onClick}
-      className="node-shadow"
       style={{ cursor: enabled ? "move" : "default" }}
     >
-      <defs>
-        <linearGradient id="lgSteelDim" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#cbd5e1" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.55" />
-        </linearGradient>
-
-        <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="2.2" result="blur" />
-          <feColorMatrix
-            in="blur"
-            type="matrix"
-            values="
-              0 0 0 0 0
-              0 1 0 0 0
-              0 0 0 0 0
-              0 0 0 0.8 0"
-            result="green"
-          />
-          <feMerge>
-            <feMergeNode in="green" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-
-        <filter id="glowRed" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="2.2" result="blur" />
-          <feColorMatrix
-            in="blur"
-            type="matrix"
-            values="
-              1 0 0 0 0
-              0 0 0 0 0
-              0 0 0 0 0
-              0 0 0 0.9 0"
-            result="red"
-          />
-          <feMerge>
-            <feMergeNode in="red" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-
-      <Flange x={0} y={h / 2} side="left" active={connected} alarm={alarm} />
-      <Flange x={w} y={h / 2} side="right" active={connected} alarm={alarm} />
-
       <rect
         width={w}
         height={h}
-        rx={18}
-        ry={18}
-        fill={fill}
-        stroke={stroke}
-        strokeWidth={strokeW}
-        filter={filterId ? `url(#${filterId})` : undefined}
+        fill="transparent"
+        style={{ pointerEvents: "all" }}
       />
+
+      <line
+        x1={0}
+        y1={cy}
+        x2={18}
+        y2={cy}
+        stroke={lineColor}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+
+      <line
+        x1={w - 18}
+        y1={cy}
+        x2={w}
+        y2={cy}
+        stroke={lineColor}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+
+      <rect
+        x={18}
+        y={cy - 19}
+        width={w - 36}
+        height={38}
+        rx={8}
+        fill="#ffffff"
+        fillOpacity={0.96}
+      />
+
+      {showBoth ? (
+        <>
+          <g>
+            <text
+              x={35}
+              y={cy + 5}
+              fill={pAlarm ? "#dc2626" : mutedColor}
+              style={{ fontSize: 12, fontWeight: 800 }}
+            >
+              P
+            </text>
+
+            <text
+              x={51}
+              y={cy + 5}
+              fill={pAlarm ? "#dc2626" : normalColor}
+              style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.1 }}
+            >
+              {pText}
+            </text>
+          </g>
+
+          <line
+            x1={119}
+            y1={cy - 10}
+            x2={119}
+            y2={cy + 10}
+            stroke="#cbd5e1"
+            strokeWidth={1}
+          />
+
+          <g>
+            <text
+              x={130}
+              y={cy + 5}
+              fill={qAlarm ? "#dc2626" : mutedColor}
+              style={{ fontSize: 12, fontWeight: 800 }}
+            >
+              Q
+            </text>
+
+            <text
+              x={146}
+              y={cy + 5}
+              fill={qAlarm ? "#dc2626" : normalColor}
+              style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.1 }}
+            >
+              {qText}
+            </text>
+          </g>
+        </>
+      ) : pText ? (
+        <>
+          <text
+            x={70}
+            y={cy + 5}
+            fill={pAlarm ? "#dc2626" : mutedColor}
+            style={{ fontSize: 12, fontWeight: 800 }}
+          >
+            P
+          </text>
+
+          <text
+            x={88}
+            y={cy + 5}
+            fill={pAlarm ? "#dc2626" : normalColor}
+            style={{ fontSize: 15, fontWeight: 800 }}
+          >
+            {pText}
+          </text>
+        </>
+      ) : qText ? (
+        <>
+          <text
+            x={67}
+            y={cy + 5}
+            fill={qAlarm ? "#dc2626" : mutedColor}
+            style={{ fontSize: 12, fontWeight: 800 }}
+          >
+            Q
+          </text>
+
+          <text
+            x={85}
+            y={cy + 5}
+            fill={qAlarm ? "#dc2626" : normalColor}
+            style={{ fontSize: 15, fontWeight: 800 }}
+          >
+            {qText}
+          </text>
+        </>
+      ) : (
+        <text
+          x={w / 2}
+          y={cy + 5}
+          textAnchor="middle"
+          fill="#94a3b8"
+          style={{ fontSize: 12, fontWeight: 700 }}
+        >
+          SIN INSTRUMENTACIÓN
+        </text>
+      )}
 
       <circle
-        cx={w - 18}
-        cy={18}
-        r={6.5}
-        fill={alarm ? "#ef4444" : connected ? "#22c55e" : "#94a3b8"}
-        stroke="#0f172a"
-        strokeOpacity={0.22}
+        cx={w - 25}
+        cy={cy - 14}
+        r={3.5}
+        fill={
+          !connected
+            ? "#94a3b8"
+            : pAlarm || qAlarm
+            ? "#ef4444"
+            : "#22c55e"
+        }
       />
-
-      <g transform={`translate(0, ${startY})`}>
-        <rect
-          x={leftPad}
-          y={(rowH - badgeH) / 2}
-          width={badgeW}
-          height={badgeH}
-          rx={10}
-          ry={10}
-          fill="#e2e8f0"
-          stroke="#94a3b8"
-        />
-        <text
-          x={leftPad + badgeW / 2}
-          y={rowH / 2 + 5}
-          textAnchor="middle"
-          className="select-none"
-          fill="#0f172a"
-          style={{ fontSize: badgeFont, fontWeight: 900 }}
-        >
-          P
-        </text>
-
-        <text
-          x={valueX}
-          y={rowH / 2 + 7}
-          textAnchor="start"
-          className="select-none"
-          fill="#0f172a"
-          style={{ fontSize: valueFont, fontWeight: 900, letterSpacing: 0.2 }}
-        >
-          {pTextShow}
-        </text>
-      </g>
-
-      <g transform={`translate(0, ${startY + rowH + gapY})`}>
-        <rect
-          x={leftPad}
-          y={(rowH - badgeH) / 2}
-          width={badgeW}
-          height={badgeH}
-          rx={10}
-          ry={10}
-          fill="#e2e8f0"
-          stroke="#94a3b8"
-        />
-        <text
-          x={leftPad + badgeW / 2}
-          y={rowH / 2 + 5}
-          textAnchor="middle"
-          className="select-none"
-          fill="#0f172a"
-          style={{ fontSize: badgeFont, fontWeight: 900 }}
-        >
-          Q
-        </text>
-
-        <text
-          x={valueX}
-          y={rowH / 2 + 7}
-          textAnchor="start"
-          className="select-none"
-          fill="#0f172a"
-          style={{ fontSize: valueFont, fontWeight: 900, letterSpacing: 0.2 }}
-        >
-          {qTextShow}
-        </text>
-      </g>
     </g>
   );
 }
