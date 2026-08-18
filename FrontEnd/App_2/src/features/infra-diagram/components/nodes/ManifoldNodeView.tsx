@@ -88,8 +88,8 @@ export default function ManifoldNodeView({
     return nodeId.length > 0 || tag.length > 0;
   };
 
-  const hasPressureSignal = hasConfiguredSignal(pSig);
-  const hasFlowSignal = hasConfiguredSignal(qSig);
+  const hasPressureSignal = pSig != null && isFiniteNumber(pSig?.value ?? pSig?.v);
+  const hasFlowSignal = qSig != null && isFiniteNumber(qSig?.value ?? qSig?.v);
   const hasAnySignal = hasPressureSignal || hasFlowSignal;
 
   const pUnit = prettyUnit(pSig?.unit, "bar");
