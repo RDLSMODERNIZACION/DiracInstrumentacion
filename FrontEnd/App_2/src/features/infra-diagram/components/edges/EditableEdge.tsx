@@ -560,7 +560,7 @@ export default function EditableEdge({
   const STROKE_OUTER = 10;
   const STROKE_BODY = 7;
   const STROKE_HL = 2.2;
-  const HIT_STROKE = 30;
+  const HIT_STROKE = tapConnectMode ? 42 : 18;
 
   const COUPLER_R_OUT = 3.6;
   const COUPLER_R_IN = 2.2;
@@ -656,6 +656,20 @@ export default function EditableEdge({
       <circle cx={geom.sx} cy={geom.sy} r={COUPLER_R_IN} fill="#e2e8f0" opacity={0.98} />
       <circle cx={geom.ex} cy={geom.ey} r={COUPLER_R_OUT} fill="#0f172a" opacity={0.35} />
       <circle cx={geom.ex} cy={geom.ey} r={COUPLER_R_IN} fill="#e2e8f0" opacity={0.98} />
+
+      {tapConnectMode && (
+        <path
+          data-role="pump-tap-connect-highlight"
+          d={geom.d}
+          fill="none"
+          stroke="#38bdf8"
+          strokeWidth={14}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.24}
+          style={{ pointerEvents: "none" }}
+        />
+      )}
 
       {/* hit test */}
       <path
