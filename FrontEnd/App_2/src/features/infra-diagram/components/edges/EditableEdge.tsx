@@ -560,7 +560,7 @@ export default function EditableEdge({
   const STROKE_OUTER = 10;
   const STROKE_BODY = 7;
   const STROKE_HL = 2.2;
-  const HIT_STROKE = 18;
+  const HIT_STROKE = 30;
 
   const COUPLER_R_OUT = 3.6;
   const COUPLER_R_IN = 2.2;
@@ -606,6 +606,7 @@ export default function EditableEdge({
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={0.55}
+        style={{ pointerEvents: "none" }}
       />
       <path
         d={geom.d}
@@ -615,6 +616,7 @@ export default function EditableEdge({
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={0.95}
+        style={{ pointerEvents: "none" }}
       />
       <path
         d={geom.d}
@@ -624,6 +626,7 @@ export default function EditableEdge({
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={0.9}
+        style={{ pointerEvents: "none" }}
       />
 
       {/* flujo */}
@@ -664,14 +667,23 @@ export default function EditableEdge({
         onPointerDown={(e) => {
           if (tapConnectMode && onTapPipeClick) {
             const p = svgPointFromEvent(e);
-            if (p) { e.preventDefault(); e.stopPropagation(); onTapPipeClick(id, p.x, p.y); }
+            if (p) {
+              e.preventDefault();
+              e.stopPropagation();
+              onTapPipeClick(id, p.x, p.y);
+            }
             return;
           }
+
           if (!editable) return;
+
           e.preventDefault();
           e.stopPropagation();
           onSelect?.(id);
-          if ((e as any).shiftKey) addPoint(e, "hit:pointerdown");
+
+          if ((e as any).shiftKey) {
+            addPoint(e, "hit:pointerdown");
+          }
         }}
         onClick={(e) => {
           if (!editable) return;
@@ -808,6 +820,7 @@ export default function EditableEdge({
             strokeLinecap="round"
             strokeLinejoin="round"
             opacity={0.22}
+            style={{ pointerEvents: "none" }}
           />
           <path
             d={geom.d}
@@ -817,6 +830,7 @@ export default function EditableEdge({
             strokeLinecap="round"
             strokeLinejoin="round"
             opacity={0.95}
+            style={{ pointerEvents: "none" }}
           />
         </>
       )}
