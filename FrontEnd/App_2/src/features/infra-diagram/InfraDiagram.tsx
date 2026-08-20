@@ -537,6 +537,19 @@ export default function InfraDiagram() {
 
   const refreshPumpPipeTaps = useCallback(async () => { try { setPumpPipeTaps(await getPumpPipeTaps()); } catch (err) { console.error(err); } }, []);
   useEffect(() => { refreshPumpPipeTaps(); }, [refreshPumpPipeTaps]);
+  const handlePumpTapSelect = useCallback((nodeId: string) => {
+    console.log("[PUMP-TAP][PUMP_SELECT]", {
+      nodeId,
+      previous: pumpTapFrom,
+      editMode,
+      connectMode,
+    });
+
+    if (!editMode || !connectMode) return;
+
+    setPumpTapFrom((prev) => (prev === nodeId ? null : nodeId));
+    setConnectFrom(null);
+  }, [editMode, connectMode, pumpTapFrom]);
   const handlePumpTapPipeClick = useCallback(async (edgeId:number,x:number,y:number) => {
     if(!pumpTapFrom) return; const pumpNode=nodesById[pumpTapFrom]; if(!pumpNode||pumpNode.type!=="pump")return;
     const raw=window.prompt("Tipo de conexión:\n1 = INYECTA\n2 = EXTRAE","1"); if(raw==null)return; const mode:PumpPipeTapMode=String(raw).trim()==="2"?"extract":"inject";
@@ -910,6 +923,7 @@ export default function InfraDiagram() {
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
                       tapSelected={pumpTapFrom === n.id}
+                      onTapSelect={() => handlePumpTapSelect(n.id)}
                       onClick={() => { if(editMode&&connectMode){ console.log("[PUMP-TAP][PUMP_SELECT]", {id:n.id, pumpTapFrom}); setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
                     />
                   ) : n.type === "pump" ? (
@@ -1043,6 +1057,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 

@@ -38,7 +38,11 @@ export default function PumpNodeView({
             e.preventDefault();
             e.stopPropagation();
             console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
-            onClick();
+            if (onTapSelect) {
+              onTapSelect(n.id);
+            } else {
+              onClick();
+            }
           }
         }} onPointerMove={(e) => { if (enabled) drag.onPointerMove(e); }} onPointerUp={(e) => { if (enabled) drag.onPointerUp(e); }}
       onMouseEnter={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseMove={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseLeave={hideTip} onClick={click}
@@ -64,7 +68,11 @@ export default function PumpNodeView({
             e.preventDefault();
             e.stopPropagation();
             console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
-            onClick();
+            if (onTapSelect) {
+              onTapSelect(n.id);
+            } else {
+              onClick();
+            }
           }
         }} onPointerMove={(e) => { if (enabled) drag.onPointerMove(e); }} onPointerUp={(e) => { if (enabled) drag.onPointerUp(e); }}
     onMouseEnter={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseMove={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseLeave={hideTip} onClick={click}
@@ -78,5 +86,6 @@ export default function PumpNodeView({
     <rect x={-23} y={54} width={46} height={16} rx={8} fill={statusFill}/><text x={0} y={66} textAnchor="middle" fill="#fff" style={{fontSize:10,fontWeight:900,pointerEvents:"none"}}>{statusText}</text>
   </g>;
 }
+
 
 
