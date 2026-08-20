@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -908,7 +908,7 @@ export default function InfraDiagram() {
                       onDragEnd={() => saveNodePosition(n.id)}
                       showTip={showTip}
                       hideTip={hideTip}
-                      enabled={editMode}
+                      enabled={editMode && !connectMode}
                       tapSelected={pumpTapFrom === n.id}
                       onClick={() => { if(editMode&&connectMode){ console.log("[PUMP-TAP][PUMP_SELECT]", {id:n.id, pumpTapFrom}); setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
                     />
@@ -921,7 +921,7 @@ export default function InfraDiagram() {
                       onDragEnd={() => saveNodePosition(n.id)}
                       showTip={showTip}
                       hideTip={hideTip}
-                      enabled={editMode}
+                      enabled={editMode && !connectMode}
                       onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "manifold" ? (
@@ -933,7 +933,7 @@ export default function InfraDiagram() {
                       onDragEnd={() => saveNodePosition(n.id)}
                       showTip={showTip}
                       hideTip={hideTip}
-                      enabled={editMode}
+                      enabled={editMode && !connectMode}
                       onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "network_analyzer" ? (
@@ -945,7 +945,7 @@ export default function InfraDiagram() {
                       onDragEnd={(x, y) => saveNodePositionXY(n.id, x, y)}
                       showTip={showTip}
                       hideTip={hideTip}
-                      enabled={editMode}
+                      enabled={editMode && !connectMode}
                       onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "valve" ? (
@@ -957,7 +957,7 @@ export default function InfraDiagram() {
                       onDragEnd={() => saveNodePosition(n.id)}
                       showTip={showTip}
                       hideTip={hideTip}
-                      enabled={editMode}
+                      enabled={editMode && !connectMode}
                       onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : null
@@ -1043,6 +1043,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 

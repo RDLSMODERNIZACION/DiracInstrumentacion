@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { PumpNode } from "../../types";
 
@@ -28,7 +28,19 @@ export default function PumpNodeView({
   const click = (e: any) => { e.stopPropagation?.(); onClick?.(); };
 
   if (orientation === "horizontal") {
-    return <g transform={`translate(${n.x}, ${n.y})`} onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp}
+    return <g transform={`translate(${n.x}, ${n.y})`} onPointerDown={(e) => {
+          if (enabled) {
+            drag.onPointerDown(e);
+            return;
+          }
+
+          if (onClick) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
+            onClick();
+          }
+        }} onPointerMove={(e) => { if (enabled) drag.onPointerMove(e); }} onPointerUp={(e) => { if (enabled) drag.onPointerUp(e); }}
       onMouseEnter={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseMove={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseLeave={hideTip} onClick={click}
       style={{cursor: enabled ? "move" : onClick ? "pointer" : "default"}} opacity={online?1:0.58}>
       <text x={72} y={4} textAnchor="start" fill="#1e293b" style={{fontSize:14,fontWeight:850,pointerEvents:"none"}}>{name}</text>
@@ -42,7 +54,19 @@ export default function PumpNodeView({
     </g>;
   }
 
-  return <g transform={`translate(${n.x}, ${n.y})`} onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp}
+  return <g transform={`translate(${n.x}, ${n.y})`} onPointerDown={(e) => {
+          if (enabled) {
+            drag.onPointerDown(e);
+            return;
+          }
+
+          if (onClick) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
+            onClick();
+          }
+        }} onPointerMove={(e) => { if (enabled) drag.onPointerMove(e); }} onPointerUp={(e) => { if (enabled) drag.onPointerUp(e); }}
     onMouseEnter={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseMove={(e)=>showTip(e,{title:name,lines:tipLines})} onMouseLeave={hideTip} onClick={click}
     style={{cursor: enabled ? "move" : onClick ? "pointer" : "default"}} opacity={online?1:0.58}>
     <text x={48} y={-18} textAnchor="start" fill="#1e293b" style={{fontSize:14,fontWeight:850,pointerEvents:"none"}}>{name}</text>
@@ -54,3 +78,5 @@ export default function PumpNodeView({
     <rect x={-23} y={54} width={46} height={16} rx={8} fill={statusFill}/><text x={0} y={66} textAnchor="middle" fill="#fff" style={{fontSize:10,fontWeight:900,pointerEvents:"none"}}>{statusText}</text>
   </g>;
 }
+
+
