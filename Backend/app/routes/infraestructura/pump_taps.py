@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from psycopg.rows import dict_row
 from app.db import get_conn
 router = APIRouter(prefix="/infraestructura", tags=["infraestructura"])

@@ -92,8 +92,7 @@ function getCompanyIdFromQuery(): number | null {
 }
 
 function isDebugEnabled(): boolean {
-  const qs = new URLSearchParams(window.location.search);
-  return qs.get("debug") === "1" || import.meta.env.DEV;
+  return false;
 }
 
 function summarizeTypes(rows: Array<{ type?: string } | any> | undefined) {
@@ -273,7 +272,6 @@ export default function InfraDiagram() {
   const DEBUG = useMemo(() => isDebugEnabled(), []);
   const log = useCallback(
     (...args: any[]) => {
-      if (DEBUG) console.log("[InfraDiagram]", ...args);
     },
     [DEBUG]
   );

@@ -44,12 +44,10 @@ const DEBUG_EDGE = false; // 👈 dejalo true para ver qué pasa, luego pasalo a
 function logEdge(tag: string, payload?: any) {
   if (!DEBUG_EDGE) return;
   // eslint-disable-next-line no-console
-  console.log(`🧩[EditableEdge] ${tag}`, payload ?? "");
 }
 function warnEdge(tag: string, payload?: any) {
   if (!DEBUG_EDGE) return;
   // eslint-disable-next-line no-console
-  console.warn(`⚠️[EditableEdge] ${tag}`, payload ?? "");
 }
 function errEdge(tag: string, payload?: any) {
   // errores conviene verlos siempre
