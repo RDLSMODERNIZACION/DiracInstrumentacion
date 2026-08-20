@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+﻿from fastapi import APIRouter, HTTPException, Request
 from psycopg.rows import dict_row
 from app.db import get_conn
 router = APIRouter(prefix="/infraestructura", tags=["infraestructura"])
@@ -15,6 +15,7 @@ async def list_pump_pipe_taps():
 @router.post("/pump_pipe_taps")
 async def upsert_pump_pipe_tap(request: Request):
     data = await request.json()
+    print("[PUMP-TAP][BACKEND_POST]", data, flush=True)
     pump_id, edge_id = data.get("pump_id"), data.get("edge_id")
     mode = str(data.get("mode") or "inject").lower()
     if not isinstance(pump_id, int) or not isinstance(edge_id, int):
@@ -32,3 +33,4 @@ async def upsert_pump_pipe_tap(request: Request):
             row = cur.fetchone(); conn.commit(); return {"ok": True, "tap": row}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (save pump tap): {e}")
+

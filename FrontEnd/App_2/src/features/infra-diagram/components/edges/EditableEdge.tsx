@@ -657,17 +657,40 @@ export default function EditableEdge({
       <circle cx={geom.ex} cy={geom.ey} r={COUPLER_R_OUT} fill="#0f172a" opacity={0.35} />
       <circle cx={geom.ex} cy={geom.ey} r={COUPLER_R_IN} fill="#e2e8f0" opacity={0.98} />
 
-      {tapConnectMode && (
+      {tapConnectMode && onTapPipeClick && (
         <path
           data-role="pump-tap-connect-highlight"
           d={geom.d}
           fill="none"
           stroke="#38bdf8"
-          strokeWidth={14}
+          strokeWidth={18}
           strokeLinecap="round"
           strokeLinejoin="round"
-          opacity={0.24}
-          style={{ pointerEvents: "none" }}
+          opacity={0.32}
+          style={{
+            pointerEvents: "stroke",
+            cursor: "crosshair",
+          }}
+          onPointerDown={(ev) => {
+            const p = svgPointFromEvent(ev);
+            console.log("[PUMP-TAP][HIGHLIGHT_POINTER]", {
+              edgeId: id,
+              point: p,
+            });
+
+            if (!p) return;
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            console.log("[PUMP-TAP][HIGHLIGHT_DISPATCH]", {
+              edgeId: id,
+              x: p.x,
+              y: p.y,
+            });
+
+            onTapPipeClick(id, p.x, p.y);
+          }}
         />
       )}
 
@@ -684,6 +707,7 @@ export default function EditableEdge({
             if (p) {
               e.preventDefault();
               e.stopPropagation();
+              console.log("[PUMP-TAP][DISPATCH]", { edgeId: id, x: p.x, y: p.y });
               onTapPipeClick(id, p.x, p.y);
             }
             return;
@@ -851,6 +875,7 @@ export default function EditableEdge({
     </g>
   );
 }
+
 
 
 

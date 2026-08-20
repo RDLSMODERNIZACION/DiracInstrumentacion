@@ -684,6 +684,15 @@ export default function InfraDiagram() {
     () => nodes.filter((n) => n.type !== "valve"),
     [nodes]
   );
+  useEffect(() => {
+    console.log("[PUMP-TAP][STATE]", {
+      editMode,
+      connectMode,
+      pumpTapFrom,
+      tapCount: pumpPipeTaps.length,
+    });
+  }, [editMode, connectMode, pumpTapFrom, pumpPipeTaps.length]);
+
   const pumpTapByEdge = useMemo(() => { const m=new Map<number,PumpPipeTap[]>(); for(const tap of pumpPipeTaps){const a=m.get(tap.edge_id)??[];a.push(tap);m.set(tap.edge_id,a);} return m; },[pumpPipeTaps]);
 
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
@@ -903,7 +912,7 @@ export default function InfraDiagram() {
                       hideTip={hideTip}
                       enabled={editMode}
                       tapSelected={pumpTapFrom === n.id}
-                      onClick={() => { if(editMode&&connectMode){ setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
+                      onClick={() => { if(editMode&&connectMode){ console.log("[PUMP-TAP][PUMP_SELECT]", {id:n.id, pumpTapFrom}); setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -1036,6 +1045,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
