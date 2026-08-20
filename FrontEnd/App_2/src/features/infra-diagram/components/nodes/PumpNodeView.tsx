@@ -38,6 +38,7 @@ export default function PumpNodeView({
             e.preventDefault();
             e.stopPropagation();
             console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
+            window.dispatchEvent(new CustomEvent("dirac:pump-tap-select", { detail: { nodeId: n.id } }));
             if (onTapSelect) {
               onTapSelect(n.id);
             } else {
@@ -68,6 +69,7 @@ export default function PumpNodeView({
             e.preventDefault();
             e.stopPropagation();
             console.log("[PUMP-TAP][PUMP_POINTER_SELECT]", { id: n.id });
+            window.dispatchEvent(new CustomEvent("dirac:pump-tap-select", { detail: { nodeId: n.id } }));
             if (onTapSelect) {
               onTapSelect(n.id);
             } else {
@@ -86,6 +88,7 @@ export default function PumpNodeView({
     <rect x={-23} y={54} width={46} height={16} rx={8} fill={statusFill}/><text x={0} y={66} textAnchor="middle" fill="#fff" style={{fontSize:10,fontWeight:900,pointerEvents:"none"}}>{statusText}</text>
   </g>;
 }
+
 
 
 

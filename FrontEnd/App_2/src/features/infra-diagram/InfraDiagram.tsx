@@ -696,6 +696,29 @@ export default function InfraDiagram() {
     [nodes]
   );
   useEffect(() => {
+    const onPumpTapSelect = (ev: Event) => {
+      const custom = ev as CustomEvent<{ nodeId?: string }>;
+      const nodeId = custom.detail?.nodeId;
+
+      console.log("[PUMP-TAP][PUMP_SELECT_EVENT]", {
+        nodeId,
+        editMode,
+        connectMode,
+      });
+
+      if (!nodeId || !editMode || !connectMode) return;
+
+      setPumpTapFrom((prev) => (prev === nodeId ? null : nodeId));
+      setConnectFrom(null);
+    };
+
+    window.addEventListener("dirac:pump-tap-select", onPumpTapSelect as EventListener);
+
+    return () => {
+      window.removeEventListener("dirac:pump-tap-select", onPumpTapSelect as EventListener);
+    };
+  }, [editMode, connectMode]);
+  useEffect(() => {
     console.log("[PUMP-TAP][STATE]", {
       editMode,
       connectMode,
@@ -1057,6 +1080,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
