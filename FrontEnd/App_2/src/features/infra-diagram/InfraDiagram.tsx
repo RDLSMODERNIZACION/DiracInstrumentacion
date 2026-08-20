@@ -133,8 +133,9 @@ function buildPorts(n: UINode) {
   const { ins, outs } = getNodePorts(n);
 
   if (n.type === "tank") {
-    const halfW = 150;
-    const halfH = 110;
+    const isWell = (n as any).categoria === "pozo";
+    const halfW = isWell ? 140 : 150;
+    const halfH = isWell ? 165 : 110;
 
     const pos: Record<string, { x: number; y: number }> = {
       L1: { x: n.x - halfW, y: n.y - 45 },
@@ -1016,6 +1017,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 

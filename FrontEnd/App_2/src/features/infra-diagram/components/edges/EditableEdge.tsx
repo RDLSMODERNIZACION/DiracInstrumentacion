@@ -160,8 +160,9 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   const pid = String(portId);
 
   if ((n as any).type === "tank") {
-    const W = 300;
-    const H = 220;
+    const isWell = (n as any).categoria === "pozo";
+    const W = isWell ? 280 : 300;
+    const H = isWell ? 330 : 220;
 
     const leftX = (n as any).x - W / 2;
     const rightX = (n as any).x + W / 2;
@@ -813,6 +814,7 @@ export default function EditableEdge({
     </g>
   );
 }
+
 
 
 
