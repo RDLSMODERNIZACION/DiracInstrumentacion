@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -19,6 +19,7 @@ import {
 import { saveLayoutToStorage } from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
+import { getPumpPipeTaps, savePumpPipeTap, type PumpPipeTap, type PumpPipeTapMode } from "./services/pumpTaps";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -29,6 +30,7 @@ import EditableEdge from "./components/edges/EditableEdge";
 import OpsDrawer from "./components/OpsDrawer";
 import LocationDrawer from "./components/LocationDrawer";
 import NetworkAnalyzerNodeView from "./components/nodes/NetworkAnalyzerNodeView";
+import PumpPipeTapView from "./components/PumpPipeTapView";
 
 /** =========================
  *  Types
@@ -283,6 +285,8 @@ export default function InfraDiagram() {
     log("companyId from query:", companyId);
   }, [companyId, log]);
 
+  const [pumpPipeTaps, setPumpPipeTaps] = useState<PumpPipeTap[]>([]);
+  const [pumpTapFrom, setPumpTapFrom] = useState<string | null>(null);
   const [nodes, setNodes] = useState<UINode[]>([]);
   const [edges, setEdges] = useState<UIEdgeWithPorts[]>([]);
 
@@ -533,6 +537,15 @@ export default function InfraDiagram() {
     [nodesById, log]
   );
 
+  const refreshPumpPipeTaps = useCallback(async () => { try { setPumpPipeTaps(await getPumpPipeTaps()); } catch (err) { console.error(err); } }, []);
+  useEffect(() => { refreshPumpPipeTaps(); }, [refreshPumpPipeTaps]);
+  const handlePumpTapPipeClick = useCallback(async (edgeId:number,x:number,y:number) => {
+    if(!pumpTapFrom) return; const pumpNode=nodesById[pumpTapFrom]; if(!pumpNode||pumpNode.type!=="pump")return;
+    const raw=window.prompt("Tipo de conexión:\n1 = INYECTA\n2 = EXTRAE","1"); if(raw==null)return; const mode:PumpPipeTapMode=String(raw).trim()==="2"?"extract":"inject";
+    const pumpId=Number(String(pumpNode.id).split(":").pop()); if(!Number.isFinite(pumpId))return;
+    try { await savePumpPipeTap({pump_id:pumpId,edge_id:edgeId,mode,x,y,t:0.5}); await refreshPumpPipeTaps(); setPumpTapFrom(null); } catch(err:any){ alert(err?.message||"No se pudo guardar"); }
+  },[pumpTapFrom,nodesById,refreshPumpPipeTaps]);
+
   const toggleEdit = useCallback(() => {
     setEditMode((prev) => {
       const next = !prev;
@@ -671,9 +684,12 @@ export default function InfraDiagram() {
     () => nodes.filter((n) => n.type !== "valve"),
     [nodes]
   );
+  const pumpTapByEdge = useMemo(() => { const m=new Map<number,PumpPipeTap[]>(); for(const tap of pumpPipeTaps){const a=m.get(tap.edge_id)??[];a.push(tap);m.set(tap.edge_id,a);} return m; },[pumpPipeTaps]);
+
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
-    return simulateFlow(edges, nodesById);
-  }, [edges, nodesById]);
+    const base=simulateFlow(edges,nodesById).filter((e)=>nodesById[e.a]?.type!=="pump"&&nodesById[e.b]?.type!=="pump");
+    return base.map((e)=>{ const taps=pumpTapByEdge.get(e.id)??[]; const active=taps.find((tap)=>{const p=nodesById[tap.pump_node_id];return !!p&&isPumpOn(p);}); if(!active)return e; return {...e,flow:{on:true,dir:active.mode==="inject"?1:-1,strength:1}}; });
+  }, [edges, nodesById, pumpTapByEdge]);
 
   return (
     <div style={{ width: "100%", padding: 0 }}>
@@ -870,6 +886,8 @@ export default function InfraDiagram() {
                     b_port={e.b_port as any}
                     flow={e.flow}
                     knots={e.knots ?? []}
+                    tapConnectMode={editMode && connectMode && !!pumpTapFrom}
+                    onTapPipeClick={handlePumpTapPipeClick}
                   />
                 ))}
 
@@ -884,7 +902,8 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      tapSelected={pumpTapFrom === n.id}
+                      onClick={() => { if(editMode&&connectMode){ setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView

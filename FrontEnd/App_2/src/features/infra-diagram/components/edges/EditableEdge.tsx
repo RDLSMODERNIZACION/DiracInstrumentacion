@@ -1,4 +1,4 @@
-﻿// src/features/infra-diagram/components/edges/EditableEdge.tsx
+// src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 
@@ -28,6 +28,8 @@ type Props = {
   editable: boolean;
   selected?: boolean;
   onSelect?: (edgeId: number) => void;
+  tapConnectMode?: boolean;
+  onTapPipeClick?: (edgeId: number, x: number, y: number) => void;
 };
 
 function clamp(n: number, lo: number, hi: number) {
@@ -413,6 +415,8 @@ export default function EditableEdge({
   editable,
   selected,
   onSelect,
+  tapConnectMode,
+  onTapPipeClick,
 }: Props) {
   const A = nodesById[a];
   const B = nodesById[b];
@@ -656,8 +660,13 @@ export default function EditableEdge({
         stroke="transparent"
         strokeWidth={HIT_STROKE}
         fill="none"
-        style={{ pointerEvents: "stroke", cursor: editable ? "pointer" : "default" }}
+        style={{ pointerEvents: "stroke", cursor: tapConnectMode ? "crosshair" : editable ? "pointer" : "default" }}
         onPointerDown={(e) => {
+          if (tapConnectMode && onTapPipeClick) {
+            const p = svgPointFromEvent(e);
+            if (p) { e.preventDefault(); e.stopPropagation(); onTapPipeClick(id, p.x, p.y); }
+            return;
+          }
           if (!editable) return;
           e.preventDefault();
           e.stopPropagation();
