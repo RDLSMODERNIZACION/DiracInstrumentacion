@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
 import type { TankNode } from "../../types";
@@ -25,6 +25,8 @@ export default function TankNodeView({
     name?: string | null;
     categoria?: TankCategory | null;
     servicio?: "agua" | "cargaderos" | "cloacas" | null;
+    chlorine_mg_l?: number | string | null;
+    ph?: number | string | null;
   };
   getPos: any;
   setPos: any;
@@ -77,6 +79,14 @@ export default function TankNodeView({
       : toNumber(n.level_pct);
 
   const level = Math.max(0, Math.min(100, levelRaw ?? 0));
+  const chlorineRaw = Number((n as any).chlorine_mg_l);
+  const phRaw = Number((n as any).ph);
+
+  const chlorineText =
+    Number.isFinite(chlorineRaw) ? `${chlorineRaw.toFixed(2)} mg/L` : "-- mg/L";
+
+  const phText =
+    Number.isFinite(phRaw) ? phRaw.toFixed(2) : "--";
 
   const name =
     typeof n.name === "string" && n.name.trim()
@@ -458,6 +468,7 @@ export default function TankNodeView({
     </g>
   );
 }
+
 
 
 

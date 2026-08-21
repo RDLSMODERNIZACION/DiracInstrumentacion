@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { PumpNode } from "../../types";
 
@@ -52,6 +52,19 @@ export default function PumpNodeView({
   const running = ["run", "running", "on", "1", "true"].includes(state);
   const online = n.online === true;
   const maintenance = (n as any).in_maintenance === true;
+  // Por ahora el modo queda hardcodeado en MANUAL.
+  // Más adelante puede reemplazarse por dato real del PLC.
+  const controlMode = "M";
+
+  const currentRaw = Number(
+    (n as any).current_a ??
+    (n as any).amperes ??
+    (n as any).current ??
+    NaN
+  );
+
+  const currentText =
+    Number.isFinite(currentRaw) ? `${currentRaw.toFixed(1)} A` : "-- A";
 
   const motorFill = !online
     ? "#cbd5e1"
@@ -242,23 +255,36 @@ export default function PumpNodeView({
           style={{ pointerEvents: "none" }}
         />
 
+        {/* Modo + corriente. Sin indicador ON/OFF: el giro ya indica marcha. */}
         <rect
-          x={-23}
+          x={-42}
           y={41}
-          width={46}
-          height={16}
-          rx={8}
-          fill={statusFill}
+          width={22}
+          height={17}
+          rx={7}
+          fill="#e2e8f0"
+          stroke="#94a3b8"
+          strokeWidth={1}
           style={{ pointerEvents: "none" }}
         />
         <text
-          x={0}
+          x={-31}
           y={53}
           textAnchor="middle"
-          fill="#fff"
-          style={{ fontSize: 10, fontWeight: 900, pointerEvents: "none" }}
+          fill="#334155"
+          style={{ fontSize: 10, fontWeight: 950, pointerEvents: "none" }}
         >
-          {statusText}
+          {controlMode}
+        </text>
+
+        <text
+          x={-12}
+          y={53}
+          textAnchor="start"
+          fill="#334155"
+          style={{ fontSize: 11, fontWeight: 900, pointerEvents: "none" }}
+        >
+          {currentText}
         </text>
       </g>
     );
@@ -354,24 +380,38 @@ export default function PumpNodeView({
         style={{ pointerEvents: "none" }}
       />
 
+      {/* Modo + corriente. Sin indicador ON/OFF. */}
       <rect
-        x={-23}
+        x={-28}
         y={54}
-        width={46}
-        height={16}
-        rx={8}
-        fill={statusFill}
+        width={22}
+        height={17}
+        rx={7}
+        fill="#e2e8f0"
+        stroke="#94a3b8"
+        strokeWidth={1}
         style={{ pointerEvents: "none" }}
       />
       <text
-        x={0}
+        x={-17}
         y={66}
         textAnchor="middle"
-        fill="#fff"
-        style={{ fontSize: 10, fontWeight: 900, pointerEvents: "none" }}
+        fill="#334155"
+        style={{ fontSize: 10, fontWeight: 950, pointerEvents: "none" }}
       >
-        {statusText}
+        {controlMode}
+      </text>
+
+      <text
+        x={0}
+        y={66}
+        textAnchor="start"
+        fill="#334155"
+        style={{ fontSize: 11, fontWeight: 900, pointerEvents: "none" }}
+      >
+        {currentText}
       </text>
     </g>
   );
 }
+
