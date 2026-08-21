@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import TankLevelChart from "@/components/TankLevelChart";
+import WaterNetworkOverviewDemo from "@/components/red/WaterNetworkOverview.demo";
 import OpsPumpsProfile from "@/components/OpsPumpsProfile";
 import ByLocationTable from "@/components/ByLocationTable";
 import { Tabs } from "@/components/Tabs";
@@ -951,7 +952,10 @@ export default function Widget() {
           </select>
         </div>
 
-        {tab === "operacion" && (
+              {tab === "operacion" && (
+        <WaterNetworkOverviewDemo />
+      )}
+{false && tab === "operacion" && (
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <MiniBadge className="bg-slate-100 text-slate-600">
               24 h

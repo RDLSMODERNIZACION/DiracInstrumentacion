@@ -21,6 +21,7 @@ import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 import { getPumpPipeTaps, savePumpPipeTap, type PumpPipeTap, type PumpPipeTapMode } from "./services/pumpTaps";
 import { saveNodeServicio, type ServicioSCADA } from "./services/nodeServicio";
+import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from "./services/pumpAvailability";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -353,6 +354,8 @@ export default function InfraDiagram() {
   const [connectMode, setConnectMode] = useState(false);
   const [activeServicio, setActiveServicio] = useState<ServicioSCADA>("agua");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedPumpAvailability, setSelectedPumpAvailability] = useState<PumpAvailability | null>(null);
+  const [savingPumpAvailability, setSavingPumpAvailability] = useState(false);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
   const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
@@ -779,6 +782,58 @@ export default function InfraDiagram() {
   );
 
   const selectedNode = selectedNodeId ? nodesById[selectedNodeId] : null;
+  // V18.7 PUMP AVAILABILITY
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedNode || selectedNode.type !== "pump") {
+      setSelectedPumpAvailability(null);
+      return;
+    }
+
+    const pumpId = Number(String(selectedNode.id).split(":").pop());
+    if (!Number.isFinite(pumpId)) {
+      setSelectedPumpAvailability(null);
+      return;
+    }
+
+    getPumpAvailability(pumpId)
+      .then((row) => {
+        if (!cancelled) setSelectedPumpAvailability(row);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSelectedPumpAvailability(null);
+          // 404 = bomba secundaria/no principal. No mostramos botÃ³n.
+          if (!String(err?.message || "").includes("404")) {
+            console.error("No se pudo leer disponibilidad de bomba:", err);
+          }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNodeId, selectedNode?.id, selectedNode?.type]);
+
+  const toggleSelectedPumpAvailability = useCallback(async () => {
+    if (!selectedPumpAvailability || savingPumpAvailability) return;
+
+    try {
+      setSavingPumpAvailability(true);
+      const saved = await savePumpAvailability(
+        selectedPumpAvailability.id,
+        !selectedPumpAvailability.disponible
+      );
+      setSelectedPumpAvailability(saved);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "No se pudo actualizar disponibilidad");
+    } finally {
+      setSavingPumpAvailability(false);
+    }
+  }, [selectedPumpAvailability, savingPumpAvailability]);
+
 
 
 
@@ -883,6 +938,66 @@ export default function InfraDiagram() {
           </div>
         )}
 
+        {/* V18.7 DISPONIBILIDAD IMPULSION */}
+        {editMode &&
+          selectedNode?.type === "pump" &&
+          selectedPumpAvailability?.rol_red === "impulsion_principal" && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                marginLeft: 8,
+                padding: "3px 7px",
+                borderRadius: 9,
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 900,
+                  color: "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.4,
+                }}
+              >
+                ImpulsiÃ³n
+              </span>
+
+              <button
+                type="button"
+                disabled={savingPumpAvailability}
+                onClick={toggleSelectedPumpAvailability}
+                title="Cambiar disponibilidad operativa de esta bomba"
+                style={{
+                  height: 26,
+                  padding: "0 10px",
+                  borderRadius: 999,
+                  border: selectedPumpAvailability.disponible
+                    ? "1px solid #86efac"
+                    : "1px solid #fecaca",
+                  background: selectedPumpAvailability.disponible
+                    ? "#dcfce7"
+                    : "#fee2e2",
+                  color: selectedPumpAvailability.disponible
+                    ? "#166534"
+                    : "#b91c1c",
+                  fontSize: 10,
+                  fontWeight: 900,
+                  cursor: savingPumpAvailability ? "wait" : "pointer",
+                  opacity: savingPumpAvailability ? 0.65 : 1,
+                }}
+              >
+                {savingPumpAvailability
+                  ? "Guardando..."
+                  : selectedPumpAvailability.disponible
+                  ? "Disponible"
+                  : "No disponible"}
+              </button>
+            </div>
+          )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button
             onClick={goToMapa}
@@ -1206,6 +1321,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
