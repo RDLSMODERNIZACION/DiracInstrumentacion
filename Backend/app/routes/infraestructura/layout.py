@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Query
+﻿from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
 import json
 
@@ -354,6 +354,8 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                         AND pmo.status = 'en_proceso'
                     ) AS in_maintenance,
                     NULL::text AS categoria,
+                    p.orientacion::text AS orientacion,
+                    p.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -926,5 +928,6 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (bootstrap): {e}")
+
 
 
