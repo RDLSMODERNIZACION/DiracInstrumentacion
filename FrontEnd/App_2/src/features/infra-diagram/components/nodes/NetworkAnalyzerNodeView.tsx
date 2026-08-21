@@ -516,14 +516,46 @@ export default function NetworkAnalyzerNodeView({
       {expanded && !enabled && (
         <g>
           <rect
+            data-role="electric-detail-hitarea"
             x={panelX}
             y={panelY}
             width={PANEL_W}
             height={PANEL_H}
             rx={14}
             fill="#ffffff"
-            stroke="#cbd5e1"
-            strokeWidth={1.4}
+            fillOpacity={0.001}
+            style={{ pointerEvents: "all" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+          <defs>
+            <filter
+              id={`electric-panel-shadow-${n.id}`}
+              x="-20%"
+              y="-20%"
+              width="140%"
+              height="140%"
+            >
+              <feDropShadow
+                dx="0"
+                dy="4"
+                stdDeviation="5"
+                floodColor="#0f172a"
+                floodOpacity="0.28"
+              />
+            </filter>
+          </defs>
+
+          <rect
+            x={panelX}
+            y={panelY}
+            width={PANEL_W}
+            height={PANEL_H}
+            rx={14}
+            fill="#ffffff"
+            fillOpacity={1}
+            stroke="#94a3b8"
+            strokeWidth={1.6}
+            filter={`url(#electric-panel-shadow-${n.id})`}
           />
 
           <text

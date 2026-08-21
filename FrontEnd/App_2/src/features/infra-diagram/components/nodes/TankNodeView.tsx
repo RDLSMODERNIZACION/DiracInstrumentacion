@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
 import type { TankNode } from "../../types";
@@ -24,6 +24,7 @@ export default function TankNodeView({
   n: TankNode & {
     name?: string | null;
     categoria?: TankCategory | null;
+    servicio?: "agua" | "cargaderos" | "cloacas" | null;
   };
   getPos: any;
   setPos: any;
@@ -47,6 +48,22 @@ export default function TankNodeView({
 
   const category: TankCategory =
     (n as any).categoria === "pozo" ? "pozo" : "tanque";
+
+  const servicio =
+    (n as any).servicio === "cargaderos"
+      ? "cargaderos"
+      : (n as any).servicio === "cloacas"
+      ? "cloacas"
+      : "agua";
+
+  const servicioLabel =
+    servicio === "cargaderos"
+      ? "CARGADEROS"
+      : servicio === "cloacas"
+      ? "CLOACAS"
+      : "AGUA";
+
+  const isCloacas = servicio === "cloacas";
 
   const isOnline = n.online === true;
   const rawAlarm = String(n.alarma || "").toLowerCase();
@@ -155,13 +172,23 @@ export default function TankNodeView({
           {name}
         </text>
 
+        <text
+          x={W / 2}
+          y={43}
+          textAnchor="middle"
+          fill={isCloacas ? "#15803d" : "#64748b"}
+          style={{ fontSize: 10, fontWeight: 900, letterSpacing: 0.6, pointerEvents: "none" }}
+        >
+          {`POZO · ${servicioLabel}`}
+        </text>
+
         {/* Cabezal */}
         <ellipse
           cx={W / 2}
           cy={57}
           rx={154}
           ry={18}
-          fill={`url(#wellSteel-${n.id})`}
+          fill={isCloacas ? "#dcfce7" : `url(#wellSteel-${n.id})`}
           stroke="#64748b"
           strokeWidth={2.4}
         />
@@ -173,7 +200,7 @@ export default function TankNodeView({
           width={shaftW}
           height={shaftH}
           rx={24}
-          fill={`url(#wellSteel-${n.id})`}
+          fill={isCloacas ? "#dcfce7" : `url(#wellSteel-${n.id})`}
           stroke={stroke}
           strokeWidth={3}
         />
@@ -185,7 +212,7 @@ export default function TankNodeView({
             y={waterY}
             width={shaftW}
             height={waterH}
-            fill="#60a5fa"
+            fill={isCloacas ? "#22c55e" : "#60a5fa"}
             opacity={0.96}
           />
           <rect
@@ -193,7 +220,7 @@ export default function TankNodeView({
             y={waterY}
             width={shaftW}
             height={6}
-            fill="#2563eb"
+            fill={isCloacas ? "#15803d" : "#2563eb"}
             opacity={0.72}
           />
         </g>
@@ -327,13 +354,23 @@ export default function TankNodeView({
         {name}
       </text>
 
+      <text
+        x={W / 2}
+        y={40}
+        textAnchor="middle"
+        fill={isCloacas ? "#15803d" : "#64748b"}
+        style={{ fontSize: 10, fontWeight: 900, letterSpacing: 0.6, pointerEvents: "none" }}
+      >
+        {`TANQUE · ${servicioLabel}`}
+      </text>
+
       <rect
         x={bodyX}
         y={bodyY}
         width={bodyW}
         height={bodyH}
         rx={15}
-        fill={`url(#tankSteel-${n.id})`}
+        fill={isCloacas ? "#dcfce7" : `url(#tankSteel-${n.id})`}
         stroke={stroke}
         strokeWidth={2.8}
       />
@@ -364,7 +401,7 @@ export default function TankNodeView({
           y={waterY}
           width={bodyW}
           height={waterH}
-          fill="#60a5fa"
+          fill={isCloacas ? "#22c55e" : "#60a5fa"}
           opacity={0.92}
         />
         <rect
@@ -372,7 +409,7 @@ export default function TankNodeView({
           y={waterY}
           width={bodyW}
           height={5}
-          fill="#2563eb"
+          fill={isCloacas ? "#15803d" : "#2563eb"}
           opacity={0.72}
         />
       </g>

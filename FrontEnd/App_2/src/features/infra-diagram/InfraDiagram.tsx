@@ -20,6 +20,7 @@ import { saveLayoutToStorage } from "@/layout/layoutIO";
 import { fetchJSON, updateLayout, updateLayoutMany } from "./services/data";
 import { createEdge as apiCreateEdge, deleteEdge as apiDeleteEdge } from "./services/edges";
 import { getPumpPipeTaps, savePumpPipeTap, type PumpPipeTap, type PumpPipeTapMode } from "./services/pumpTaps";
+import { saveNodeServicio, type ServicioSCADA } from "./services/nodeServicio";
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
@@ -350,6 +351,8 @@ export default function InfraDiagram() {
 
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
+  const [activeServicio, setActiveServicio] = useState<ServicioSCADA>("agua");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
   const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
@@ -432,6 +435,7 @@ export default function InfraDiagram() {
       categoria: (n as any).categoria ?? null,
       in_maintenance: (n as any).in_maintenance ?? false,
       orientacion: (n as any).orientacion ?? null,
+      servicio: (n as any).servicio ?? "agua",
       location_id: (n as any).location_id ?? null,
       location_name: (n as any).location_name ?? null,
 
@@ -631,6 +635,7 @@ export default function InfraDiagram() {
         setPumpTapFrom(null);
         setConnectFrom(null);
         setSelectedEdgeId(null);
+        setSelectedNodeId(null);
       }
       return next;
     });
@@ -759,9 +764,21 @@ export default function InfraDiagram() {
   );
 
   const visibleNodes = useMemo(
-    () => nodes.filter((n) => n.type !== "valve"),
-    [nodes]
+    () =>
+      nodes.filter((n) => {
+        if (n.type === "valve") return false;
+        if (activeServicio === "todos") return true;
+        return ((n as any).servicio ?? "agua") === activeServicio;
+      }),
+    [nodes, activeServicio]
   );
+
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((n) => n.id)),
+    [visibleNodes]
+  );
+
+  const selectedNode = selectedNodeId ? nodesById[selectedNodeId] : null;
 
 
 
@@ -786,12 +803,84 @@ export default function InfraDiagram() {
           boxSizing: "border-box",
         }}
       >
-        {error ? (
-          <span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>
-        ) : isFetching ? (
-          "Actualizando…"
-        ) : (
-          "Sincronizado"
+        {error && (<span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>)}
+
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            marginLeft: 14,
+            padding: 3,
+            borderRadius: 10,
+            background: "#eef2f7",
+          }}
+        >
+          {([
+            ["agua", "Agua"],
+            ["cargaderos", "Cargaderos de agua"],
+            ["cloacas", "Cloacas"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => {
+                setActiveServicio(id);
+                setSelectedNodeId(null);
+              }}
+              style={{
+                padding: "5px 10px",
+                borderRadius: 8,
+                border: "none",
+                background: activeServicio === id ? "#0f172a" : "transparent",
+                color: activeServicio === id ? "#ffffff" : "#475569",
+                fontWeight: 800,
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {editMode && selectedNode && ["tank", "pump"].includes(selectedNode.type) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#64748b" }}>
+              Grupo:
+            </span>
+            <select
+              value={((selectedNode as any).servicio ?? "agua") as ServicioSCADA}
+              onChange={async (e) => {
+                const servicio = e.target.value as ServicioSCADA;
+                try {
+                  await saveNodeServicio(selectedNode.id, servicio);
+                  setNodes((prev) =>
+                    prev.map((node) =>
+                      node.id === selectedNode.id
+                        ? ({ ...node, servicio } as any)
+                        : node
+                    )
+                  );
+                } catch (err: any) {
+                  console.error(err);
+                  alert(err?.message || "No se pudo cambiar el grupo");
+                }
+              }}
+              style={{
+                height: 28,
+                borderRadius: 7,
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#0f172a",
+                fontSize: 11,
+                fontWeight: 800,
+                padding: "0 8px",
+              }}
+            >
+              <option value="agua">Agua</option>
+              <option value="cargaderos">Cargaderos de agua</option>
+              <option value="cloacas">Cloacas</option>
+            </select>
+          </div>
         )}
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -922,38 +1011,9 @@ export default function InfraDiagram() {
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#f3f6f9" />
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.03} />
 
-                {locationGroups.map((g) => (
-                  <g
-                    key={`loc-bg-${g.key}`}
-                    style={{ cursor: "default" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleLocationClick(g);
-                    }}
-                  >
-                    <rect
-                      x={g.bbox.minx}
-                      y={g.bbox.miny}
-                      width={g.bbox.w}
-                      height={g.bbox.h}
-                      rx={18}
-                      ry={18}
-                      fill="#f8fafc"
-                      fillOpacity={0.38}
-                      stroke="#d6dee8"
-                      strokeWidth={1.2}
-                    />
-                    <text
-                      x={g.bbox.minx + 16}
-                      y={g.bbox.miny + 24}
-                      style={{ fontSize: 14, fontWeight: 800, fill: "#334155", pointerEvents: "none" }}
-                    >
-                      {g.name === "Sin ubicación" ? "" : g.name}
-                    </text>
-                  </g>
-                ))}
+                {/* Localidades visuales eliminadas: sin fondos ni títulos. */}
 
-                {edgesForRender.map((e) => (
+                {edgesForRender.filter((e) => visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b)).map((e) => (
                   <EditableEdge
                     key={`edge-${e.id}`}
                     id={e.id}
@@ -976,12 +1036,18 @@ export default function InfraDiagram() {
                   <PumpPipeTapView
                     key={`pump-tap-${tap.id}`}
                     tap={tap}
-                    pump={nodesById[tap.pump_node_id]}
+                    pump={visibleNodeIds.has(tap.pump_node_id) ? nodesById[tap.pump_node_id] : undefined}
                     visiblePoint={editMode && connectMode}
                   />
                 ))}
 
-                {visibleNodes.map((n) =>
+                {[...visibleNodes]
+                  .sort((a, b) => {
+                    const za = a.type === "network_analyzer" ? 1 : 0;
+                    const zb = b.type === "network_analyzer" ? 1 : 0;
+                    return za - zb;
+                  })
+                  .map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
                       key={n.id}
@@ -992,7 +1058,13 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() => {
+                        if (editMode && !connectMode) {
+                          setSelectedNodeId(n.id);
+                          return;
+                        }
+                        if (!editMode && !connectMode) maybeOpenOps(n);
+                      }}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -1007,7 +1079,13 @@ export default function InfraDiagram() {
                       tapConnectMode={editMode && connectMode}
                       tapSelected={pumpTapFrom === n.id}
                       onTapSelect={handlePumpTapSelect}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() => {
+                        if (editMode && !connectMode) {
+                          setSelectedNodeId(n.id);
+                          return;
+                        }
+                        if (!editMode && !connectMode) maybeOpenOps(n);
+                      }}
                     />
                   ) : n.type === "manifold" ? (
                     <ManifoldNodeView
@@ -1128,6 +1206,8 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
+
 
 
 

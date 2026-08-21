@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
 import json
 
@@ -193,6 +193,12 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       c.in_maintenance,
                       CASE WHEN c.type = 'tank' THEN t.categoria ELSE NULL END AS categoria,
                       CASE WHEN c.type = 'pump' THEN p.orientacion ELSE NULL END AS orientacion,
+                      CASE
+                        WHEN c.type = 'tank' THEN t.servicio
+                        WHEN c.type = 'pump' THEN p.servicio
+                        WHEN c.type = 'manifold' THEN m.servicio
+                        ELSE 'agua'
+                      END::text AS servicio,
                       CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
                       c.signals,
                       COALESCE(
@@ -253,6 +259,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                       FALSE AS in_maintenance,
                       NULL::text AS categoria,
                       NULL::text AS orientacion,
+                      na.servicio::text AS servicio,
                       lna.meta AS meta,
                       '{}'::jsonb AS signals,
                       na.location_id::bigint AS location_id,
@@ -302,6 +309,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     FALSE AS in_maintenance,
                     t.categoria::text AS categoria,
                     NULL::text AS orientacion,
+                    t.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -378,6 +386,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     FALSE AS in_maintenance,
                     NULL::text AS orientacion,
                     NULL::text AS categoria,
+                    NULL::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lv.meta AS meta,
@@ -431,6 +440,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     FALSE AS in_maintenance,
                     NULL::text AS orientacion,
                     NULL::text AS categoria,
+                    m.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -460,6 +470,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     FALSE AS in_maintenance,
                     NULL::text AS categoria,
                     NULL::text AS orientacion,
+                    na.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lna.meta AS meta,
@@ -473,15 +484,15 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   LEFT JOIN public.layout_network_analyzers lna
                     ON lna.analyzer_id = na.id
                 )
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM m
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM na
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
                 (company_id,),
@@ -849,15 +860,15 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                   JOIN locs lx ON lx.id = l.id
                 )
 
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM t
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM t
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM p
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM p
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM v
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM v
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM m
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM m
                 UNION ALL
-                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM na
+                SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,servicio,location_id,location_name,meta,signals FROM na
                 ORDER BY type,id
                 """,
                 (company_id,),
