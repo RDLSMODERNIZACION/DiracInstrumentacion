@@ -1,4 +1,4 @@
-from datetime import date, datetime
+﻿from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 from calendar import monthrange
@@ -260,7 +260,7 @@ def get_pump_daily(
             last_event_at,
             estado_operativo,
             problem_score
-        from kpi.v_pump_operation_1d
+        from kpi.v_pump_operation_1d_corrected
         where day_ts between %s::date and %s::date
           and (%s::bigint is null or location_id = %s::bigint)
           and (%s::bigint is null or pump_id = %s::bigint)
@@ -303,7 +303,7 @@ def get_pump_daily_chart(
             coalesce(sum(stops_count), 0)::int as total_stops,
             round(avg(availability_pct), 2) as avg_availability_pct,
             coalesce(sum(problem_score), 0)::numeric(12,2) as total_problem_score
-        from kpi.v_pump_operation_1d
+        from kpi.v_pump_operation_1d_corrected
         where day_ts between %s::date and %s::date
           and (%s::bigint is null or location_id = %s::bigint)
           and (%s::bigint is null or pump_id = %s::bigint)
@@ -381,7 +381,7 @@ def get_pump_ranking(
                 else 'normal'
             end as estado_operativo
 
-        from kpi.v_pump_operation_1d
+        from kpi.v_pump_operation_1d_corrected
         where day_ts between %s::date and %s::date
           and (%s::bigint is null or location_id = %s::bigint)
         group by
@@ -663,9 +663,9 @@ def get_tank_day_events(
             tce.event_type,
             case
                 when tce.event_type = 'low' then 'Nivel bajo'
-                when tce.event_type = 'low_low' then 'Nivel bajo crítico'
+                when tce.event_type = 'low_low' then 'Nivel bajo crÃ­tico'
                 when tce.event_type = 'high' then 'Nivel alto'
-                when tce.event_type = 'high_high' then 'Nivel alto crítico'
+                when tce.event_type = 'high_high' then 'Nivel alto crÃ­tico'
                 else tce.event_type
             end as event_label,
             tce.configured_limit,

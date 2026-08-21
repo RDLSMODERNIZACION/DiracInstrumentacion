@@ -945,7 +945,329 @@ export default function Widget() {
         ]}
       />
 
+            {/* V18.14 RED PRINCIPAL */}
       {tab === "operacion" && (
+        <WaterNetworkOverviewLive
+          pumpTs={playback.pumpTs}
+          tankTs={playback.tankTs}
+          pumpTimelineItems={pumpTimelineItems}
+          xDomain={playback.domain}
+          xTicks={playback.ticks}
+          pumpSummaryItems={liveSync.pumpsSummary?.items ?? []}
+          tankSummaryItems={liveSync.tanksSummary?.items ?? []}
+          locationLabel={principalLocName}
+        />
+      )}
+
+            {tab === "operacion" && (
+        <>
+{/* V18.16 AUDITORIA */}<section>
+            <Card className="rounded-2xl border-blue-200 bg-blue-50/40">
+              <CardHeader className="pb-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-base text-blue-900">
+                    Auditoría comparativa
+                  </CardTitle>
+
+                  {auditEnabled && (
+                    <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
+                      Comparación activa
+                    </span>
+                  )}
+                </div>
+              </CardHeader>
+
+              <CardContent>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={auditEnabled}
+                      onChange={(e) => setAuditEnabled(e.target.checked)}
+                    />
+                    Auditar / comparar localidades
+                  </label>
+
+                  {auditEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setAudit2Enabled((v) => !v)}
+                      className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                    >
+                      {audit2Enabled
+                        ? "Quitar segundo auditado"
+                        : "Agregar otro auditado"}
+                    </button>
+                  )}
+                </div>
+
+                {auditEnabled && (
+                  <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-3">
+                    <PlaybackControls
+                      disabled={!locId}
+                      playEnabled={playback.playEnabled}
+                      setPlayEnabled={playback.setPlayEnabled}
+                      playDate={playback.playDate}
+                      setPlayDate={playback.setPlayDate}
+                      minDate={playback.minDate}
+                      maxDate={playback.maxDate}
+                      prevDay={playback.prevDay}
+                      nextDay={playback.nextDay}
+                      goToday={playback.goToday}
+                      selectedDayLabel={playback.selectedDayLabel}
+                      startLabel={playback.startLabel}
+                      endLabel={playback.endLabel}
+                      loadingPlay={playback.loadingPlay}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
+          {auditEnabled && (
+            <section className="rounded-2xl border-2 border-blue-300 bg-blue-50/30 p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-blue-900">
+                    Comparación directa
+                  </div>
+
+                  <div className="text-xs text-blue-700">
+                    Cada fila tiene una sola ubicación. Dentro de cada fila
+                    podés seleccionar qué tanques y qué bombas mostrar.
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-3">
+                <div className="mb-3">
+                  <LocationSelect
+                    label="Ubicación principal"
+                    value={loc}
+                    onChange={(v) => setLoc(v as number | "all")}
+                    options={locOptionsAll}
+                    allowAll
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div>
+                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                      PRINCIPAL · TANQUES · {principalLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Tanques"
+                        allLabel="Todos los tanques"
+                        options={tankOptions}
+                        selectedIds={selectedTankIds}
+                        setSelectedIds={setSelectedTankIds}
+                        getId={getTankId}
+                        getName={getTankName}
+                      />
+                    </div>
+
+                    <TankLevelChart
+                      ts={playback.tankTs}
+                      syncId="row-principal-sync"
+                      title={`Principal · Nivel de tanques · ${principalLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                      showBrushIf={120}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">
+                      PRINCIPAL · BOMBAS · {principalLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Bombas"
+                        allLabel="Todas las bombas"
+                        options={pumpOptions}
+                        selectedIds={selectedPumpIds}
+                        setSelectedIds={setSelectedPumpIds}
+                        getId={getPumpId}
+                        getName={getPumpName}
+                      />
+                    </div>
+
+                    <OpsPumpsProfile
+                      pumpsTs={playback.pumpTs}
+                      timelineItems={pumpTimelineItems}
+                      max={totalPumpsCap}
+                      syncId="row-principal-sync"
+                      title={`Principal · Bombas ON · ${principalLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-4 rounded-2xl border border-blue-200 bg-white p-3">
+                <div className="mb-3">
+                  <LocationSelect
+                    label="Ubicación auditada 1"
+                    value={auditLoc}
+                    onChange={(v) => setAuditLoc(v as number | "")}
+                    options={locOptionsAll}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div>
+                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                      AUDITADO 1 · TANQUES · {auditLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Tanques"
+                        allLabel="Todos los tanques"
+                        options={audit.tankOptions ?? []}
+                        selectedIds={audit.selectedTankIds}
+                        setSelectedIds={audit.setSelectedTankIds}
+                        getId={getTankId}
+                        getName={getTankName}
+                      />
+                    </div>
+
+                    <TankLevelChart
+                      ts={audit.tankTs ?? { timestamps: [], level_percent: [] }}
+                      syncId="row-audit-1-sync"
+                      title={`Auditado 1 · Nivel de tanques · ${auditLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-800">
+                      AUDITADO 1 · BOMBAS · {auditLocName}
+                    </div>
+
+                    <div className="mb-2">
+                      <EntitySelector
+                        title="Bombas"
+                        allLabel="Todas las bombas"
+                        options={audit.pumpOptions ?? []}
+                        selectedIds={audit.selectedPumpIds}
+                        setSelectedIds={audit.setSelectedPumpIds}
+                        getId={getPumpId}
+                        getName={getPumpName}
+                      />
+                    </div>
+
+                    <OpsPumpsProfile
+                      pumpsTs={audit.pumpTs ?? { timestamps: [], is_on: [] }}
+                      max={auditPumpsCap}
+                      syncId="row-audit-1-sync"
+                      title={`Auditado 1 · Bombas ON · ${auditLocName}`}
+                      tz="America/Argentina/Buenos_Aires"
+                      xDomain={playback.domain}
+                      xTicks={playback.ticks}
+                      hoverX={null}
+                      onHoverX={() => {}}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {audit2Enabled && (
+                <div className="rounded-2xl border border-indigo-200 bg-white p-3">
+                  <div className="mb-3">
+                    <LocationSelect
+                      label="Ubicación auditada 2"
+                      value={auditLoc2}
+                      onChange={(v) => setAuditLoc2(v as number | "")}
+                      options={locOptionsAll}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    <div>
+                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
+                        AUDITADO 2 · TANQUES · {auditLocName2}
+                      </div>
+
+                      <div className="mb-2">
+                        <EntitySelector
+                          title="Tanques"
+                          allLabel="Todos los tanques"
+                          options={audit2.tankOptions ?? []}
+                          selectedIds={audit2.selectedTankIds}
+                          setSelectedIds={audit2.setSelectedTankIds}
+                          getId={getTankId}
+                          getName={getTankName}
+                        />
+                      </div>
+
+                      <TankLevelChart
+                        ts={
+                          audit2.tankTs ?? { timestamps: [], level_percent: [] }
+                        }
+                        syncId="row-audit-2-sync"
+                        title={`Auditado 2 · Nivel de tanques · ${auditLocName2}`}
+                        tz="America/Argentina/Buenos_Aires"
+                        xDomain={playback.domain}
+                        xTicks={playback.ticks}
+                        hoverX={null}
+                        onHoverX={() => {}}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="mb-2 rounded-xl bg-indigo-100 px-3 py-2 text-xs font-semibold text-indigo-800">
+                        AUDITADO 2 · BOMBAS · {auditLocName2}
+                      </div>
+
+                      <div className="mb-2">
+                        <EntitySelector
+                          title="Bombas"
+                          allLabel="Todas las bombas"
+                          options={audit2.pumpOptions ?? []}
+                          selectedIds={audit2.selectedPumpIds}
+                          setSelectedIds={audit2.setSelectedPumpIds}
+                          getId={getPumpId}
+                          getName={getPumpName}
+                        />
+                      </div>
+
+                      <OpsPumpsProfile
+                        pumpsTs={
+                          audit2.pumpTs ?? { timestamps: [], is_on: [] }
+                        }
+                        max={auditPumpsCap2}
+                        syncId="row-audit-2-sync"
+                        title={`Auditado 2 · Bombas ON · ${auditLocName2}`}
+                        tz="America/Argentina/Buenos_Aires"
+                        xDomain={playback.domain}
+                        xTicks={playback.ticks}
+                        hoverX={null}
+                        onHoverX={() => {}}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+{false && tab === "operacion" && (
         <>
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <TankLevelChart
@@ -1293,7 +1615,10 @@ export default function Widget() {
         </>
       )}
 
-      {tab === "eficiencia" && (
+      
+        </>
+      )}
+{tab === "eficiencia" && (
         <section>
           <EnergyEfficiencyPage
             locationId={locId}
@@ -1302,7 +1627,25 @@ export default function Widget() {
         </section>
       )}
 
+            {/* V18.19 SELECTOR CONFIABILIDAD */}
       {tab === "confiabilidad" && (
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="w-full max-w-sm">
+            <LocationSelect
+              label="UbicaciÃ³n"
+              value={loc}
+              onChange={(v) => setLoc(v as number | "all")}
+              options={locOptionsAll}
+              allowAll
+            />
+          </div>
+
+          <div className="text-xs text-slate-400">
+            Filtro exclusivo de OperaciÃ³n y confiabilidad
+          </div>
+        </div>
+      )}
+{tab === "confiabilidad" && (
         <ReliabilityPage
           locationId={loc === "all" ? "all" : locId ?? "all"}
           selectedPumpIds={selectedPumpIds}
@@ -1348,6 +1691,10 @@ export default function Widget() {
     </div>
   );
 }
+
+
+
+
 
 
 
