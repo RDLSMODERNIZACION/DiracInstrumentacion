@@ -685,7 +685,7 @@ export default function Widget() {
 
   const pollMs = tab === "operacion" ? 60_000 : 10 * 60_000;
 
-  const shouldLoadPumpTimeline = tab === "operacion" && locId != null;
+  const shouldLoadPumpTimeline = tab === "operacion";
 
   const liveSync = useLiveOps({
     locationId: locId,
@@ -1691,6 +1691,7 @@ export default function Widget() {
     </div>
   );
 }
+
 
 
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -420,7 +420,7 @@ function PumpNamesBlock({
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
       <div className={`mb-1 text-[11px] font-semibold ${colorClass}`}>
-        {title} · {names?.length ?? 0}
+        {title} Â· {names?.length ?? 0}
       </div>
 
       {names && names.length > 0 ? (
@@ -446,91 +446,67 @@ function CustomTooltip({
   label,
   payload,
   tz,
+  availablePumpCount,
 }: {
   active?: boolean;
   label?: any;
   payload?: any[];
   tz: string;
+  availablePumpCount?: number;
 }) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload as ChartRow | undefined;
   if (!row) return null;
 
+  const onCount =
+    typeof row.on === "number" && Number.isFinite(row.on) ? row.on : 0;
+
+  const available =
+    typeof availablePumpCount === "number" &&
+    Number.isFinite(availablePumpCount)
+      ? availablePumpCount
+      : 0;
+
   return (
-    <div className="w-[340px] rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-lg">
-      <div className="mb-2 font-semibold text-slate-700">
+    <div className="w-[320px] rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-lg">
+      <div className="mb-3 font-semibold text-slate-700">
         {fmtDateTime(Number(label ?? row.ms), tz)}
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2">
-        <div className="rounded-lg bg-emerald-50 px-2 py-1">
-          <div className="text-[11px] text-emerald-700">Bombas ON</div>
-          <div className="text-lg font-bold text-emerald-800">
-            {fmtInt(row.on)}
+        <div className="rounded-lg bg-emerald-50 px-3 py-2">
+          <div className="text-[11px] font-medium text-emerald-700">
+            Bombas encendidas
+          </div>
+          <div className="mt-1 text-2xl font-bold text-emerald-800">
+            {fmtInt(onCount)}
           </div>
         </div>
 
-        <div className="rounded-lg bg-slate-100 px-2 py-1">
-          <div className="text-[11px] text-slate-500">Bombas OFF</div>
-          <div className="text-lg font-bold text-slate-800">
-            {fmtInt(row.off)}
+        <div className="rounded-lg bg-blue-50 px-3 py-2">
+          <div className="text-[11px] font-medium text-blue-700">
+            Bombas disponibles
           </div>
-        </div>
-
-        <div className="rounded-lg bg-blue-50 px-2 py-1">
-          <div className="text-[11px] text-blue-700">Online</div>
-          <div className="text-lg font-bold text-blue-800">
-            {fmtInt(row.online)}
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-red-50 px-2 py-1">
-          <div className="text-[11px] text-red-700">Sin comunicación</div>
-          <div className="text-lg font-bold text-red-800">
-            {fmtInt(row.offline)}
+          <div className="mt-1 text-2xl font-bold text-blue-800">
+            {fmtInt(available)}
           </div>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <PumpNamesBlock
-          title="Encendidas en este minuto"
-          names={row.activePumpNames}
-          empty="No hay detalle de bombas encendidas para este minuto."
-          colorClass="text-emerald-700"
-        />
-
-        <PumpNamesBlock
-          title="Apagadas"
-          names={row.stoppedPumpNames}
-          empty="Sin detalle de bombas apagadas."
-          colorClass="text-slate-600"
-        />
-
-        {row.offlinePumpNames && row.offlinePumpNames.length > 0 && (
-          <PumpNamesBlock
-            title="Sin comunicación"
-            names={row.offlinePumpNames}
-            empty="Sin bombas offline."
-            colorClass="text-red-700"
-          />
-        )}
-      </div>
-
-      <div className="mt-2 border-t pt-2 text-[11px] text-slate-500">
-        Uso: <span className="font-semibold">{fmtPct(row.onPct)}</span> ·
-        Comunicación:{" "}
-        <span className="font-semibold">{fmtPct(row.onlinePct)}</span>
-      </div>
+      <PumpNamesBlock
+        title="Encendidas en este minuto"
+        names={row.activePumpNames}
+        empty="No hay bombas encendidas registradas para este minuto."
+        colorClass="text-emerald-700"
+      />
     </div>
   );
 }
-
 export default function OpsPumpsProfile({
   pumpsTs,
   comparePumpsTs,
-  compareLabel = "Auditoría",
+  compareLabel = "AuditorÃ­a",
   max,
   syncId,
   title = "Bombas ON",
@@ -541,6 +517,7 @@ export default function OpsPumpsProfile({
   onHoverX,
   showBrushIf = 0,
   timelineItems = [],
+  availablePumpCount = 0,
 }: {
   pumpsTs?: PumpsTs;
   comparePumpsTs?: PumpsTs;
@@ -667,7 +644,7 @@ export default function OpsPumpsProfile({
           <div className="text-sm font-semibold text-slate-700">{title}</div>
 
           <div className="mt-1 text-xs text-slate-400">
-            Tocá o pasá por un punto del gráfico para ver qué bombas estaban
+            TocÃ¡ o pasÃ¡ por un punto del grÃ¡fico para ver quÃ© bombas estaban
             encendidas en ese minuto.
           </div>
         </div>
@@ -693,7 +670,7 @@ export default function OpsPumpsProfile({
           )}
 
           <div className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
-            Máx ON:{" "}
+            MÃ¡x ON:{" "}
             <span className="font-semibold">
               {fmtInt(summary.maxPoint?.value)}
             </span>
@@ -769,7 +746,7 @@ export default function OpsPumpsProfile({
               />
 
               <Tooltip
-                content={(props: any) => <CustomTooltip {...props} tz={tz} />}
+                content={(props: any) => <CustomTooltip {...props} tz={tz} availablePumpCount={availablePumpCount} />}
               />
 
               <Legend
@@ -794,7 +771,7 @@ export default function OpsPumpsProfile({
                 <Area
                   type="stepAfter"
                   dataKey="offline"
-                  name="Sin comunicación"
+                  name="Sin comunicaciÃ³n"
                   stroke="#dc2626"
                   fill="#fecaca"
                   fillOpacity={0.35}
@@ -828,7 +805,7 @@ export default function OpsPumpsProfile({
                   stroke="#ffffff"
                   strokeWidth={2}
                   label={{
-                    value: `Máx ${fmtInt(summary.maxPoint.value)}`,
+                    value: `MÃ¡x ${fmtInt(summary.maxPoint.value)}`,
                     position: "top",
                     fill: "#059669",
                     fontSize: 11,
@@ -896,7 +873,7 @@ export default function OpsPumpsProfile({
             <PumpNamesBlock
               title="Encendidas"
               names={selectedRow.activePumpNames}
-              empty="No había bombas encendidas o no llegó detalle."
+              empty="No habÃ­a bombas encendidas o no llegÃ³ detalle."
               colorClass="text-emerald-700"
             />
 
@@ -908,7 +885,7 @@ export default function OpsPumpsProfile({
             />
 
             <PumpNamesBlock
-              title="Sin comunicación"
+              title="Sin comunicaciÃ³n"
               names={selectedRow.offlinePumpNames}
               empty="Sin bombas offline."
               colorClass="text-red-700"
@@ -920,7 +897,7 @@ export default function OpsPumpsProfile({
       {summary.maxPoint ? (
         <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
           <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-700">
-            Máximo ON:{" "}
+            MÃ¡ximo ON:{" "}
             <span className="font-semibold">
               {fmtInt(summary.maxPoint.value)}
             </span>{" "}

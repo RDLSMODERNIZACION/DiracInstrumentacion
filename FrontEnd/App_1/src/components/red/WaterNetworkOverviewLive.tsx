@@ -208,6 +208,15 @@ export default function WaterNetworkOverviewLive({
     return m;
   }, [tankSummaryItems]);
 
+  const availablePumpCount = useMemo(
+    () =>
+      availability.filter(
+        (p) =>
+          p.rol_red === "impulsion_principal" &&
+          p.disponible === true
+      ).length,
+    [availability]
+  );
   const pumpGroups = useMemo(() => {
     const groups = new Map<string, any[]>();
 
@@ -311,6 +320,7 @@ export default function WaterNetworkOverviewLive({
           <OpsPumpsProfile
             pumpsTs={pumpTs}
             timelineItems={pumpTimelineItems}
+            availablePumpCount={availablePumpCount}
             max={12}
             syncId="red-principal-sync"
             title="ImpulsiÃ³n Â· Bombas principales Â· 24 h"
@@ -499,4 +509,5 @@ export default function WaterNetworkOverviewLive({
     </div>
   );
 }
+
 

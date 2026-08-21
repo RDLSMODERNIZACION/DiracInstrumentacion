@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -334,7 +334,7 @@ function statusStyle(status?: string) {
     s.includes("severo") ||
     s.includes("activo") ||
     s.includes("vacio") ||
-    s.includes("vacío") ||
+    s.includes("vacÃ­o") ||
     s.includes("rebalse") ||
     s.includes("muy")
   ) {
@@ -362,7 +362,7 @@ function eventStyle(value?: string) {
   if (
     s.includes("low_low") ||
     s.includes("high_high") ||
-    s.includes("crítico") ||
+    s.includes("crÃ­tico") ||
     s.includes("critico")
   ) {
     return "border-red-200 bg-red-50 text-red-700";
@@ -447,6 +447,11 @@ export default function ReliabilityPage({
   selectedTankIds = "all",
 }: Props) {
   const [view, setView] = useState<ViewMode>("pumps");
+  const [reliabilityPumpFilter, setReliabilityPumpFilter] =
+    useState<"impulsion" | "todas">("impulsion");
+  const [impulsionPumpIds, setImpulsionPumpIds] =
+    useState<Set<number>>(new Set());
+
   const [month, setMonth] = useState(currentMonth());
 
   const [pumpDaily, setPumpDaily] = useState<PumpDailyRow[]>([]);
@@ -473,6 +478,32 @@ export default function ReliabilityPage({
   const [minDurationMinutes, setMinDurationMinutes] = useState("");
 
   const locParam = safeLocationId(locationId);
+  // V18.35 IMPULSION IDS
+  useEffect(() => {
+    let alive = true;
+
+    fetchJson<any[]>("/infraestructura/pump_availability")
+      .then((rows) => {
+        if (!alive) return;
+
+        const ids = new Set<number>(
+          (Array.isArray(rows) ? rows : [])
+            .map((r: any) => Number(r?.id ?? r?.pump_id))
+            .filter((id: number) => Number.isFinite(id))
+        );
+
+        setImpulsionPumpIds(ids);
+      })
+      .catch((err) => {
+        console.error("[ReliabilityPage] impulsion filter:", err);
+        if (alive) setImpulsionPumpIds(new Set());
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
 
   const selectedPumpSet = useMemo(
     () => normalizeIdSet(selectedPumpIds),
@@ -571,7 +602,7 @@ export default function ReliabilityPage({
 
       setDayEvents(Array.isArray(data.items) ? data.items : []);
     } catch (e: any) {
-      setEventError(e?.message || "No se pudo cargar el historial del día.");
+      setEventError(e?.message || "No se pudo cargar el historial del dÃ­a.");
     } finally {
       setLoadingEvents(false);
     }
@@ -616,9 +647,24 @@ export default function ReliabilityPage({
   }
 
   const filteredPumpDaily = useMemo(() => {
-    if (!selectedPumpSet) return pumpDaily;
-    return pumpDaily.filter((r) => selectedPumpSet.has(Number(r.pump_id)));
-  }, [pumpDaily, selectedPumpSet]);
+    return pumpDaily.filter((r) => {
+      const id = Number(r.pump_id);
+
+      if (selectedPumpSet && !selectedPumpSet.has(id)) {
+        return false;
+      }
+
+      if (
+        reliabilityPumpFilter === "impulsion" &&
+        impulsionPumpIds.size > 0 &&
+        !impulsionPumpIds.has(id)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pumpDaily, selectedPumpSet, reliabilityPumpFilter, impulsionPumpIds]);
 
   const filteredTankDaily = useMemo(() => {
     if (!selectedTankSet) return tankDaily;
@@ -626,9 +672,24 @@ export default function ReliabilityPage({
   }, [tankDaily, selectedTankSet]);
 
   const filteredPumpTable = useMemo(() => {
-    if (!selectedPumpSet) return pumpTable;
-    return pumpTable.filter((r) => selectedPumpSet.has(Number(r.pump_id)));
-  }, [pumpTable, selectedPumpSet]);
+    return pumpTable.filter((r) => {
+      const id = Number(r.pump_id);
+
+      if (selectedPumpSet && !selectedPumpSet.has(id)) {
+        return false;
+      }
+
+      if (
+        reliabilityPumpFilter === "impulsion" &&
+        impulsionPumpIds.size > 0 &&
+        !impulsionPumpIds.has(id)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pumpTable, selectedPumpSet, reliabilityPumpFilter, impulsionPumpIds]);
 
   const filteredTankTable = useMemo(() => {
     if (!selectedTankSet) return tankTable;
@@ -905,13 +966,13 @@ export default function ReliabilityPage({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Operación y confiabilidad
+              OperaciÃ³n y confiabilidad
             </div>
             <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950">
               Seguimiento mensual de {view === "pumps" ? "bombas" : "tanques"}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Gráfico mensual, tabla ordenable e historial horario al seleccionar un día.
+              GrÃ¡fico mensual, tabla ordenable e historial horario al seleccionar un dÃ­a.
             </p>
           </div>
 
@@ -950,7 +1011,7 @@ export default function ReliabilityPage({
               }}
               className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
-              ← Mes anterior
+              â† Mes anterior
             </button>
 
             <input
@@ -971,14 +1032,14 @@ export default function ReliabilityPage({
               }}
               className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
-              Mes siguiente →
+              Mes siguiente â†’
             </button>
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
           <span className="rounded-full bg-slate-100 px-3 py-1">
-            Ubicación: {locationId === "all" ? "Todas" : locationId}
+            UbicaciÃ³n: {locationId === "all" ? "Todas" : locationId}
           </span>
           <span className="rounded-full bg-slate-100 px-3 py-1">
             Mes: {month}
@@ -988,6 +1049,49 @@ export default function ReliabilityPage({
           </span>
         </div>
       </section>
+
+      {/* V18.35 FILTRO IMPULSION */}
+      {view === "pumps" && (
+        <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Filtro de bombas
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setReliabilityPumpFilter("impulsion")}
+              className={
+                "rounded-full border px-4 py-2 text-sm font-semibold transition " +
+                (reliabilityPumpFilter === "impulsion"
+                  ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50")
+              }
+            >
+              ImpulsiÃ³n
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setReliabilityPumpFilter("todas")}
+              className={
+                "rounded-full border px-4 py-2 text-sm font-semibold transition " +
+                (reliabilityPumpFilter === "todas"
+                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50")
+              }
+            >
+              Todas
+            </button>
+
+            <span className="ml-1 text-xs text-slate-400">
+              {reliabilityPumpFilter === "impulsion"
+                ? `${impulsionPumpIds.size} bombas de impulsiÃ³n`
+                : "Todas las bombas"}
+            </span>
+          </div>
+        </section>
+      )}
 
       {error ? (
         <section className="rounded-3xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
@@ -1013,7 +1117,7 @@ export default function ReliabilityPage({
             <KpiCard
               label="Disponibilidad prom."
               value={summary.c}
-              help="Promedio de días con datos"
+              help="Promedio de dÃ­as con datos"
               tone={summary.toneC as KpiTone}
             />
             <KpiCard
@@ -1032,7 +1136,7 @@ export default function ReliabilityPage({
               tone={summary.toneA as KpiTone}
             />
             <KpiCard
-              label="Críticos"
+              label="CrÃ­ticos"
               value={summary.b}
               help="Low-low + high-high"
               tone={summary.toneB as KpiTone}
@@ -1040,11 +1144,11 @@ export default function ReliabilityPage({
             <KpiCard
               label="Activos"
               value={summary.c}
-              help="Eventos todavía activos"
+              help="Eventos todavÃ­a activos"
               tone={summary.toneC as KpiTone}
             />
             <KpiCard
-              label="Duración acum."
+              label="DuraciÃ³n acum."
               value={summary.d}
               help="Tiempo total de eventos"
               tone={summary.toneD as KpiTone}
@@ -1058,11 +1162,11 @@ export default function ReliabilityPage({
           <div>
             <h3 className="text-lg font-black text-slate-950">
               {view === "pumps"
-                ? "Arranques, paradas y disponibilidad por día"
-                : "Eventos de tanques por día"}
+                ? "Arranques, paradas y disponibilidad por dÃ­a"
+                : "Eventos de tanques por dÃ­a"}
             </h3>
             <p className="text-sm text-slate-500">
-              Tocá una barra para ver el historial horario del día en la sección inferior.
+              TocÃ¡ una barra para ver el historial horario del dÃ­a en la secciÃ³n inferior.
             </p>
           </div>
 
@@ -1152,7 +1256,7 @@ export default function ReliabilityPage({
                       onClick={handleBarClick}
                     />
                     <Bar
-                      name="Bajo crítico"
+                      name="Bajo crÃ­tico"
                       dataKey="low_critical_events"
                       stackId="events"
                       fill="#1d4ed8"
@@ -1168,7 +1272,7 @@ export default function ReliabilityPage({
                       onClick={handleBarClick}
                     />
                     <Bar
-                      name="Alto crítico"
+                      name="Alto crÃ­tico"
                       dataKey="high_critical_events"
                       stackId="events"
                       fill="#dc2626"
@@ -1193,8 +1297,8 @@ export default function ReliabilityPage({
                 {view === "pumps" ? "bombas" : "tanques"}
               </h3>
               <p className="text-sm text-slate-500">
-                Tocá una columna para ordenar por disponibilidad, arranques,
-                eventos, duración o score.
+                TocÃ¡ una columna para ordenar por disponibilidad, arranques,
+                eventos, duraciÃ³n o score.
               </p>
             </div>
           </div>
@@ -1204,7 +1308,7 @@ export default function ReliabilityPage({
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left font-bold">Equipo</th>
-                  <th className="px-4 py-3 text-left font-bold">Ubicación</th>
+                  <th className="px-4 py-3 text-left font-bold">UbicaciÃ³n</th>
 
                   {view === "pumps" ? (
                     <>
@@ -1257,31 +1361,31 @@ export default function ReliabilityPage({
                         onClick={() => toggleSort("low_critical_events")}
                         className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
                       >
-                        Bajo crítico
+                        Bajo crÃ­tico
                       </th>
                       <th
                         onClick={() => toggleSort("high_critical_events")}
                         className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
                       >
-                        Alto crítico
+                        Alto crÃ­tico
                       </th>
                       <th
                         onClick={() => toggleSort("min_detected_value")}
                         className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
                       >
-                        Valor mín.
+                        Valor mÃ­n.
                       </th>
                       <th
                         onClick={() => toggleSort("max_detected_value")}
                         className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
                       >
-                        Valor máx.
+                        Valor mÃ¡x.
                       </th>
                       <th
                         onClick={() => toggleSort("total_duration_seconds")}
                         className="cursor-pointer px-4 py-3 text-right font-bold hover:bg-slate-100"
                       >
-                        Duración
+                        DuraciÃ³n
                       </th>
                       <th
                         onClick={() => toggleSort("problem_score")}
@@ -1393,8 +1497,8 @@ export default function ReliabilityPage({
               </h3>
               <p className="text-sm text-slate-500">
                 {view === "pumps"
-                  ? "Encendidos, apagados, horarios y duración de cada estado."
-                  : "Eventos de nivel, valores detectados, horarios y duración."}
+                  ? "Encendidos, apagados, horarios y duraciÃ³n de cada estado."
+                  : "Eventos de nivel, valores detectados, horarios y duraciÃ³n."}
               </p>
             </div>
 
@@ -1411,7 +1515,7 @@ export default function ReliabilityPage({
             <input
               value={eventSearch}
               onChange={(e) => setEventSearch(e.target.value)}
-              placeholder="Buscar equipo o ubicación"
+              placeholder="Buscar equipo o ubicaciÃ³n"
               className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
             />
 
@@ -1429,9 +1533,9 @@ export default function ReliabilityPage({
               ) : (
                 <>
                   <option value="low">Nivel bajo</option>
-                  <option value="low_low">Nivel bajo crítico</option>
+                  <option value="low_low">Nivel bajo crÃ­tico</option>
                   <option value="high">Nivel alto</option>
-                  <option value="high_high">Nivel alto crítico</option>
+                  <option value="high_high">Nivel alto crÃ­tico</option>
                 </>
               )}
             </select>
@@ -1472,7 +1576,7 @@ export default function ReliabilityPage({
               min={0}
               value={minDurationMinutes}
               onChange={(e) => setMinDurationMinutes(e.target.value)}
-              placeholder="Duración mín. min"
+              placeholder="DuraciÃ³n mÃ­n. min"
               className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
             />
           </div>
@@ -1481,7 +1585,7 @@ export default function ReliabilityPage({
             {view === "pumps" ? (
               <>
                 <KpiCard
-                  label="Eventos del día"
+                  label="Eventos del dÃ­a"
                   value={fmtInt(filteredDayEvents.length)}
                   help="Encendidos y apagados filtrados"
                   tone="blue"
@@ -1505,7 +1609,7 @@ export default function ReliabilityPage({
                   tone="slate"
                 />
                 <KpiCard
-                  label="Duración acum."
+                  label="DuraciÃ³n acum."
                   value={fmtDuration(
                     filteredDayEvents.reduce(
                       (acc: number, e: any) =>
@@ -1520,19 +1624,19 @@ export default function ReliabilityPage({
             ) : (
               <>
                 <KpiCard
-                  label="Eventos del día"
+                  label="Eventos del dÃ­a"
                   value={fmtInt(filteredDayEvents.length)}
                   help="Eventos filtrados"
                   tone="blue"
                 />
                 <KpiCard
-                  label="Críticos"
+                  label="CrÃ­ticos"
                   value={fmtInt(
                     filteredDayEvents.filter((e: any) =>
                       ["low_low", "high_high"].includes(e.event_type)
                     ).length
                   )}
-                  help="Bajo crítico + alto crítico"
+                  help="Bajo crÃ­tico + alto crÃ­tico"
                   tone="orange"
                 />
                 <KpiCard
@@ -1545,7 +1649,7 @@ export default function ReliabilityPage({
                   tone="red"
                 />
                 <KpiCard
-                  label="Duración acum."
+                  label="DuraciÃ³n acum."
                   value={fmtDuration(
                     filteredDayEvents.reduce(
                       (acc: number, e: any) =>
@@ -1572,13 +1676,13 @@ export default function ReliabilityPage({
                 <tr>
                   <th className="px-4 py-3 text-left font-bold">Hora</th>
                   <th className="px-4 py-3 text-left font-bold">Equipo</th>
-                  <th className="px-4 py-3 text-left font-bold">Ubicación</th>
+                  <th className="px-4 py-3 text-left font-bold">UbicaciÃ³n</th>
                   <th className="px-4 py-3 text-left font-bold">Evento</th>
 
                   {view === "tanks" ? (
                     <>
                       <th className="px-4 py-3 text-right font-bold">
-                        Valor / límite
+                        Valor / lÃ­mite
                       </th>
                       <th className="px-4 py-3 text-right font-bold">
                         Estado
@@ -1587,7 +1691,7 @@ export default function ReliabilityPage({
                   ) : null}
 
                   <th className="px-4 py-3 text-right font-bold">Fin</th>
-                  <th className="px-4 py-3 text-right font-bold">Duración</th>
+                  <th className="px-4 py-3 text-right font-bold">DuraciÃ³n</th>
                 </tr>
               </thead>
 
@@ -1704,7 +1808,7 @@ export default function ReliabilityPage({
           {selectedDayDailyRows.length > 0 ? (
             <div className="mt-5 rounded-2xl bg-slate-50 p-4">
               <h4 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-500">
-                Resumen agregado del día
+                Resumen agregado del dÃ­a
               </h4>
 
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1727,7 +1831,7 @@ export default function ReliabilityPage({
                         {view === "pumps" ? row.pump_name : row.tank_name}
                       </div>
                       <div className="text-xs text-slate-500">
-                        {row.location_name || "Sin ubicación"}
+                        {row.location_name || "Sin ubicaciÃ³n"}
                       </div>
 
                       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
@@ -1761,7 +1865,7 @@ export default function ReliabilityPage({
                               </div>
                             </div>
                             <div className="rounded-xl bg-slate-50 p-2">
-                              <div className="text-slate-500">Críticos</div>
+                              <div className="text-slate-500">CrÃ­ticos</div>
                               <div className="font-black">
                                 {fmtInt(
                                   toNum(row.low_critical_events) +
@@ -1770,7 +1874,7 @@ export default function ReliabilityPage({
                               </div>
                             </div>
                             <div className="rounded-xl bg-slate-50 p-2">
-                              <div className="text-slate-500">Duración</div>
+                              <div className="text-slate-500">DuraciÃ³n</div>
                               <div className="font-black">
                                 {fmtDuration(row.total_duration_seconds)}
                               </div>
