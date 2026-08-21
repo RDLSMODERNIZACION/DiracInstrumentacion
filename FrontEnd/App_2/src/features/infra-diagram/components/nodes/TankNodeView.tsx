@@ -85,6 +85,8 @@ export default function TankNodeView({
   const chlorineText =
     Number.isFinite(chlorineRaw) ? `${chlorineRaw.toFixed(2)} mg/L` : "-- mg/L";
 
+  const chlorineValueText =
+    Number.isFinite(chlorineRaw) ? chlorineRaw.toFixed(2) : "--";
   const phText =
     Number.isFinite(phRaw) ? phRaw.toFixed(2) : "--";
 
@@ -274,139 +276,78 @@ export default function TankNodeView({
         </text>
 
         <g data-role="well-quality" style={{ pointerEvents: "none" }}>
-          {/* Banderín Cloro */}
-          <g transform={`translate(${W - 130}, 52)`}>
+          <g transform={`translate(${W - 154}, 250)`}>
             <rect
               x={0}
               y={0}
-              width={114}
-              height={30}
-              rx={9}
+              width={164}
+              height={44}
+              rx={10}
               fill="#ffffff"
               fillOpacity={0.98}
               stroke="#94a3b8"
-              strokeWidth={1.2}
+              strokeWidth={1.15}
             />
-            <path
-              d="M 18 30 L 28 30 L 23 38 Z"
-              fill="#ffffff"
-              stroke="#94a3b8"
-              strokeWidth={1.2}
-            />
-            <text
-              x={12}
-              y={13}
-              fill="#64748b"
-              style={{ fontSize: 8.5, fontWeight: 900, letterSpacing: 0.4 }}
-            >
-              CLORO
-            </text>
-            <text
-              x={12}
-              y={25}
-              fill="#0f172a"
-              style={{ fontSize: 11, fontWeight: 950 }}
-            >
-              {chlorineText}
-            </text>
-          </g>
 
-          {/* Banderín pH */}
-          <g transform={`translate(${W - 114}, 88)`}>
-            <rect
-              x={0}
-              y={0}
-              width={98}
-              height={30}
-              rx={9}
-              fill="#ffffff"
-              fillOpacity={0.98}
-              stroke="#94a3b8"
-              strokeWidth={1.2}
-            />
-            <path
-              d="M 16 30 L 26 30 L 21 38 Z"
-              fill="#ffffff"
-              stroke="#94a3b8"
-              strokeWidth={1.2}
-            />
             <text
               x={12}
-              y={13}
+              y={16}
               fill="#64748b"
-              style={{ fontSize: 8.5, fontWeight: 900, letterSpacing: 0.4 }}
+              style={{ fontSize: 9, fontWeight: 950, letterSpacing: 0.4 }}
+            >
+              CR
+            </text>
+
+            <text
+              x={12}
+              y={36}
+              fill="#0f172a"
+              style={{ fontSize: 23, fontWeight: 950 }}
+            >
+              {chlorineValueText}
+            </text>
+
+            <text
+              x={60}
+              y={36}
+              fill="#64748b"
+              style={{ fontSize: 8, fontWeight: 800 }}
+            >
+              mg/L
+            </text>
+
+            <line
+              x1={84}
+              y1={8}
+              x2={84}
+              y2={37}
+              stroke="#e2e8f0"
+              strokeWidth={1}
+            />
+
+            <text
+              x={96}
+              y={16}
+              fill="#64748b"
+              style={{ fontSize: 9, fontWeight: 950, letterSpacing: 0.4 }}
             >
               pH
             </text>
+
             <text
-              x={12}
-              y={25}
+              x={96}
+              y={36}
               fill="#0f172a"
-              style={{ fontSize: 13, fontWeight: 950 }}
+              style={{ fontSize: 23, fontWeight: 950 }}
             >
               {phText}
             </text>
           </g>
         </g>
 
-        <g data-role="well-water-quality" style={{ pointerEvents: "none" }}>
-          <rect
-            x={W / 2 - 76}
-            y={204}
-            width={152}
-            height={42}
-            rx={9}
-            fill="#ffffff"
-            fillOpacity={0.96}
-            stroke="#94a3b8"
-            strokeWidth={1.2}
-          />
 
-          <line
-            x1={W / 2}
-            y1={208}
-            x2={W / 2}
-            y2={242}
-            stroke="#e2e8f0"
-            strokeWidth={1}
-          />
 
-          <text
-            x={W / 2 - 64}
-            y={218}
-            fill="#64748b"
-            style={{ fontSize: 9, fontWeight: 900 }}
-          >
-            CLORO
-          </text>
-
-          <text
-            x={W / 2 - 64}
-            y={237}
-            fill="#0f172a"
-            style={{ fontSize: 12, fontWeight: 950 }}
-          >
-            {chlorineText}
-          </text>
-
-          <text
-            x={W / 2 + 12}
-            y={218}
-            fill="#64748b"
-            style={{ fontSize: 9, fontWeight: 900 }}
-          >
-            pH
-          </text>
-
-          <text
-            x={W / 2 + 12}
-            y={237}
-            fill="#0f172a"
-            style={{ fontSize: 12, fontWeight: 950 }}
-          >
-            {phText}
-          </text>
-        </g>
+        
 
         {/* Estado */}
         <circle
@@ -586,140 +527,79 @@ export default function TankNodeView({
       </text>
 
       <g data-role="tank-quality" style={{ pointerEvents: "none" }}>
-        {/* Banderín Cloro */}
-        <g transform={`translate(${W - 126}, 42)`}>
+        <g transform={`translate(${W - 150}, 172)`}>
           <rect
             x={0}
             y={0}
-            width={112}
-            height={28}
-            rx={9}
+            width={160}
+            height={42}
+            rx={10}
             fill="#ffffff"
             fillOpacity={0.98}
             stroke="#94a3b8"
-            strokeWidth={1.2}
+            strokeWidth={1.15}
           />
-          <path
-            d="M 18 28 L 28 28 L 23 36 Z"
-            fill="#ffffff"
-            stroke="#94a3b8"
-            strokeWidth={1.2}
-          />
-          <text
-            x={12}
-            y={12}
-            fill="#64748b"
-            style={{ fontSize: 8.5, fontWeight: 900, letterSpacing: 0.4 }}
-          >
-            CLORO
-          </text>
-          <text
-            x={12}
-            y={23}
-            fill="#0f172a"
-            style={{ fontSize: 10.5, fontWeight: 950 }}
-          >
-            {chlorineText}
-          </text>
-        </g>
 
-        {/* Banderín pH */}
-        <g transform={`translate(${W - 112}, 76)`}>
-          <rect
-            x={0}
-            y={0}
-            width={98}
-            height={28}
-            rx={9}
-            fill="#ffffff"
-            fillOpacity={0.98}
-            stroke="#94a3b8"
-            strokeWidth={1.2}
-          />
-          <path
-            d="M 16 28 L 26 28 L 21 36 Z"
-            fill="#ffffff"
-            stroke="#94a3b8"
-            strokeWidth={1.2}
-          />
+          {/* CR */}
           <text
             x={12}
-            y={12}
+            y={15}
             fill="#64748b"
-            style={{ fontSize: 8.5, fontWeight: 900, letterSpacing: 0.4 }}
+            style={{ fontSize: 9, fontWeight: 950, letterSpacing: 0.4 }}
+          >
+            CR
+          </text>
+
+          <text
+            x={12}
+            y={34}
+            fill="#0f172a"
+            style={{ fontSize: 22, fontWeight: 950 }}
+          >
+            {chlorineValueText}
+          </text>
+
+          <text
+            x={58}
+            y={34}
+            fill="#64748b"
+            style={{ fontSize: 8, fontWeight: 800 }}
+          >
+            mg/L
+          </text>
+
+          <line
+            x1={82}
+            y1={7}
+            x2={82}
+            y2={35}
+            stroke="#e2e8f0"
+            strokeWidth={1}
+          />
+
+          {/* pH */}
+          <text
+            x={94}
+            y={15}
+            fill="#64748b"
+            style={{ fontSize: 9, fontWeight: 950, letterSpacing: 0.4 }}
           >
             pH
           </text>
+
           <text
-            x={12}
-            y={23}
+            x={94}
+            y={34}
             fill="#0f172a"
-            style={{ fontSize: 12.5, fontWeight: 950 }}
+            style={{ fontSize: 22, fontWeight: 950 }}
           >
             {phText}
           </text>
         </g>
       </g>
 
-      {/* Calidad de agua */}
-      <g data-role="tank-water-quality" style={{ pointerEvents: "none" }}>
-        <rect
-          x={W / 2 - 72}
-          y={151}
-          width={144}
-          height={38}
-          rx={9}
-          fill="#ffffff"
-          fillOpacity={0.96}
-          stroke="#94a3b8"
-          strokeWidth={1.2}
-        />
 
-        <line
-          x1={W / 2}
-          y1={155}
-          x2={W / 2}
-          y2={185}
-          stroke="#e2e8f0"
-          strokeWidth={1}
-        />
-
-        <text
-          x={W / 2 - 60}
-          y={164}
-          fill="#64748b"
-          style={{ fontSize: 9, fontWeight: 900 }}
-        >
-          CLORO
-        </text>
-
-        <text
-          x={W / 2 - 60}
-          y={181}
-          fill="#0f172a"
-          style={{ fontSize: 12, fontWeight: 950 }}
-        >
-          {chlorineText}
-        </text>
-
-        <text
-          x={W / 2 + 12}
-          y={164}
-          fill="#64748b"
-          style={{ fontSize: 9, fontWeight: 900 }}
-        >
-          pH
-        </text>
-
-        <text
-          x={W / 2 + 12}
-          y={181}
-          fill="#0f172a"
-          style={{ fontSize: 12, fontWeight: 950 }}
-        >
-          {phText}
-        </text>
-      </g>
+      
 
       <circle
         cx={38}
@@ -739,6 +619,8 @@ export default function TankNodeView({
     </g>
   );
 }
+
+
 
 
 
