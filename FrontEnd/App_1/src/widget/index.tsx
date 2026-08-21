@@ -9,6 +9,7 @@ import { Tabs } from "@/components/Tabs";
 import EnergyEfficiencyPage from "@/components/EnergyEfficiencyPage";
 import ReliabilityPage from "@/components/ReliabilityPage";
 import ProcesoCalidad from "@/components/ProcesoCalidad";
+import AIManagementPage from "@/components/AIManagementPage";
 
 import { loadDashboard } from "@/data/loadFromApi";
 import { k } from "@/utils/format";
@@ -1663,21 +1664,9 @@ export default function Widget() {
 
       {tab === "gestion" && (
         <section>
-          <Card className="rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Gestión global</CardTitle>
-            </CardHeader>
-
-            <CardContent>
-              <div className="text-sm text-gray-600">
-                Espacio reservado para indicadores globales, seguimiento y
-                administración.
-              </div>
-            </CardContent>
-          </Card>
+          <AIManagementPage />
         </section>
       )}
-
       <section>
         <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -1692,6 +1681,7 @@ export default function Widget() {
     </div>
   );
 }
+
 
 
 
