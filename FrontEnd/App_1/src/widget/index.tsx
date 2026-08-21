@@ -956,6 +956,7 @@ export default function Widget() {
           pumpSummaryItems={liveSync.pumpsSummary?.items ?? []}
           tankSummaryItems={liveSync.tanksSummary?.items ?? []}
           locationLabel={principalLocName}
+                  onSelectTankIds={setSelectedTankIds}
         />
       )}
 
@@ -1691,6 +1692,7 @@ export default function Widget() {
     </div>
   );
 }
+
 
 
 

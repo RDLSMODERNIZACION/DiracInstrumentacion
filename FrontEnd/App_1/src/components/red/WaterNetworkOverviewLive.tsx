@@ -36,6 +36,7 @@ type Props = {
   pumpSummaryItems?: any[];
   tankSummaryItems?: any[];
   locationLabel?: string;
+  onSelectTankIds?: (ids: number[] | "all") => void;
 };
 
 function cleanLocation(v?: string | null) {
@@ -92,6 +93,7 @@ export default function WaterNetworkOverviewLive({
   pumpSummaryItems = [],
   tankSummaryItems = [],
   locationLabel = "Todas las localidades",
+  onSelectTankIds,
 }: Props) {
   const [availability, setAvailability] = useState<PumpAvailability[]>([]);
   const [layout, setLayout] = useState<LayoutNode[]>([]);
@@ -470,9 +472,14 @@ export default function WaterNetworkOverviewLive({
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3">
-            <div className="text-sm font-bold text-slate-800">
+            <button
+              type="button"
+              onClick={() => onSelectTankIds?.("all")}
+              className="text-left text-sm font-bold text-slate-800 transition hover:text-blue-700"
+              title="Ver todos los tanques principales"
+            >
               Tanques de distribuciÃ³n
-            </div>
+            </button>
             <div className="text-xs text-slate-400">
               Principales: HormigÃ³n, TK 1000, TK1, TK2, TK3, PulmÃ³n y TK 160
             </div>
@@ -484,21 +491,38 @@ export default function WaterNetworkOverviewLive({
                 key={group.location}
                 className="overflow-hidden rounded-xl border border-slate-200"
               >
-                <div className="bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
-                  {group.location}
-                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectTankIds?.(
+                      group.rows
+                        .map((r) => Number(r.id))
+                        .filter((id) => Number.isFinite(id))
+                    )
+                  }
+                  className="flex w-full items-center justify-between bg-slate-50 px-3 py-2 text-left text-xs font-bold text-slate-700 transition hover:bg-blue-50 hover:text-blue-700"
+                  title={`Ver solo los tanques de ${group.location}`}
+                >
+                  <span>{group.location}</span>
+                  <span className="text-[10px] font-medium text-slate-400">
+                    Ver conjunto
+                  </span>
+                </button>
 
                 <div className="divide-y divide-slate-100">
                   {group.rows.map((r) => (
-                    <div
+                    <button
                       key={r.id}
-                      className="grid grid-cols-[minmax(0,1fr)_85px] items-center gap-3 px-3 py-2 text-xs"
+                      type="button"
+                      onClick={() => onSelectTankIds?.([Number(r.id)])}
+                      className="grid w-full grid-cols-[minmax(0,1fr)_85px] items-center gap-3 px-3 py-2 text-left text-xs transition hover:bg-blue-50"
+                      title={`Ver historial de ${r.name}`}
                     >
                       <div className="font-medium text-slate-800">{r.name}</div>
                       <div className="text-right font-bold text-slate-900">
                         {r.level == null ? "â€”" : `${r.level.toFixed(1)}%`}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -509,5 +533,6 @@ export default function WaterNetworkOverviewLive({
     </div>
   );
 }
+
 
 
