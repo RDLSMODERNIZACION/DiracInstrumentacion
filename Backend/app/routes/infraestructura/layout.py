@@ -172,27 +172,103 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
     """
     try:
         with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # SIN company_id: leemos de la VIEW
+                        # SIN company_id:
+            # leemos la view general y agregamos explícitamente los analizadores
+            # para no depender de que v_layout_combined los incluya.
             if company_id is None:
                 cur.execute(
                     """
                     SELECT
-                      c.node_id, c.id, c.type, c.x, c.y, c.updated_at, c.online, c.state, c.level_pct, c.alarma,
-                      c.name, c.in_maintenance,
+                      c.node_id,
+                      c.id,
+                      c.type,
+                      c.x,
+                      c.y,
+                      c.updated_at,
+                      c.online,
+                      c.state,
+                      c.level_pct,
+                      c.alarma,
+                      c.name,
+                      c.in_maintenance,
                       CASE WHEN c.type = 'tank' THEN t.categoria ELSE NULL END AS categoria,
                       CASE WHEN c.type = 'pump' THEN p.orientacion ELSE NULL END AS orientacion,
                       CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
-                      c.signals
+                      c.signals,
+                      COALESCE(
+                        CASE
+                          WHEN c.type = 'tank' THEN t.location_id
+                          WHEN c.type = 'pump' THEN p.location_id
+                          WHEN c.type = 'valve' THEN v.location_id
+                          WHEN c.type = 'manifold' THEN m.location_id
+                          ELSE NULL
+                        END,
+                        NULL
+                      )::bigint AS location_id,
+                      l.name::text AS location_name
+
                     FROM public.v_layout_combined c
-                    LEFT JOIN public.layout_valves lv ON lv.node_id = c.node_id
-                    LEFT JOIN public.tanks t ON c.type = 'tank' AND t.id = c.id
-                    LEFT JOIN public.pumps p ON c.type = 'pump' AND p.id = c.id
-                    ORDER BY c.type, c.id
+
+                    LEFT JOIN public.layout_valves lv
+                      ON lv.node_id = c.node_id
+
+                    LEFT JOIN public.tanks t
+                      ON c.type = 'tank' AND t.id = c.id
+
+                    LEFT JOIN public.pumps p
+                      ON c.type = 'pump' AND p.id = c.id
+
+                    LEFT JOIN public.valves v
+                      ON c.type = 'valve' AND v.id = c.id
+
+                    LEFT JOIN public.manifolds m
+                      ON c.type = 'manifold' AND m.id = c.id
+
+                    LEFT JOIN public.locations l
+                      ON l.id = COALESCE(
+                        CASE
+                          WHEN c.type = 'tank' THEN t.location_id
+                          WHEN c.type = 'pump' THEN p.location_id
+                          WHEN c.type = 'valve' THEN v.location_id
+                          WHEN c.type = 'manifold' THEN m.location_id
+                          ELSE NULL
+                        END,
+                        NULL
+                      )
+
+                    UNION ALL
+
+                    SELECT
+                      lna.node_id AS node_id,
+                      na.id::bigint AS id,
+                      'network_analyzer'::text AS type,
+                      lna.x,
+                      lna.y,
+                      lna.updated_at,
+                      NULL::boolean AS online,
+                      NULL::text AS state,
+                      NULL::numeric AS level_pct,
+                      NULL::text AS alarma,
+                      na.name::text AS name,
+                      FALSE AS in_maintenance,
+                      NULL::text AS categoria,
+                      NULL::text AS orientacion,
+                      lna.meta AS meta,
+                      '{}'::jsonb AS signals,
+                      na.location_id::bigint AS location_id,
+                      loc.name::text AS location_name
+
+                    FROM public.layout_network_analyzers lna
+                    JOIN public.network_analyzers na
+                      ON na.id = lna.analyzer_id
+                    LEFT JOIN public.locations loc
+                      ON loc.id = na.location_id
+
+                    ORDER BY type, id
                     """
                 )
                 return cur.fetchall()
-
-            # CON company_id: query rápida
+# CON company_id: query rápida
             cur.execute(
                 """
                 WITH
@@ -367,31 +443,36 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                   LEFT JOIN m_signals ms ON ms.manifold_id = m.id
                 ),
 
-                -- ✅ NUEVO: ABB / Network Analyzers
+                -- Network Analyzers
                 na AS (
                   SELECT
-                    lna.node_id AS node_id,
+                    COALESCE(lna.node_id, 'network_analyzer:' || na.id) AS node_id,
                     na.id::bigint AS id,
                     'network_analyzer'::text AS type,
-                    lna.x, lna.y, lna.updated_at,
+                    lna.x,
+                    lna.y,
+                    lna.updated_at,
                     NULL::boolean AS online,
                     NULL::text AS state,
                     NULL::numeric AS level_pct,
                     NULL::text AS alarma,
                     na.name::text AS name,
                     FALSE AS in_maintenance,
-                    NULL::text AS orientacion,
                     NULL::text AS categoria,
+                    NULL::text AS orientacion,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lna.meta AS meta,
                     '{}'::jsonb AS signals
-                  FROM public.layout_network_analyzers lna
-                  JOIN public.network_analyzers na ON na.id = lna.analyzer_id
-                  JOIN public.locations l ON l.id = na.location_id
-                  JOIN locs lx ON lx.id = l.id
-                )
 
+                  FROM public.network_analyzers na
+                  JOIN public.locations l
+                    ON l.id = na.location_id
+                  JOIN locs lx
+                    ON lx.id = l.id
+                  LEFT JOIN public.layout_network_analyzers lna
+                    ON lna.analyzer_id = na.id
+                )
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM t
                 UNION ALL
                 SELECT node_id,id,type,x,y,updated_at,online,state,level_pct,alarma,name,in_maintenance,categoria,orientacion,location_id,location_name,meta,signals FROM p
@@ -834,4 +915,5 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (bootstrap): {e}")
+
 

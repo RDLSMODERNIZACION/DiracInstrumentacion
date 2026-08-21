@@ -1,4 +1,4 @@
-// src/features/infra-diagram/components/edges/EditableEdge.tsx
+﻿// src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 
@@ -671,21 +671,10 @@ export default function EditableEdge({
           }}
           onPointerDown={(ev) => {
             const p = svgPointFromEvent(ev);
-            console.log("[PUMP-TAP][HIGHLIGHT_POINTER]", {
-              edgeId: id,
-              point: p,
-            });
-
             if (!p) return;
 
             ev.preventDefault();
             ev.stopPropagation();
-
-            console.log("[PUMP-TAP][HIGHLIGHT_DISPATCH]", {
-              edgeId: id,
-              x: p.x,
-              y: p.y,
-            });
 
             onTapPipeClick(id, p.x, p.y);
           }}
@@ -705,7 +694,6 @@ export default function EditableEdge({
             if (p) {
               e.preventDefault();
               e.stopPropagation();
-              console.log("[PUMP-TAP][DISPATCH]", { edgeId: id, x: p.x, y: p.y });
               onTapPipeClick(id, p.x, p.y);
             }
             return;
@@ -873,6 +861,7 @@ export default function EditableEdge({
     </g>
   );
 }
+
 
 
 

@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
 import type { TankNode } from "../../types";
@@ -88,12 +88,12 @@ export default function TankNodeView({
   // POZO GRANDE
   // ============================================================
   if (category === "pozo") {
-    const W = 280;
+    const W = 420;
     const H = 330;
 
-    const shaftX = 70;
+    const shaftX = 60;
     const shaftY = 62;
-    const shaftW = 140;
+    const shaftW = 300;
     const shaftH = 225;
 
     const waterH = shaftH * (level / 100);
@@ -159,7 +159,7 @@ export default function TankNodeView({
         <ellipse
           cx={W / 2}
           cy={57}
-          rx={74}
+          rx={154}
           ry={18}
           fill={`url(#wellSteel-${n.id})`}
           stroke="#64748b"
@@ -202,7 +202,7 @@ export default function TankNodeView({
         <ellipse
           cx={W / 2}
           cy={shaftY + shaftH}
-          rx={68}
+          rx={148}
           ry={15}
           fill="#cbd5e1"
           stroke="#64748b"
@@ -238,7 +238,7 @@ export default function TankNodeView({
 
         {/* Estado */}
         <circle
-          cx={88}
+          cx={82}
           cy={82}
           r={6}
           fill={isOnline ? "#22c55e" : "#94a3b8"}
@@ -246,7 +246,7 @@ export default function TankNodeView({
 
         {hasAlarm && (
           <circle
-            cx={W - 88}
+            cx={W - 82}
             cy={82}
             r={7}
             fill={critical ? "#ef4444" : "#f59e0b"}
@@ -421,3 +421,8 @@ export default function TankNodeView({
     </g>
   );
 }
+
+
+
+
+

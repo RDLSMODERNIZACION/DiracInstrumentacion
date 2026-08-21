@@ -135,41 +135,96 @@ function buildPorts(n: UINode) {
 
   if (n.type === "tank") {
     const isWell = (n as any).categoria === "pozo";
-    const halfW = isWell ? 140 : 150;
-    const halfH = isWell ? 165 : 110;
+
+    if (isWell) {
+      /*
+       * POZO ANCHO
+       * Casing visual aproximado: 300 px.
+       *
+       * Los puertos laterales quedan ADENTRO del cuerpo:
+       * - dos a la izquierda
+       * - dos a la derecha
+       *
+       * Esto permite ubicar hasta dos bombas por lado.
+       */
+      const insideX = 140;
+
+      const pos: Record<string, { x: number; y: number }> = {
+        L1: { x: n.x - insideX, y: n.y - 52 },
+        L2: { x: n.x - insideX, y: n.y + 52 },
+        L3: { x: n.x - insideX, y: n.y },
+
+        R1: { x: n.x + insideX, y: n.y - 52 },
+        R2: { x: n.x + insideX, y: n.y + 52 },
+        R3: { x: n.x + insideX, y: n.y },
+
+        T1: { x: n.x - 75, y: n.y - 105 },
+        T2: { x: n.x,      y: n.y - 105 },
+        T3: { x: n.x + 75, y: n.y - 105 },
+
+        B1: { x: n.x - 75, y: n.y + 105 },
+        B2: { x: n.x,      y: n.y + 105 },
+        B3: { x: n.x + 75, y: n.y + 105 },
+      };
+
+      return {
+        inPorts: ins.map((id) => ({
+          portId: id,
+          side: "in" as const,
+          ...(pos[id] ?? { x: n.x - insideX, y: n.y }),
+        })),
+        outPorts: outs.map((id) => ({
+          portId: id,
+          side: "out" as const,
+          ...(pos[id] ?? { x: n.x + insideX, y: n.y }),
+        })),
+      };
+    }
+
+    // TANQUE NORMAL
+    //
+    // Cuerpo visual:
+    //   ancho aprox. 256 px
+    //   alto aprox. 144 px
+    //
+    // Los puntos quedan metidos dentro del cuerpo para que la
+    // cañería parezca nacer desde el tanque y no desde afuera.
+    const insideX = 118;
+    const insideY = 82;
 
     const pos: Record<string, { x: number; y: number }> = {
-      L1: { x: n.x - halfW, y: n.y - 45 },
-      L2: { x: n.x - halfW, y: n.y },
-      L3: { x: n.x - halfW, y: n.y + 45 },
+      // Laterales: 3 puntos por lado, todos dentro del cuerpo
+      L1: { x: n.x - insideX, y: n.y - 42 },
+      L2: { x: n.x - insideX, y: n.y },
+      L3: { x: n.x - insideX, y: n.y + 42 },
 
-      R1: { x: n.x + halfW, y: n.y - 45 },
-      R2: { x: n.x + halfW, y: n.y },
-      R3: { x: n.x + halfW, y: n.y + 45 },
+      R1: { x: n.x + insideX, y: n.y - 42 },
+      R2: { x: n.x + insideX, y: n.y },
+      R3: { x: n.x + insideX, y: n.y + 42 },
 
-      T1: { x: n.x - 70, y: n.y - halfH },
-      T2: { x: n.x, y: n.y - halfH },
-      T3: { x: n.x + 70, y: n.y - halfH },
+      // Superior e inferior también levemente adentro
+      T1: { x: n.x - 65, y: n.y - insideY },
+      T2: { x: n.x,      y: n.y - insideY },
+      T3: { x: n.x + 65, y: n.y - insideY },
 
-      B1: { x: n.x - 70, y: n.y + halfH },
-      B2: { x: n.x, y: n.y + halfH },
-      B3: { x: n.x + 70, y: n.y + halfH },
+      B1: { x: n.x - 65, y: n.y + insideY },
+      B2: { x: n.x,      y: n.y + insideY },
+      B3: { x: n.x + 65, y: n.y + insideY },
     };
 
     return {
       inPorts: ins.map((id) => ({
         portId: id,
         side: "in" as const,
-        ...(pos[id] ?? { x: n.x - halfW, y: n.y }),
+        ...(pos[id] ?? { x: n.x - insideX, y: n.y }),
       })),
       outPorts: outs.map((id) => ({
         portId: id,
         side: "out" as const,
-        ...(pos[id] ?? { x: n.x + halfW, y: n.y }),
+        ...(pos[id] ?? { x: n.x + insideX, y: n.y }),
       })),
     };
   }
-
   const off = 6;
   const half = halfByType(n.type);
   const h = heightByType(n.type);
@@ -538,30 +593,42 @@ export default function InfraDiagram() {
   const refreshPumpPipeTaps = useCallback(async () => { try { setPumpPipeTaps(await getPumpPipeTaps()); } catch (err) { console.error(err); } }, []);
   useEffect(() => { refreshPumpPipeTaps(); }, [refreshPumpPipeTaps]);
   const handlePumpTapSelect = useCallback((nodeId: string) => {
-    console.log("[PUMP-TAP][PUMP_SELECT]", {
-      nodeId,
-      previous: pumpTapFrom,
-      editMode,
-      connectMode,
-    });
-
     if (!editMode || !connectMode) return;
-
-    setPumpTapFrom((prev) => (prev === nodeId ? null : nodeId));
+    setPumpTapFrom(nodeId);
     setConnectFrom(null);
-  }, [editMode, connectMode, pumpTapFrom]);
-  const handlePumpTapPipeClick = useCallback(async (edgeId:number,x:number,y:number) => {
-    if(!pumpTapFrom) return; const pumpNode=nodesById[pumpTapFrom]; if(!pumpNode||pumpNode.type!=="pump")return;
-    const raw=window.prompt("Tipo de conexión:\n1 = INYECTA\n2 = EXTRAE","1"); if(raw==null)return; const mode:PumpPipeTapMode=String(raw).trim()==="2"?"extract":"inject";
-    const pumpId=Number(String(pumpNode.id).split(":").pop()); if(!Number.isFinite(pumpId))return;
-    try { await savePumpPipeTap({pump_id:pumpId,edge_id:edgeId,mode,x,y,t:0.5}); await refreshPumpPipeTaps(); setPumpTapFrom(null); } catch(err:any){ alert(err?.message||"No se pudo guardar"); }
-  },[pumpTapFrom,nodesById,refreshPumpPipeTaps]);
+    setMouseSvg(null);
+    setSelectedEdgeId(null);
+  }, [editMode, connectMode]);
+
+  const handlePumpTapPipeClick = useCallback(async (edgeId: number, x: number, y: number) => {
+    if (!pumpTapFrom) return;
+    const pumpNode = nodesById[pumpTapFrom];
+    if (!pumpNode || pumpNode.type !== "pump") return;
+
+    const inject = window.confirm("Aceptar = INYECTA a la cañería\nCancelar = EXTRAE de la cañería");
+    const mode: PumpPipeTapMode = inject ? "inject" : "extract";
+    const pumpId = Number(String(pumpNode.id).split(":").pop());
+    if (!Number.isFinite(pumpId)) return;
+
+    try {
+      await savePumpPipeTap({ pump_id: pumpId, edge_id: edgeId, mode, x, y, t: 0.5 });
+      await refreshPumpPipeTaps();
+      setPumpTapFrom(null);
+      setConnectFrom(null);
+      setMouseSvg(null);
+      setSelectedEdgeId(null);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "No se pudo guardar la conexión bomba-cañería");
+    }
+  }, [pumpTapFrom, nodesById, refreshPumpPipeTaps]);
 
   const toggleEdit = useCallback(() => {
     setEditMode((prev) => {
       const next = !prev;
       if (!next) {
         setConnectMode(false);
+        setPumpTapFrom(null);
         setConnectFrom(null);
         setSelectedEdgeId(null);
       }
@@ -695,37 +762,8 @@ export default function InfraDiagram() {
     () => nodes.filter((n) => n.type !== "valve"),
     [nodes]
   );
-  useEffect(() => {
-    const onPumpTapSelect = (ev: Event) => {
-      const custom = ev as CustomEvent<{ nodeId?: string }>;
-      const nodeId = custom.detail?.nodeId;
 
-      console.log("[PUMP-TAP][PUMP_SELECT_EVENT]", {
-        nodeId,
-        editMode,
-        connectMode,
-      });
 
-      if (!nodeId || !editMode || !connectMode) return;
-
-      setPumpTapFrom((prev) => (prev === nodeId ? null : nodeId));
-      setConnectFrom(null);
-    };
-
-    window.addEventListener("dirac:pump-tap-select", onPumpTapSelect as EventListener);
-
-    return () => {
-      window.removeEventListener("dirac:pump-tap-select", onPumpTapSelect as EventListener);
-    };
-  }, [editMode, connectMode]);
-  useEffect(() => {
-    console.log("[PUMP-TAP][STATE]", {
-      editMode,
-      connectMode,
-      pumpTapFrom,
-      tapCount: pumpPipeTaps.length,
-    });
-  }, [editMode, connectMode, pumpTapFrom, pumpPipeTaps.length]);
 
   const pumpTapByEdge = useMemo(() => { const m=new Map<number,PumpPipeTap[]>(); for(const tap of pumpPipeTaps){const a=m.get(tap.edge_id)??[];a.push(tap);m.set(tap.edge_id,a);} return m; },[pumpPipeTaps]);
 
@@ -900,8 +938,8 @@ export default function InfraDiagram() {
                       height={g.bbox.h}
                       rx={18}
                       ry={18}
-                      fill="#f8fafc" fillOpacity={0.38} fillOpacity={0.55}
-                      fillOpacity={0.62}
+                      fill="#f8fafc"
+                      fillOpacity={0.38}
                       stroke="#d6dee8"
                       strokeWidth={1.2}
                     />
@@ -934,6 +972,15 @@ export default function InfraDiagram() {
                   />
                 ))}
 
+                {pumpPipeTaps.map((tap) => (
+                  <PumpPipeTapView
+                    key={`pump-tap-${tap.id}`}
+                    tap={tap}
+                    pump={nodesById[tap.pump_node_id]}
+                    visiblePoint={editMode && connectMode}
+                  />
+                ))}
+
                 {visibleNodes.map((n) =>
                   n.type === "tank" ? (
                     <TankNodeView
@@ -945,9 +992,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
-                      tapSelected={pumpTapFrom === n.id}
-                      onTapSelect={() => handlePumpTapSelect(n.id)}
-                      onClick={() => { if(editMode&&connectMode){ console.log("[PUMP-TAP][PUMP_SELECT]", {id:n.id, pumpTapFrom}); setPumpTapFrom((prev)=>prev===n.id?null:n.id); setConnectFrom(null); return; } if(!editMode&&!connectMode) maybeOpenOps(n); }}
+                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "pump" ? (
                     <PumpNodeView
@@ -959,6 +1004,9 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
+                      tapConnectMode={editMode && connectMode}
+                      tapSelected={pumpTapFrom === n.id}
+                      onTapSelect={handlePumpTapSelect}
                       onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "manifold" ? (
@@ -1002,7 +1050,7 @@ export default function InfraDiagram() {
 
                 {editMode &&
                   connectMode &&
-                  visibleNodes.map((n) => {
+                  visibleNodes.filter((n) => n.type !== "pump").map((n) => {
                     const { inPorts, outPorts } = buildPorts(n);
                     return (
                       <g key={`ports-${n.id}`}>
@@ -1080,6 +1128,9 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
+
+
 
 
 
