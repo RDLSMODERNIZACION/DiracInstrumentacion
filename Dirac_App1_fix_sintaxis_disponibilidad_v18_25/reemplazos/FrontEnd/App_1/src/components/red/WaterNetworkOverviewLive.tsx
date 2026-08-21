@@ -233,6 +233,13 @@ export default function WaterNetworkOverviewLive({
         estado: String(estado),
         disponible: p.disponible,
         descripcion: String(p.disponibilidad_descripcion ?? ""),
+        hours:
+          fmtHours(
+            summary?.running_seconds_24h ??
+              summary?.running_seconds ??
+              summary?.run_seconds_24h
+          ),
+        starts: Number(summary?.starts_24h ?? summary?.starts_count ?? 0),
       };
 
       if (!groups.has(location)) groups.set(location, []);
@@ -345,7 +352,7 @@ export default function WaterNetworkOverviewLive({
               Bombas de impulsión
             </div>
             <div className="text-xs text-slate-400">
-              Agrupadas por localidad · disponibilidad y detalle
+              Agrupadas por localidad · disponibilidad editable
             </div>
           </div>
 
@@ -363,7 +370,7 @@ export default function WaterNetworkOverviewLive({
                   {group.rows.map((r) => (
                     <div
                       key={r.id}
-                      className="grid grid-cols-[minmax(0,1.15fr)_90px_145px_minmax(180px,1.2fr)] items-center gap-3 px-3 py-2 text-xs"
+                      className="grid grid-cols-[minmax(0,1.1fr)_90px_minmax(0,260px)_70px_55px] items-center gap-3 px-3 py-2 text-xs"
                     >
                       <div className="truncate font-medium text-slate-800">
                         {r.name}
@@ -383,52 +390,52 @@ export default function WaterNetworkOverviewLive({
                         {r.estado}
                       </div>
 
-                      {(() => {
-                        const draft = editValues[r.id] ?? {
-                          disponible: !!r.disponible,
-                          descripcion: String(r.descripcion ?? ""),
-                        };
+                      <div className="space-y-1">
+                        {(() => {
+                          const draft = editValues[r.id] ?? {
+                            disponible: !!r.disponible,
+                            descripcion: String(r.descripcion ?? ""),
+                          };
+                          const unavailable = !draft.disponible;
 
-                        return (
-                          <>
-                            <div className="flex items-center gap-2">
-                              <select
-                                value={draft.disponible ? "si" : "no"}
-                                onChange={(e) => {
-                                  const value = e.target.value === "si";
-                                  setEditValues((prev) => ({
-                                    ...prev,
-                                    [r.id]: {
-                                      disponible: value,
-                                      descripcion: value
-                                        ? ""
-                                        : prev[r.id]?.descripcion ??
-                                          String(r.descripcion ?? ""),
-                                    },
-                                  }));
-                                }}
-                                className={`w-full rounded-lg border px-2 py-1.5 text-[11px] font-semibold outline-none ${
-                                  draft.disponible
-                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                    : "border-amber-200 bg-amber-50 text-amber-700"
-                                }`}
-                              >
-                                <option value="si">Disponible</option>
-                                <option value="no">No disponible</option>
-                              </select>
+                          return (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={draft.disponible ? "si" : "no"}
+                                  onChange={(e) => {
+                                    const value = e.target.value === "si";
+                                    setEditValues((prev) => ({
+                                      ...prev,
+                                      [r.id]: {
+                                        disponible: value,
+                                        descripcion: value
+                                          ? ""
+                                          : prev[r.id]?.descripcion ?? String(r.descripcion ?? ""),
+                                      },
+                                    }));
+                                  }}
+                                  className={`rounded-lg border px-2 py-1 text-[11px] font-semibold outline-none ${
+                                    draft.disponible
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                      : "border-amber-200 bg-amber-50 text-amber-700"
+                                  }`}
+                                >
+                                  <option value="si">Disponible</option>
+                                  <option value="no">No disponible</option>
+                                </select>
 
-                              <button
-                                type="button"
-                                onClick={() => saveAvailability(Number(r.id))}
-                                disabled={savingPumpId === Number(r.id)}
-                                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {savingPumpId === Number(r.id) ? "..." : "Guardar"}
-                              </button>
-                            </div>
+                                <button
+                                  type="button"
+                                  onClick={() => saveAvailability(Number(r.id))}
+                                  disabled={savingPumpId === Number(r.id)}
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {savingPumpId === Number(r.id) ? "Guardando..." : "Guardar"}
+                                </button>
+                              </div>
 
-                            <div>
-                              {!draft.disponible ? (
+                              {unavailable ? (
                                 <input
                                   value={draft.descripcion}
                                   onChange={(e) =>
@@ -440,16 +447,19 @@ export default function WaterNetworkOverviewLive({
                                       },
                                     }))
                                   }
-                                  placeholder="Detalle / motivo de indisponibilidad"
-                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none placeholder:text-slate-400"
+                                  placeholder="Describí el motivo"
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 outline-none placeholder:text-slate-400"
                                 />
-                              ) : (
-                                <span className="text-[11px] text-slate-400">—</span>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()}
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="text-slate-500">{r.hours}</div>
+                      <div className="text-right text-slate-500">
+                        {r.starts || "—"}
+                      </div>
                     </div>
                   ))}
                 </div>

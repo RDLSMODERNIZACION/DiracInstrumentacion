@@ -1,4 +1,4 @@
-# app/main.py
+﻿# app/main.py
 import os
 import logging
 
@@ -15,7 +15,7 @@ from app.services.telegram_reporter import start_telegram_reporter, stop_telegra
 # ===== Telegram test router =====
 from app.services.telegram_test import router as telegram_test_router
 
-# ===== Rutas base (operación / visualización) =====
+# ===== Rutas base (operaciÃ³n / visualizaciÃ³n) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
@@ -24,7 +24,7 @@ from app.routes.arduino_controler import router as arduino_router
 # Infraestructura (lectura)
 from app.routes.infraestructura import router as infraestructura_router
 
-# Infraestructura (edición)
+# Infraestructura (ediciÃ³n)
 from app.routes.infra_edit.edit import router as infra_edit_router
 
 # ===== PLC =====
@@ -33,13 +33,13 @@ from app.routes.plc import router as plc_router
 # ===== KPI =====
 from app.routes.kpi import router as kpi_router
 
-# ===== Dirac (operación) =====
+# ===== Dirac (operaciÃ³n) =====
 from app.routes.dirac.me import router as dirac_me_router
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
 
-# ===== Administración =====
+# ===== AdministraciÃ³n =====
 from app.routes.dirac_admin.companies import router as admin_companies_router
 from app.routes.dirac_admin.users import router as admin_users_router
 from app.routes.dirac_admin.locations import router as admin_locations_router
@@ -87,16 +87,42 @@ app = FastAPI(
 # ===== Middlewares =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "https://www.diracserviciosenergia.com",
+        "https://diracserviciosenergia.com",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     expose_headers=["*"],
     max_age=3600,
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+
+# ===== Global exception handler =====
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logging.exception(
+        "Unhandled exception on %s %s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+    )
+    return JSONResponse(
+        {
+            "ok": False,
+            "detail": str(exc),
+            "path": request.url.path,
+        },
+        status_code=500,
+    )
 
 # ===== Health =====
 @app.get("/", tags=["health"])
@@ -145,7 +171,7 @@ def health_db():
         )
 
 
-# ===== Rutas (operación base) =====
+# ===== Rutas (operaciÃ³n base) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
@@ -159,13 +185,13 @@ app.include_router(infra_edit_router)
 app.include_router(plc_router)
 app.include_router(kpi_router)
 
-# ===== Dirac (operación) =====
+# ===== Dirac (operaciÃ³n) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
-# ===== Administración =====
+# ===== AdministraciÃ³n =====
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
