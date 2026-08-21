@@ -511,7 +511,7 @@ export default function InfraDiagram() {
   useEffect(() => {
     if (!nodes.length) return;
 
-    const pad = 120;
+    const pad = 240;
     const bb = computeBBox(nodes, pad);
 
     const safe = {
@@ -1060,8 +1060,8 @@ export default function InfraDiagram() {
           ref={wrapRef}
           style={{
             position: "relative",
-            border: "1px solid #e2e8f0",
-            borderRadius: 12,
+            border: "none",
+            borderRadius: 0,
             overflow: "hidden",
             background: "#ffffff",
             width: "100%",
@@ -1069,15 +1069,15 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={3.35} minScale={0.6} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
-            <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
+          <TransformWrapper initialScale={1} minScale={0.35} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+            <TransformComponent wrapperStyle={{ width: "100%", height: "100%", background: "#ffffff" }} contentStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
                 width="100%"
                 height="100%"
                 viewBox={viewBoxStr}
                 preserveAspectRatio="xMidYMid meet"
-                style={{ display: "block" }}
+                style={{ display: "block", width: "100%", height: "100%", background: "#ffffff" }}
                 onMouseMove={(e) => {
                   if (!connectFrom) return;
                   const p = clientToSvgPoint(e);
@@ -1123,8 +1123,8 @@ export default function InfraDiagram() {
                   </linearGradient>
                 </defs>
 
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#f3f6f9" />
-                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.03} />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="#ffffff" />
+                <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.012} />
 
                 {/* Localidades visuales eliminadas: sin fondos ni títulos. */}
 
@@ -1321,6 +1321,7 @@ export default function InfraDiagram() {
     </div>
   );
 }
+
 
 
 
