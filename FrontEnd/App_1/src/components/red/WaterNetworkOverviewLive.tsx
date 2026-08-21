@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import TankLevelChart from "@/components/TankLevelChart";
 import OpsPumpsProfile, {
   type PumpsTs,
@@ -40,7 +40,7 @@ type Props = {
 
 function cleanLocation(v?: string | null) {
   const s = String(v ?? "").trim();
-  if (!s) return "Sin ubicación";
+  if (!s) return "Sin ubicaciÃ³n";
   return s.replace(/^\d+[_\s-]*/g, "").trim() || s;
 }
 
@@ -51,7 +51,7 @@ function isOn(state?: string | null) {
 
 function fmtHours(seconds: any) {
   const n = Number(seconds);
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "â€”";
   return `${(n / 3600).toFixed(1).replace(".", ",")} h`;
 }
 
@@ -295,7 +295,7 @@ export default function WaterNetworkOverviewLive({
           Estado principal de la red
         </div>
         <div className="mt-1 text-sm text-slate-500">
-          Impulsión y distribución · {locationLabel}
+          ImpulsiÃ³n y distribuciÃ³n Â· {locationLabel}
         </div>
       </div>
 
@@ -305,7 +305,7 @@ export default function WaterNetworkOverviewLive({
         </div>
       )}
 
-      {/* LOS DOS GRÁFICOS ORIGINALES, EN EL TIEMPO */}
+      {/* LOS DOS GRÃFICOS ORIGINALES, EN EL TIEMPO */}
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="min-w-0">
           <OpsPumpsProfile
@@ -313,7 +313,7 @@ export default function WaterNetworkOverviewLive({
             timelineItems={pumpTimelineItems}
             max={12}
             syncId="red-principal-sync"
-            title="Impulsión · Bombas principales · 24 h"
+            title="ImpulsiÃ³n Â· Bombas principales Â· 24 h"
             tz="America/Argentina/Buenos_Aires"
             xDomain={xDomain}
             xTicks={xTicks}
@@ -326,7 +326,7 @@ export default function WaterNetworkOverviewLive({
           <TankLevelChart
             ts={tankTs}
             syncId="red-principal-sync"
-            title="Distribución · Tanques principales · 24 h"
+            title="DistribuciÃ³n Â· Tanques principales Â· 24 h"
             tz="America/Argentina/Buenos_Aires"
             xDomain={xDomain}
             xTicks={xTicks}
@@ -342,10 +342,10 @@ export default function WaterNetworkOverviewLive({
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3">
             <div className="text-sm font-bold text-slate-800">
-              Bombas de impulsión
+              Bombas de impulsiÃ³n
             </div>
             <div className="text-xs text-slate-400">
-              Agrupadas por localidad · disponibilidad y detalle
+              Agrupadas por localidad Â· disponibilidad y detalle
             </div>
           </div>
 
@@ -444,7 +444,7 @@ export default function WaterNetworkOverviewLive({
                                   className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 outline-none placeholder:text-slate-400"
                                 />
                               ) : (
-                                <span className="text-[11px] text-slate-400">—</span>
+                                <span className="text-[11px] text-slate-400">â€”</span>
                               )}
                             </div>
                           </>
@@ -461,10 +461,10 @@ export default function WaterNetworkOverviewLive({
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3">
             <div className="text-sm font-bold text-slate-800">
-              Tanques de distribución
+              Tanques de distribuciÃ³n
             </div>
             <div className="text-xs text-slate-400">
-              Principales: Hormigón, TK 1000, TK1, TK2, TK3, Pulmón y TK 160
+              Principales: HormigÃ³n, TK 1000, TK1, TK2, TK3, PulmÃ³n y TK 160
             </div>
           </div>
 
@@ -486,7 +486,7 @@ export default function WaterNetworkOverviewLive({
                     >
                       <div className="font-medium text-slate-800">{r.name}</div>
                       <div className="text-right font-bold text-slate-900">
-                        {r.level == null ? "—" : `${r.level.toFixed(1)}%`}
+                        {r.level == null ? "â€”" : `${r.level.toFixed(1)}%`}
                       </div>
                     </div>
                   ))}
@@ -499,3 +499,4 @@ export default function WaterNetworkOverviewLive({
     </div>
   );
 }
+
