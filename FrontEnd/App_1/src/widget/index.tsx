@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import TankLevelChart from "@/components/TankLevelChart";
 import OpsPumpsProfile from "@/components/OpsPumpsProfile";
@@ -1351,11 +1351,6 @@ export default function Widget() {
               events={combinedEvents}
               loading={operationLoading}
             />
-          </section>
-
-          <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <TankHealthTable items={tankHealthRows} />
-            <PumpHealthTable items={pumpHealthRows} />
           </section>
         </>
       )}

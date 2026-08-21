@@ -111,7 +111,7 @@ function buildRows(ts?: TankTs): Row[] {
   return rows.sort((a, b) => a.ms - b.ms);
 }
 
-function ProfessionalTooltip({
+function AverageTooltip({
   active,
   payload,
   label,
@@ -128,14 +128,16 @@ function ProfessionalTooltip({
   if (!row) return null;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-xl">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+    <div className="min-w-[150px] rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur">
+      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
         {fmtDateTime(Number(label ?? row.ms), tz)}
       </div>
 
-      <div className="mt-1.5 flex items-baseline justify-between gap-5">
-        <span className="text-xs font-medium text-slate-500">Nivel promedio</span>
-        <span className="text-lg font-bold text-slate-900">
+      <div className="mt-2 flex items-end justify-between gap-4">
+        <span className="text-xs font-semibold text-slate-500">
+          Nivel promedio
+        </span>
+        <span className="text-2xl font-black leading-none text-blue-700">
           {fmtPct(row.level)}
         </span>
       </div>
@@ -170,63 +172,59 @@ export default function TankLevelChart({
 }) {
   const data = useMemo(() => buildRows(ts), [ts]);
 
-  const stats = useMemo(() => {
+  const average = useMemo(() => {
     const valid = data
       .map((r) => r.level)
       .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 
-    if (!valid.length) {
-      return {
-        average: null,
-        current: null,
-      };
-    }
+    if (!valid.length) return null;
 
-    return {
-      average: valid.reduce((acc, v) => acc + v, 0) / valid.length,
-      current: valid[valid.length - 1],
-    };
+    return valid.reduce((acc, v) => acc + v, 0) / valid.length;
   }, [data]);
 
   const hasData = data.some((r) => r.level !== null);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-        <div className="min-w-0">
-          <div className="truncate text-[15px] font-semibold text-slate-800">
-            {title}
-          </div>
-          <div className="mt-1 text-xs text-slate-400">
-            Nivel promedio del período seleccionado
+    <div className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+        <div>
+          <div className="text-[15px] font-bold text-slate-800">{title}</div>
+          <div className="mt-1 text-xs font-medium text-slate-400">
+            Evolución del nivel promedio durante el período
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400">
-              Actual
-            </div>
-            <div className="mt-0.5 text-lg font-bold leading-none text-slate-700">
-              {fmtPct(stats.current)}
-            </div>
+        <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-sky-50 px-4 py-3 shadow-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-sm">
+            <svg
+              width="18"
+              height="22"
+              viewBox="0 0 18 22"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M9 1.5C9 1.5 2.5 9.2 2.5 14.1C2.5 17.9 5.4 20.5 9 20.5C12.6 20.5 15.5 17.9 15.5 14.1C15.5 9.2 9 1.5 9 1.5Z"
+                fill="white"
+              />
+            </svg>
           </div>
 
-          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2">
-            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-blue-500">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-500">
               Promedio
             </div>
-            <div className="mt-0.5 text-2xl font-extrabold leading-none tracking-tight text-blue-700">
-              {fmtPct(stats.average)}
+            <div className="mt-0.5 text-[32px] font-black leading-none tracking-tight text-blue-700">
+              {fmtPct(average)}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="border-t border-slate-100 px-3 pb-3 pt-2">
-        <div className="h-[320px] rounded-xl bg-white">
+      <div className="px-3 pb-3 pt-2">
+        <div className="h-[330px] rounded-2xl bg-gradient-to-b from-slate-50/80 to-white p-2">
           {!hasData ? (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
+            <div className="flex h-full items-center justify-center rounded-xl text-sm text-slate-400">
               Sin datos de nivel para el filtro actual.
             </div>
           ) : (
@@ -234,7 +232,7 @@ export default function TankLevelChart({
               <AreaChart
                 data={data}
                 syncId={syncId}
-                margin={{ top: 16, right: 18, bottom: 8, left: 0 }}
+                margin={{ top: 18, right: 18, bottom: 8, left: 0 }}
                 onMouseMove={(e: any) => {
                   if (!onHoverX) return;
                   const x = Number(e?.activeLabel);
@@ -243,15 +241,16 @@ export default function TankLevelChart({
                 onMouseLeave={() => onHoverX?.(null)}
               >
                 <defs>
-                  <linearGradient id="tankProfessionalFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#2563eb" stopOpacity={0.14} />
-                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0.01} />
+                  <linearGradient id="tankAverageFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.24} />
+                    <stop offset="65%" stopColor="#60a5fa" stopOpacity={0.08} />
+                    <stop offset="100%" stopColor="#93c5fd" stopOpacity={0.01} />
                   </linearGradient>
                 </defs>
 
                 <CartesianGrid
-                  stroke="#e7edf4"
-                  strokeDasharray="3 5"
+                  stroke="#e2e8f0"
+                  strokeDasharray="4 5"
                   vertical={false}
                 />
 
@@ -265,17 +264,17 @@ export default function TankLevelChart({
                       ? fmtTime(Number(ms), tz)
                       : ""
                   }
-                  tick={{ fontSize: 11, fill: "#64748b", fontWeight: 500 }}
-                  axisLine={{ stroke: "#dbe3ec" }}
+                  tick={{ fontSize: 11, fill: "#64748b", fontWeight: 600 }}
+                  axisLine={{ stroke: "#cbd5e1" }}
                   tickLine={false}
-                  dy={6}
+                  dy={7}
                 />
 
                 <YAxis
                   domain={[0, 100]}
                   ticks={[0, 25, 50, 75, 100]}
                   tickFormatter={(n: any) => `${Number(n).toFixed(0)}%`}
-                  tick={{ fontSize: 11, fill: "#64748b", fontWeight: 500 }}
+                  tick={{ fontSize: 11, fill: "#64748b", fontWeight: 600 }}
                   axisLine={false}
                   tickLine={false}
                   width={44}
@@ -288,16 +287,23 @@ export default function TankLevelChart({
                     strokeWidth: 1,
                   }}
                   content={(props: any) => (
-                    <ProfessionalTooltip {...props} tz={tz} />
+                    <AverageTooltip {...props} tz={tz} />
                   )}
                 />
 
-                {stats.average !== null && (
+                {average !== null && (
                   <ReferenceLine
-                    y={stats.average}
-                    stroke="#94a3b8"
-                    strokeDasharray="6 6"
-                    strokeWidth={1.2}
+                    y={average}
+                    stroke="#60a5fa"
+                    strokeDasharray="5 5"
+                    strokeWidth={1.5}
+                    label={{
+                      value: `Prom. ${average.toFixed(1)}%`,
+                      position: "insideTopRight",
+                      fill: "#2563eb",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
                   />
                 )}
 
@@ -306,12 +312,12 @@ export default function TankLevelChart({
                   dataKey="level"
                   name="Nivel promedio"
                   stroke="#2563eb"
-                  strokeWidth={3}
-                  fill="url(#tankProfessionalFill)"
+                  strokeWidth={3.5}
+                  fill="url(#tankAverageFill)"
                   dot={false}
                   activeDot={{
-                    r: 4.5,
-                    strokeWidth: 2.5,
+                    r: 5,
+                    strokeWidth: 3,
                     stroke: "#ffffff",
                     fill: "#2563eb",
                   }}
@@ -321,17 +327,6 @@ export default function TankLevelChart({
               </AreaChart>
             </ResponsiveContainer>
           )}
-        </div>
-
-        <div className="flex items-center justify-end gap-4 px-2 pb-1 pt-1.5 text-[10px] font-medium text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-[2px] w-5 rounded bg-blue-600" />
-            Nivel promedio
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-5 border-t border-dashed border-slate-400" />
-            Promedio del período
-          </span>
         </div>
       </div>
     </div>
