@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import TankLevelChart from "@/components/TankLevelChart";
-import WaterNetworkOverviewDemo from "@/components/red/WaterNetworkOverview.demo";
+import WaterNetworkOverviewLive from "@/components/red/WaterNetworkOverviewLive";
 import OpsPumpsProfile from "@/components/OpsPumpsProfile";
 import ByLocationTable from "@/components/ByLocationTable";
 import { Tabs } from "@/components/Tabs";
@@ -23,6 +23,8 @@ import BaseSelectors from "./components/BaseSelectors";
 
 import type { LocOpt, PumpInfo, TankInfo } from "./types";
 
+const PRINCIPAL_PUMP_IDS = [12, 13, 14, 15, 16, 17, 18, 24, 25, 26, 29, 30];
+const PRINCIPAL_TANK_IDS = [7, 8, 9, 10, 11, 12, 21];
 type CombinedOperationEvent = {
   id: string;
   kind: "pump" | "tank";
@@ -619,8 +621,8 @@ export default function Widget() {
 
   const [pumpOptions, setPumpOptions] = useState<PumpInfo[]>([]);
   const [tankOptions, setTankOptions] = useState<TankInfo[]>([]);
-  const [selectedPumpIds, setSelectedPumpIds] = useState<number[] | "all">("all");
-  const [selectedTankIds, setSelectedTankIds] = useState<number[] | "all">("all");
+  const [selectedPumpIds, setSelectedPumpIds] = useState<number[] | "all">(PRINCIPAL_PUMP_IDS);
+  const [selectedTankIds, setSelectedTankIds] = useState<number[] | "all">(PRINCIPAL_TANK_IDS);
 
   useEffect(() => {
     let mounted = true;
@@ -653,8 +655,8 @@ export default function Widget() {
 
     setPumpOptions([]);
     setTankOptions([]);
-    setSelectedPumpIds("all");
-    setSelectedTankIds("all");
+    setSelectedPumpIds(locId == null ? PRINCIPAL_PUMP_IDS : "all");
+    setSelectedTankIds(locId == null ? PRINCIPAL_TANK_IDS : "all");
 
     (async () => {
       try {
@@ -931,74 +933,6 @@ export default function Widget() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">Ubicación:</span>
-
-          <select
-            className="rounded-xl border p-2 text-sm"
-            value={loc === "all" ? "all" : String(loc)}
-            onChange={(e) =>
-              setLoc(e.target.value === "all" ? "all" : Number(e.target.value))
-            }
-          >
-            <option value="all">Todas</option>
-
-            {locOptionsAll.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-              {tab === "operacion" && (
-        <WaterNetworkOverviewDemo />
-      )}
-{false && tab === "operacion" && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <MiniBadge className="bg-slate-100 text-slate-600">
-              24 h
-            </MiniBadge>
-
-            <MiniBadge className="bg-slate-100 text-slate-600">
-              bucket {liveSync.meta?.bucket ?? "5min"}
-            </MiniBadge>
-
-            {locId != null && (
-              <MiniBadge
-                className={
-                  shouldLoadPumpTimeline
-                    ? "bg-emerald-100 text-emerald-700"
-                    : "bg-slate-100 text-slate-600"
-                }
-              >
-                detalle bombas activo
-              </MiniBadge>
-            )}
-
-            {liveSync.meta?.lastOkAt && (
-              <span>actualizado {fmtShortTime(liveSync.meta.lastOkAt)}</span>
-            )}
-
-            {liveSync.meta?.lastErr && (
-              <span className="text-red-500">{liveSync.meta.lastErr}</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {(pumpOptions.length > 0 || tankOptions.length > 0) && (
-        <BaseSelectors
-          pumpOptions={pumpOptions}
-          tankOptions={tankOptions}
-          selectedPumpIds={selectedPumpIds}
-          setSelectedPumpIds={setSelectedPumpIds}
-          selectedTankIds={selectedTankIds}
-          setSelectedTankIds={setSelectedTankIds}
-        />
-      )}
-
       <Tabs
         value={tab}
         onChange={setTab}
@@ -1414,3 +1348,7 @@ export default function Widget() {
     </div>
   );
 }
+
+
+
+
