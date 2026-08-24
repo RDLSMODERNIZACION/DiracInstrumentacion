@@ -30,7 +30,7 @@ const app2Base = import.meta.env.DEV
 
 // App de Administración independiente (igual que KPI/Infra)
 const app3Src = import.meta.env.DEV
-  ? (import.meta.env.VITE_ADMIN_DEV ?? import.meta.env.VITE_APP3_DEV ?? "http://localhost:5176/")
+  ? (import.meta.env.VITE_ADMIN_DEV ?? import.meta.env.VITE_APP3_DEV ?? "http://localhost:5178/")
   : "/admin/";
 
 type Props = {
@@ -240,8 +240,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       if (!canSeeAdvanced) return noPermsBanner;
       return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />;
     }
-    if (!canSeeAdmin) return ownerOnlyBanner;
-    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administración" />;
+    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administracion" />;
   })();
 
   const companyBadge = user.company?.name ?? (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");

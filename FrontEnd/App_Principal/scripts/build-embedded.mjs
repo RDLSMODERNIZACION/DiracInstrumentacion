@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, cpSync, rmSync } from "node:fs";
 const root = process.cwd(); // App_Principal
 const app1 = `${root}/../App_1`;
 const app2 = `${root}/../App_2`;
+const admin = `${root}/../Administracion`;
 const mapa = `${root}/../Mapa`; // ✅ NUEVO
 
 const run = (cmd, cwd) => {
@@ -36,13 +37,19 @@ if (!existsSync(`${root}/public/infraestructura`))
   mkdirSync(`${root}/public/infraestructura`, { recursive: true });
 cpSync(`${app2}/dist`, `${root}/public/infraestructura`, { recursive: true });
 
+// ==== Administracion (login propio) ====
+cleanInstall(admin);
+run("npm run build", admin);
+if (!existsSync(`${root}/public/admin`))
+  mkdirSync(`${root}/public/admin`, { recursive: true });
+cpSync(`${admin}/dist`, `${root}/public/admin`, { recursive: true });
 // ==== Mapa (NUEVO, sin iframe) ====
 cleanInstall(mapa);
 run("npm run build", mapa);
 if (!existsSync(`${root}/public/mapa`)) mkdirSync(`${root}/public/mapa`, { recursive: true });
 cpSync(`${mapa}/dist`, `${root}/public/mapa`, { recursive: true });
 
-console.log("\n✅ Apps copiadas a /public (kpi/, infraestructura/ y mapa/)");
+console.log("\n✅ Apps copiadas a /public (kpi/, infraestructura/, admin/ y mapa/)");
 
 // ==== Workaround rollup para la App_Principal (root) ====
 // Tras el `npm ci` de Vercel, ejecutamos un `npm install` en Linux
