@@ -2,14 +2,14 @@
 import React from "react";
 import { Badge } from "./ui";
 import { fmtLiters, sevMeta, severityOf } from "./utils";
-import type { ServiceType } from "./hooks/usePlant"; // âœ… NUEVO (tipado del service_type)
+import type { ServiceType } from "./hooks/usePlant"; // ✅ NUEVO (tipado del service_type)
 
 export type ConnStatus = { online: boolean; ageSec: number; tone: "ok" | "warn" | "bad" };
 
 /* --------------------------
-   Fallback de conexiÃ³n (WS/lecturas)
+   Fallback de conexión (WS/lecturas)
 --------------------------- */
-// Umbrales: primero especÃ­ficos de WS; si no existen, usan staleness general
+// Umbrales: primero específicos de WS; si no existen, usan staleness general
 const WARN_SEC =
   Number((import.meta as any).env?.VITE_WS_WARN_SEC ?? (import.meta as any).env?.VITE_STALE_WARN_SEC ?? 120);
 const CRIT_SEC =
@@ -173,7 +173,7 @@ export function TankCard({
   );
 }
 /* =====================
-   PumpCard â€“ Vertical Compact
+   PumpCard – Vertical Compact
 ===================== */
 
 export function PumpCard({
@@ -354,7 +354,7 @@ function clampPct(n: number) {
 }
 
 function fmtAgoShort(sec: number) {
-  if (!isFinite(sec)) return "â€”";
+  if (!isFinite(sec)) return "—";
   if (sec < 90) return `${sec | 0}s`;
   const m = Math.round(sec / 60);
   if (m < 90) return `${m}m`;

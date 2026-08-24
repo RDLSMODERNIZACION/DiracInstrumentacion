@@ -44,7 +44,7 @@ type Group = {
   locId: number | null;
   groupName: string;
   groupCode?: string | null;
-  // âœ… NUEVO: tipo de servicio del grupo (para pestaÃ±as y color)
+  // ✅ NUEVO: tipo de servicio del grupo (para pestañas y color)
   serviceType: ServiceType;
   items: GroupItem[];
   tanks: number;
@@ -52,8 +52,8 @@ type Group = {
 };
 
 function accentForGroup(_key: string, serviceType: ServiceType) {
-  // âœ… Agua: azul suave (default actual)
-  // âœ… Cloacas: verde suave
+  // ✅ Agua: azul suave (default actual)
+  // ✅ Cloacas: verde suave
   if (serviceType === "cloacas") {
     return {
       stripe: "rgba(34,197,94,0.85)", // green-500-ish
@@ -140,7 +140,7 @@ export function OverviewGrid({
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
 
-    // âœ… NUEVO: pasa el serviceType a la card (para que pinte verde si cloacas)
+    // ✅ NUEVO: pasa el serviceType a la card (para que pinte verde si cloacas)
     const serviceType = getServiceTypeFromAsset(t);
 
     return { status: { ...status, tone }, serviceType };
@@ -155,7 +155,7 @@ export function OverviewGrid({
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
 
-    // por si querÃ©s pintar bombas distinto mÃ¡s adelante
+    // por si querés pintar bombas distinto más adelante
     const serviceType = getServiceTypeFromAsset(p);
 
     return { status: { ...status, tone }, serviceType };
@@ -179,7 +179,7 @@ export function OverviewGrid({
   const [showPump, setShowPump] = React.useState(true);
   const [showAll, setShowAll] = React.useState(false); // default: solo conectados
 
-  // âœ… NUEVO: pestaÃ±as Agua | Cloacas
+  // ✅ NUEVO: pestañas Agua | Cloacas
   const [svcTab, setSvcTab] = React.useState<ServiceType>("agua");
   // V18.45 - una sola ubicacion abierta a la vez
   const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
@@ -196,7 +196,7 @@ export function OverviewGrid({
       const code = (l as any).location_code ?? l.code ?? l.location?.code ?? null;
       const name = (l as any).location_name ?? l.name ?? l.location?.name ?? null;
 
-      // si algÃºn dÃ­a assetLocs tambiÃ©n trae service_type
+      // si algún día assetLocs también trae service_type
       const stRaw = (l as any).service_type ?? (l as any).serviceType ?? (l as any).location_service_type ?? null;
       const serviceType: ServiceType | undefined =
         String(stRaw ?? "").trim().toLowerCase() === "cloacas" ? "cloacas" : stRaw != null ? "agua" : undefined;
@@ -231,7 +231,7 @@ export function OverviewGrid({
         };
         out.set(key, g);
       } else {
-        // si el grupo se creÃ³ sin serviceType y luego vemos uno, lo ajustamos
+        // si el grupo se creó sin serviceType y luego vemos uno, lo ajustamos
         if (g.serviceType !== "cloacas" && serviceType === "cloacas") g.serviceType = "cloacas";
       }
       return g;
@@ -284,7 +284,7 @@ export function OverviewGrid({
     return list;
   }, [plant?.tanks, plant?.pumps, linkMap]);
 
-  // âœ… NUEVO: contar por servicio para mostrar en las pestaÃ±as
+  // ✅ NUEVO: contar por servicio para mostrar en las pestañas
   const svcCounts = React.useMemo(() => {
     let agua = 0;
     let cloacas = 0;
@@ -298,7 +298,7 @@ export function OverviewGrid({
   const filteredGroups = React.useMemo(() => {
     const res: Group[] = [];
     for (const g of groups) {
-      // âœ… filtro por pestaÃ±a
+      // ✅ filtro por pestaña
       if (g.serviceType !== svcTab) continue;
 
       if (locFilter !== "ALL") {
@@ -354,7 +354,7 @@ export function OverviewGrid({
       {/* Toolbar */}
       <div className="sticky top-[57px] z-20 flex flex-col gap-2 p-2.5 sm:static sm:gap-4 sm:p-4 rounded-xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm">
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-row sm:items-end sm:gap-4">
-          {/* âœ… NUEVO: Tabs Agua | Cloacas */}
+          {/* ✅ NUEVO: Tabs Agua | Cloacas */}
           <div className="flex-1 min-w-0">
             <label className="block text-xs font-medium text-slate-600 mb-1">Servicio</label>
             <div className="inline-flex w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
@@ -380,9 +380,9 @@ export function OverviewGrid({
             </div>
           </div>
 
-          {/* Selector ubicaciÃ³n */}
+          {/* Selector ubicación */}
           <div className="flex-1 min-w-0">
-            <label className="block text-xs font-medium text-slate-600 mb-1">UbicaciÃ³n</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>
             <select
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               value={typeof locFilter === "number" ? String(locFilter) : locFilter}
@@ -494,7 +494,7 @@ export function OverviewGrid({
                     </div>
                   )}
                   <div className="mt-0.5 text-[11px] text-slate-500">
-                    {g.tanks} {g.tanks === 1 ? "tanque" : "tanques"} Â· {g.pumps} {g.pumps === 1 ? "bomba" : "bombas"}
+                    {g.tanks} {g.tanks === 1 ? "tanque" : "tanques"} · {g.pumps} {g.pumps === 1 ? "bomba" : "bombas"}
                   </div>
                 </div>
                 <span className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-600">
