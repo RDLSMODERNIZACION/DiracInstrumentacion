@@ -100,6 +100,16 @@ type Pump = {
   start_type?: string | null;
   startType?: string | null;
   criticality?: string | null;
+
+  available?: boolean;
+  availability_description?: string | null;
+  availability_type?: string | null;
+  availability_updated_at?: string | null;
+  network_role?: string | null;
+  starts_24h?: number;
+  stops_24h?: number;
+  running_seconds_24h?: number;
+  running_hours_24h?: number;
 };
 
 export type Plant = { tanks: Tank[]; pumps: Pump[]; alarms?: any[] };
@@ -376,6 +386,24 @@ function mapPumps(rows: any[]): Pump[] {
       start_type: r.start_type ?? null,
       startType: r.start_type ?? null,
       criticality: r.criticality ?? null,
+
+      available:
+        typeof r.available === "boolean"
+          ? r.available
+          : typeof r.disponible === "boolean"
+          ? r.disponible
+          : true,
+      availability_description:
+        r.availability_description ?? r.disponibilidad_descripcion ?? null,
+      availability_type:
+        r.availability_type ?? r.tipo_indisponibilidad ?? null,
+      availability_updated_at:
+        r.availability_updated_at ?? r.disponibilidad_actualizada_at ?? null,
+      network_role: r.network_role ?? r.rol_red ?? null,
+      starts_24h: toNumOr(0, r.starts_24h),
+      stops_24h: toNumOr(0, r.stops_24h),
+      running_seconds_24h: toNumOr(0, r.running_seconds_24h),
+      running_hours_24h: toNumOr(0, r.running_hours_24h),
     };
   });
 }

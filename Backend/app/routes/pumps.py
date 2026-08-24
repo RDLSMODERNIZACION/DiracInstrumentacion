@@ -76,6 +76,14 @@ def list_pumps_config(request: Request, response: Response):
       p.tension_v,
       p.tipo_arranque,
       p.criticidad,
+      p.disponible,
+      p.disponibilidad_descripcion,
+      p.tipo_indisponibilidad,
+      p.disponibilidad_actualizada_at,
+      p.rol_red,
+      ks.starts_24h,
+      ks.stops_24h,
+      ks.running_seconds_24h,
 
       v.state,
       v.latest_event_id,
@@ -89,6 +97,8 @@ def list_pumps_config(request: Request, response: Response):
       ON l.id = v.location_id
     LEFT JOIN public.pumps p
       ON p.id = v.pump_id
+    LEFT JOIN kpi.v_operation_pump_summary_24h_full ks
+      ON ks.pump_id = v.pump_id
     ORDER BY v.pump_id
     """
 
@@ -131,6 +141,15 @@ def list_pumps_config(request: Request, response: Response):
                 "voltage_v": float(r["tension_v"]) if r.get("tension_v") is not None else None,
                 "start_type": r.get("tipo_arranque"),
                 "criticality": r.get("criticidad"),
+                "available": bool(r["disponible"]) if r.get("disponible") is not None else True,
+                "availability_description": r.get("disponibilidad_descripcion"),
+                "availability_type": r.get("tipo_indisponibilidad"),
+                "availability_updated_at": _jsonable(r.get("disponibilidad_actualizada_at")),
+                "network_role": r.get("rol_red"),
+                "starts_24h": int(r["starts_24h"]) if r.get("starts_24h") is not None else 0,
+                "stops_24h": int(r["stops_24h"]) if r.get("stops_24h") is not None else 0,
+                "running_seconds_24h": int(r["running_seconds_24h"]) if r.get("running_seconds_24h") is not None else 0,
+                "running_hours_24h": round((float(r["running_seconds_24h"]) / 3600.0), 2) if r.get("running_seconds_24h") is not None else 0.0,
             }
         )
 

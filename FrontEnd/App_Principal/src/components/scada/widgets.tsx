@@ -2,14 +2,14 @@
 import React from "react";
 import { Badge } from "./ui";
 import { fmtLiters, sevMeta, severityOf } from "./utils";
-import type { ServiceType } from "./hooks/usePlant"; // ✅ NUEVO (tipado del service_type)
+import type { ServiceType } from "./hooks/usePlant"; // âœ… NUEVO (tipado del service_type)
 
 export type ConnStatus = { online: boolean; ageSec: number; tone: "ok" | "warn" | "bad" };
 
 /* --------------------------
-   Fallback de conexión (WS/lecturas)
+   Fallback de conexiÃ³n (WS/lecturas)
 --------------------------- */
-// Umbrales: primero específicos de WS; si no existen, usan staleness general
+// Umbrales: primero especÃ­ficos de WS; si no existen, usan staleness general
 const WARN_SEC =
   Number((import.meta as any).env?.VITE_WS_WARN_SEC ?? (import.meta as any).env?.VITE_STALE_WARN_SEC ?? 120);
 const CRIT_SEC =
@@ -51,7 +51,7 @@ export function TankCard({
   onClick,
   signal = "ok",
   status,
-  serviceType, // ✅ NUEVO: permite forzarlo desde OverviewGrid
+  serviceType,
 }: {
   tank: any;
   onClick?: () => void;
@@ -62,105 +62,118 @@ export function TankCard({
   const sev = severityOf(tank.levelPct, tank.thresholds);
   const meta = sevMeta(sev);
 
-  // valores seguros
-  const level = typeof tank.levelPct === "number" && isFinite(tank.levelPct) ? tank.levelPct : null;
+  const level =
+    typeof tank.levelPct === "number" && isFinite(tank.levelPct)
+      ? tank.levelPct
+      : null;
+
   const pct = clampPct(level ?? 0);
 
-  // ---- Conexión: WS o fallback por timestamp de última lectura ----
   const fallbackAge = secSince(tank?.latest?.ts);
-  const fallbackTone: ConnStatus["tone"] = fallbackAge < WARN_SEC ? "ok" : fallbackAge < CRIT_SEC ? "warn" : "bad";
-  const conn: ConnStatus = status ?? { online: fallbackAge < CRIT_SEC, ageSec: fallbackAge, tone: fallbackTone };
+  const fallbackTone: ConnStatus["tone"] =
+    fallbackAge < WARN_SEC
+      ? "ok"
+      : fallbackAge < CRIT_SEC
+      ? "warn"
+      : "bad";
 
-  // Dim por señal + status
+  const conn: ConnStatus =
+    status ?? {
+      online: fallbackAge < CRIT_SEC,
+      ageSec: fallbackAge,
+      tone: fallbackTone,
+    };
+
   const tone = conn.tone ?? signal;
-  const dimClass =
-    tone === "bad" ? "filter grayscale opacity-60" : tone === "warn" ? "filter saturate-50 opacity-90" : "";
 
-  // ✅ NUEVO: color del líquido según servicio
-  // Agua = azul (cyan), Cloacas = verde
+  const dimClass =
+    tone === "bad"
+      ? "opacity-70"
+      : tone === "warn"
+      ? "opacity-90"
+      : "";
+
   const st = getServiceTypeFromTank(tank, serviceType);
-  const liquidClass =
+
+  const barClass =
     st === "cloacas"
-      ? "bg-gradient-to-t from-emerald-800 via-emerald-600 to-emerald-300"
-      : "bg-gradient-to-t from-cyan-700 via-cyan-500 to-cyan-300";
+      ? "from-emerald-700 via-emerald-500 to-emerald-300"
+      : "from-sky-700 via-cyan-500 to-cyan-300";
+
+  const alarmClass =
+    sev === "critical"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : sev === "warning"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-slate-200 bg-slate-50 text-slate-500";
 
   return (
-    <button
-      onClick={onClick}
-      className={`text-left p-4 bg-white border border-slate-200 rounded-2xl hover:shadow-lg transition w-full ${dimClass}`}
+    <div
+      className={[
+        "w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left",
+        "transition ",
+        dimClass,
+      ].join(" ")}
       aria-label={`Tanque ${tank.name}, nivel ${Math.round(pct)}%`}
     >
-      <div className="flex items-center justify-between mb-3">
-        <div className="font-medium text-slate-800">{tank.name}</div>
-        <div className="flex items-center gap-2">
-          {/* Pastilla de conexión (siempre, con WS o fallback) */}
-          <Badge tone={conn.tone}>
-            {conn.online ? `Online${Number.isFinite(conn.ageSec) ? ` · ${fmtAgoShort(conn.ageSec)}` : ""}` : "Offline"}
-          </Badge>
-
-          {/* ✅ NUEVO: etiqueta de servicio (opcional, pero ayuda visual) */}
-          <Badge tone={st === "cloacas" ? "ok" : "ok"}>{st === "cloacas" ? "Cloacas" : "Agua"}</Badge>
-
-          {/* Severidad por nivel */}
-          <Badge tone={meta.tone}>{meta.label}</Badge>
-        </div>
-      </div>
-
-      <div className="flex items-end gap-5">
-        {/* === Tanque 3D compacto === */}
-        <div className="relative">
-          <div className="relative w-[95px] h-44 border-[6px] border-slate-200 rounded-[28px] bg-slate-50 overflow-hidden shadow-inner">
-            {/* Material 3D */}
-            <div className="pointer-events-none absolute inset-0 rounded-[28px]">
-              <div className="absolute inset-0 rounded-[28px] [background:radial-gradient(ellipse_at_center,rgba(255,255,255,0.7)_0%,rgba(255,255,255,0.28)_38%,rgba(0,0,0,0.08)_85%)]" />
-              <div className="absolute inset-0 rounded-[28px] [box-shadow:inset_0_18px_28px_rgba(0,0,0,0.10),inset_0_-12px_18px_rgba(0,0,0,0.08)]" />
-              <div className="absolute inset-y-2 left-[45%] w-[10%] bg-white/35 blur-sm rounded-full" />
-            </div>
-
-            {/* Contenido líquido */}
-            <div
-              className="absolute bottom-0 left-0 right-0 will-change-[height]"
-              style={{ height: `${pct}%`, transition: "height 800ms cubic-bezier(0.2,0.8,0.2,1)" }}
-            >
-              {/* ✅ ACÁ cambia el color */}
-              <div className={`absolute inset-0 ${liquidClass}`} />
-
-              <div className="absolute -top-3 left-0 w-[220%] h-6 animate-wave [--wave-speed:7s] text-white/70">
-                <WaveSVG />
-              </div>
-              <div className="absolute -top-2 left-0 w-[220%] h-5 animate-wave [--wave-speed:5s] [animation-direction:reverse] text-white/50">
-                <WaveSVG />
-              </div>
-              <div className="absolute -top-0.5 left-0 right-0 h-2 bg-white/60 rounded-full blur-[1px]" />
-              <Bubbles count={16} />
-            </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-bold text-slate-900">
+            {tank.name}
           </div>
-          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-[70px] h-3 bg-black/15 rounded-full blur-md" />
+
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {!conn.online ? (
+              <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                Sin comunicacion
+              </span>
+            ) : null}
+
+            {meta.label !== "Normal" ? (
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${alarmClass}`}>
+                {meta.label}
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        {/* Lecturas a la derecha */}
-        <div className="flex-1 min-w-0">
-          <div className="text-3xl font-semibold tabular-nums leading-none text-slate-800">{Math.round(pct)}%</div>
-          {/* ✅ Quitado: litros */}
-          {/* <div className="text-xs text-slate-500 truncate">{fmtLiters(volume)} / {fmtLiters(capacity)}</div> */}
+        <div className="shrink-0 text-3xl font-black leading-none tabular-nums text-slate-950">
+          {Math.round(pct)}%
         </div>
       </div>
 
-      <style>{`
-        @keyframes waveMove { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        .animate-wave { animation: waveMove var(--wave-speed,8s) linear infinite; }
-        @keyframes bubble-rise {
-          0% { transform: translateY(0) scale(0.7); opacity: 0; }
-          10% { opacity: 0.6; }
-          100% { transform: translateY(-115%) scale(1); opacity: 0; }
-        }
-      `}</style>
-    </button>
+      <div className="mt-3">
+        <div className="relative h-5 overflow-hidden rounded-md border border-slate-300 bg-slate-100 shadow-inner">
+          <div
+            className={`absolute inset-y-0 left-0 bg-gradient-to-r ${barClass}`}
+            style={{
+              width: `${pct}%`,
+              transition: "width 650ms cubic-bezier(0.2,0.8,0.2,1)",
+            }}
+          />
+
+          {[25, 50, 75].map((mark) => (
+            <div
+              key={mark}
+              className="pointer-events-none absolute inset-y-0 w-px bg-white/70"
+              style={{ left: `${mark}%` }}
+            />
+          ))}
+        </div>
+
+        <div className="mt-1.5 flex justify-between text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+          <span>0</span>
+          <span>25</span>
+          <span>50</span>
+          <span>75</span>
+          <span>100%</span>
+        </div>
+      </div>
+    </div>
   );
 }
-
 /* =====================
-   PumpCard – Vertical Compact
+   PumpCard â€“ Vertical Compact
 ===================== */
 
 export function PumpCard({
@@ -174,7 +187,10 @@ export function PumpCard({
   signal?: "ok" | "warn" | "bad";
   status?: ConnStatus;
 }) {
-  const state: "run" | "stop" | undefined = pump?.state === "run" || pump?.state === "stop" ? pump.state : undefined;
+  const state: "run" | "stop" | undefined =
+    pump?.state === "run" || pump?.state === "stop"
+      ? pump.state
+      : undefined;
 
   const ageSecFromRow =
     Number.isFinite(pump?.age_sec)
@@ -190,10 +206,19 @@ export function PumpCard({
       ? (ageSecFromRow as number) < CRIT_SEC
       : false;
 
-  const ts: string | null = pump?.hb_ts ?? pump?.event_ts ?? pump?.latest?.ts ?? null;
+  const ts: string | null =
+    pump?.hb_ts ?? pump?.event_ts ?? pump?.latest?.ts ?? null;
 
-  const derivedAge = Number.isFinite(ageSecFromRow) ? (ageSecFromRow as number) : secSince(ts);
-  const derivedTone: ConnStatus["tone"] = onlineFromRow ? "ok" : derivedAge < WARN_SEC ? "warn" : "bad";
+  const derivedAge = Number.isFinite(ageSecFromRow)
+    ? (ageSecFromRow as number)
+    : secSince(ts);
+
+  const derivedTone: ConnStatus["tone"] =
+    onlineFromRow
+      ? "ok"
+      : derivedAge < WARN_SEC
+      ? "warn"
+      : "bad";
 
   const conn: ConnStatus =
     status ?? {
@@ -202,100 +227,123 @@ export function PumpCard({
       tone: derivedTone,
     };
 
+  const title = String(pump?.name ?? "Bomba");
   const isOn = state === "run";
-  const canSpin = Boolean(conn.online && isOn);
-  const tone = conn.tone ?? signal;
+  const available =
+    typeof pump?.available === "boolean" ? pump.available : true;
 
-  const ring = tone === "ok" ? "ring-emerald-300" : tone === "warn" ? "ring-amber-300" : "ring-rose-300";
-  const dot = conn.online ? "bg-emerald-500" : tone === "warn" ? "bg-amber-500" : "bg-rose-500";
+  const availabilityType = String(
+    pump?.availability_type ?? ""
+  ).trim();
 
-  const dimClass = tone === "bad" ? "grayscale opacity-60" : tone === "warn" ? "saturate-75" : "";
+  const availabilityDescription = String(
+    pump?.availability_description ?? ""
+  ).trim();
 
-  const title = (pump?.name ?? "—").toString();
+  const runningHours = Number(pump?.running_hours_24h ?? 0);
+  const starts24h = Number(pump?.starts_24h ?? 0);
+  const nominalPower = Number(pump?.power_kw);
+
+  const ledClass =
+    !conn.online
+      ? "bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.75)]"
+      : !available
+      ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.65)]"
+      : isOn
+      ? "bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.75)]"
+      : "bg-slate-500";
+
+  const stateText =
+    !conn.online
+      ? "SIN COMUNICACION"
+      : isOn
+      ? "ENCENDIDA"
+      : "APAGADA";
+
+  const stateClass =
+    !conn.online
+      ? "text-rose-600"
+      : isOn
+      ? "text-emerald-600"
+      : "text-slate-500";
+
+  const availabilityLabel =
+    !available
+      ? availabilityType
+        ? availabilityType.toUpperCase()
+        : "NO DISPONIBLE"
+      : "DISPONIBLE";
+
+  const availabilityClass =
+    !available
+      ? "border-amber-300 bg-amber-50 text-amber-700"
+      : "border-emerald-300 bg-emerald-50 text-emerald-700";
 
   return (
-    <button
-      onClick={onClick}
+    <div
       className={[
-        "group relative block w-full max-w-none min-w-0 sm:max-w-[150px] sm:min-w-[140px]",
-        "h-full",
-        "rounded-2xl border border-slate-200 bg-white",
-        "px-2.5 py-2 text-left transition",
-        "hover:shadow-md active:scale-[0.99]",
-        dimClass,
+        "group relative block w-full min-w-0 overflow-hidden rounded-xl border",
+        "border-slate-200 bg-white px-3 py-3 text-left",
+        "shadow-sm",
+        "transition",
       ].join(" ")}
       aria-label={`Bomba ${title}`}
     >
-      <div
-        className={[
-          "pointer-events-none absolute -top-8 -right-8 h-24 w-24 rounded-full blur-2xl",
-          tone === "ok" ? "bg-emerald-200/35" : tone === "warn" ? "bg-amber-200/35" : "bg-rose-200/30",
-        ].join(" ")}
-      />
-
-      <div className="relative z-10 flex h-full flex-col">
-        <div className="mb-2">
-          <div className="flex items-center gap-1">
-            <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
-            <div className="truncate text-[12px] font-semibold text-slate-900 leading-tight">{title}</div>
-          </div>
-        </div>
-
-        <div className="flex flex-1 items-center justify-center">
-          <div className="relative grid h-14 w-14 place-items-center">
-            <div className={`absolute inset-0 rounded-full ring-2 ${ring}`} />
-            <div className={`relative h-10 w-10 ${canSpin ? "text-emerald-500" : "text-slate-400"}`}>
-              <Impeller spinning={canSpin} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`h-2.5 w-2.5 shrink-0 rounded-full border border-black/20 ${ledClass}`}
+            />
+            <div className="truncate font-mono text-[15px] font-black tracking-wide text-slate-900">
+              {title}
             </div>
+          </div>
 
-            {!canSpin && (
-              <span
-                className="pointer-events-none absolute inset-0 grid place-items-center text-slate-400/70"
-                title={!conn.online ? "Sin conexión" : "Apagada"}
-              >
-                <LockIcon className="h-4 w-4" />
-              </span>
-            )}
+          <div className={`mt-3 font-mono text-[15px] font-bold tracking-[0.08em] ${stateClass}`}>
+            {stateText}
           </div>
         </div>
 
-        <div className="mt-2 flex items-center justify-between">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <span
             className={[
-              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-              conn.online
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : tone === "warn"
-                ? "bg-amber-50 text-amber-700 border-amber-200"
-                : "bg-rose-50 text-rose-700 border-rose-200",
+              "rounded-md border px-2.5 py-1 font-mono text-[10px] font-black tracking-wide",
+              availabilityClass,
             ].join(" ")}
           >
-            {conn.online ? "Online" : "Offline"}
+            {availabilityLabel}
           </span>
 
-          <span
-            className={[
-              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-              isOn ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-600 border-slate-200",
-            ].join(" ")}
-          >
-            {isOn ? "ON" : "OFF"}
+          <span className="hidden">
+            &gt;
           </span>
         </div>
-
-        <div className="mt-1 text-[10px] text-slate-500 text-right">{canSpin ? "Lista" : !conn.online ? "Sin conexión" : "Apagada"}</div>
       </div>
 
-      <style>
-        {`
-          @keyframes rotate360 { to { transform: rotate(360deg); } }
-          .impeller-spin { animation: rotate360 1.05s linear infinite; }
-        `}
-      </style>
-    </button>
+      <div className="my-3 h-px bg-slate-200" />
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] font-semibold text-slate-400">
+        <span>{runningHours.toFixed(1)} h / 24h</span>
+        <span className="text-slate-600">|</span>
+        <span>{Math.round(starts24h)} arr.</span>
+
+        {Number.isFinite(nominalPower) && nominalPower > 0 ? (
+          <>
+            <span className="text-slate-600">|</span>
+            <span>{nominalPower.toFixed(0)} kW nom.</span>
+          </>
+        ) : null}
+      </div>
+
+      {!available && availabilityDescription ? (
+        <div className="mt-2 truncate font-mono text-[11px] text-amber-700">
+          {availabilityDescription}
+        </div>
+      ) : null}
+    </div>
   );
 }
-
 /* =====================
    Compartidos
 ===================== */
@@ -306,7 +354,7 @@ function clampPct(n: number) {
 }
 
 function fmtAgoShort(sec: number) {
-  if (!isFinite(sec)) return "—";
+  if (!isFinite(sec)) return "â€”";
   if (sec < 90) return `${sec | 0}s`;
   const m = Math.round(sec / 60);
   if (m < 90) return `${m}m`;
@@ -401,3 +449,4 @@ function WaveSVG() {
     </svg>
   );
 }
+

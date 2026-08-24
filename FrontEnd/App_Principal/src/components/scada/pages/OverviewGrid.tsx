@@ -44,7 +44,7 @@ type Group = {
   locId: number | null;
   groupName: string;
   groupCode?: string | null;
-  // ✅ NUEVO: tipo de servicio del grupo (para pestañas y color)
+  // âœ… NUEVO: tipo de servicio del grupo (para pestaÃ±as y color)
   serviceType: ServiceType;
   items: GroupItem[];
   tanks: number;
@@ -52,8 +52,8 @@ type Group = {
 };
 
 function accentForGroup(_key: string, serviceType: ServiceType) {
-  // ✅ Agua: azul suave (default actual)
-  // ✅ Cloacas: verde suave
+  // âœ… Agua: azul suave (default actual)
+  // âœ… Cloacas: verde suave
   if (serviceType === "cloacas") {
     return {
       stripe: "rgba(34,197,94,0.85)", // green-500-ish
@@ -140,7 +140,7 @@ export function OverviewGrid({
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
 
-    // ✅ NUEVO: pasa el serviceType a la card (para que pinte verde si cloacas)
+    // âœ… NUEVO: pasa el serviceType a la card (para que pinte verde si cloacas)
     const serviceType = getServiceTypeFromAsset(t);
 
     return { status: { ...status, tone }, serviceType };
@@ -155,7 +155,7 @@ export function OverviewGrid({
     const key = String(nid);
     const tone = badKeys.has(key) ? "bad" : warnKeys.has(key) ? "warn" : status.tone;
 
-    // por si querés pintar bombas distinto más adelante
+    // por si querÃ©s pintar bombas distinto mÃ¡s adelante
     const serviceType = getServiceTypeFromAsset(p);
 
     return { status: { ...status, tone }, serviceType };
@@ -179,8 +179,10 @@ export function OverviewGrid({
   const [showPump, setShowPump] = React.useState(true);
   const [showAll, setShowAll] = React.useState(false); // default: solo conectados
 
-  // ✅ NUEVO: pestañas Agua | Cloacas
+  // âœ… NUEVO: pestaÃ±as Agua | Cloacas
   const [svcTab, setSvcTab] = React.useState<ServiceType>("agua");
+  // V18.45 - una sola ubicacion abierta a la vez
+  const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
 
   const linkMap = React.useMemo(() => {
     const map = new Map<string, { locId: number | null; code?: string | null; name?: string | null; serviceType?: ServiceType }>();
@@ -194,7 +196,7 @@ export function OverviewGrid({
       const code = (l as any).location_code ?? l.code ?? l.location?.code ?? null;
       const name = (l as any).location_name ?? l.name ?? l.location?.name ?? null;
 
-      // si algún día assetLocs también trae service_type
+      // si algÃºn dÃ­a assetLocs tambiÃ©n trae service_type
       const stRaw = (l as any).service_type ?? (l as any).serviceType ?? (l as any).location_service_type ?? null;
       const serviceType: ServiceType | undefined =
         String(stRaw ?? "").trim().toLowerCase() === "cloacas" ? "cloacas" : stRaw != null ? "agua" : undefined;
@@ -229,7 +231,7 @@ export function OverviewGrid({
         };
         out.set(key, g);
       } else {
-        // si el grupo se creó sin serviceType y luego vemos uno, lo ajustamos
+        // si el grupo se creÃ³ sin serviceType y luego vemos uno, lo ajustamos
         if (g.serviceType !== "cloacas" && serviceType === "cloacas") g.serviceType = "cloacas";
       }
       return g;
@@ -282,7 +284,7 @@ export function OverviewGrid({
     return list;
   }, [plant?.tanks, plant?.pumps, linkMap]);
 
-  // ✅ NUEVO: contar por servicio para mostrar en las pestañas
+  // âœ… NUEVO: contar por servicio para mostrar en las pestaÃ±as
   const svcCounts = React.useMemo(() => {
     let agua = 0;
     let cloacas = 0;
@@ -296,7 +298,7 @@ export function OverviewGrid({
   const filteredGroups = React.useMemo(() => {
     const res: Group[] = [];
     for (const g of groups) {
-      // ✅ filtro por pestaña
+      // âœ… filtro por pestaÃ±a
       if (g.serviceType !== svcTab) continue;
 
       if (locFilter !== "ALL") {
@@ -324,8 +326,8 @@ export function OverviewGrid({
       const t = it.obj;
       const props = tankCardProps(t);
       return (
-        <div key={`wrap-t-${t.id}`} className="col-span-1 sm:col-span-2 w-full justify-self-stretch">
-          <TankCard tank={t} onClick={() => onOpenTank(t.id)} {...props} />
+        <div key={`wrap-t-${t.id}`} className="col-span-1 w-full justify-self-stretch">
+          <TankCard tank={t} {...props} />
         </div>
       );
     }
@@ -333,7 +335,7 @@ export function OverviewGrid({
     const props = pumpCardProps(p);
     return (
       <div key={`wrap-p-${p.id}`} className="col-span-1 w-full justify-self-stretch">
-        <PumpCard pump={p} onClick={() => onOpenPump(p.id)} {...props} />
+        <PumpCard pump={p} {...props} />
       </div>
     );
   };
@@ -341,14 +343,14 @@ export function OverviewGrid({
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Toolbar */}
-      <div className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white/80 backdrop-blur shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
-          {/* ✅ NUEVO: Tabs Agua | Cloacas */}
+      <div className="sticky top-[57px] z-20 flex flex-col gap-2 p-2.5 sm:static sm:gap-4 sm:p-4 rounded-xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-row sm:items-end sm:gap-4">
+          {/* âœ… NUEVO: Tabs Agua | Cloacas */}
           <div className="flex-1 min-w-0">
             <label className="block text-xs font-medium text-slate-600 mb-1">Servicio</label>
             <div className="inline-flex w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
               <button
-                onClick={() => setSvcTab("agua")}
+                onClick={() => { setSvcTab("agua"); setOpenGroupKey(null); }}
                 className={[
                   "flex-1 sm:flex-none px-3 py-2 text-sm transition",
                   svcTab === "agua" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
@@ -358,7 +360,7 @@ export function OverviewGrid({
               </button>
               <div className="w-px bg-slate-300" />
               <button
-                onClick={() => setSvcTab("cloacas")}
+                onClick={() => { setSvcTab("cloacas"); setOpenGroupKey(null); }}
                 className={[
                   "flex-1 sm:flex-none px-3 py-2 text-sm transition",
                   svcTab === "cloacas" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
@@ -369,9 +371,9 @@ export function OverviewGrid({
             </div>
           </div>
 
-          {/* Selector ubicación */}
+          {/* Selector ubicaciÃ³n */}
           <div className="flex-1 min-w-0">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">UbicaciÃ³n</label>
             <select
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               value={typeof locFilter === "number" ? String(locFilter) : locFilter}
@@ -396,7 +398,7 @@ export function OverviewGrid({
 
         {/* Botonera responsive */}
         <div className="flex items-center">
-          <div className="inline-flex flex-wrap w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
+          <div className="grid grid-cols-3 w-full sm:inline-flex sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
             <button
               onClick={() => setShowTank((v) => !v)}
               className={[
@@ -424,7 +426,7 @@ export function OverviewGrid({
             <button
               onClick={() => setShowAll((v) => !v)}
               className={[
-                "w-full sm:w-auto px-3 py-2 text-sm transition whitespace-nowrap border-t sm:border-t-0 border-slate-300 sm:border-0",
+                "px-2 py-2 text-xs sm:px-3 sm:text-sm transition whitespace-nowrap border-l border-slate-300",
                 showAll ? "bg-white text-slate-700 hover:bg-slate-50" : "bg-slate-900 text-white",
               ].join(" ")}
             >
@@ -447,34 +449,62 @@ export function OverviewGrid({
           return (
             <div
               key={g.key}
-              className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 sm:p-4"
+              className="rounded-xl border border-slate-200 bg-white shadow-sm p-2.5 sm:rounded-2xl sm:p-4"
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
               {/* Header del grupo */}
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-start justify-between gap-2 mb-2 sm:items-center sm:mb-3"
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenGroupKey((curr) => (curr === g.key ? null : g.key))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setOpenGroupKey((curr) => (curr === g.key ? null : g.key));
+                  }
+                }}>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">
+                  <div className="text-sm font-bold text-slate-900 truncate">
                     {g.groupName}
-                    {g.groupCode ? <span className="ml-2 text-xs text-slate-500">({g.groupCode})</span> : null}
+                  </div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-600">
+                    {g.tanks} {g.tanks === 1 ? "tanque" : "tanques"} - {g.pumps} {g.pumps === 1 ? "bomba" : "bombas"}
+                  </div>
+
+                  {g.tanks > 0 && (
+                    <div className="mt-0.5 text-[11px] text-slate-500">
+                      Nivel prom.{" "}
+                      {(() => {
+                        const vals = g.items
+                          .filter((it) => it.kind === "tank")
+                          .map((it) => Number(it.obj?.levelPct))
+                          .filter((v) => Number.isFinite(v));
+                        if (!vals.length) return "--";
+                        return `${Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)}%`;
+                      })()}
+                    </div>
+                  )}
+                  <div className="mt-0.5 text-[11px] text-slate-500">
+                    {g.tanks} {g.tanks === 1 ? "tanque" : "tanques"} Â· {g.pumps} {g.pumps === 1 ? "bomba" : "bombas"}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span
-                    className="px-2 py-1 rounded-full text-xs border"
-                    style={{ background: acc.pillBg, borderColor: acc.pillBd, color: acc.pillTx }}
-                  >
-                    {g.serviceType === "cloacas" ? "Cloacas" : "Agua"}
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    TK {g.tanks} · PU {g.pumps}
-                  </span>
-                </div>
+                <span
+                  className="shrink-0 px-2 py-1 rounded-full text-[11px] border"
+                  style={{ background: acc.pillBg, borderColor: acc.pillBd, color: acc.pillTx }}
+                >
+                  {g.serviceType === "cloacas" ? "Cloacas" : "Agua"}
+                </span>
+                <span className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-600">
+                  {openGroupKey === g.key ? "-" : "+"}
+                </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2 sm:gap-3 items-stretch justify-items-stretch">
+              {openGroupKey === g.key && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 sm:gap-3 items-stretch justify-items-stretch">
                 {g.items.map(renderItemCard)}
               </div>
+              )}
             </div>
           );
         })}
@@ -482,3 +512,4 @@ export function OverviewGrid({
     </div>
   );
 }
+
