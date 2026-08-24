@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import TankLevelChart from "@/components/TankLevelChart";
 import WaterNetworkOverviewLive from "@/components/red/WaterNetworkOverviewLive";
@@ -1634,7 +1634,7 @@ export default function Widget() {
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="w-full max-w-sm">
             <LocationSelect
-              label="UbicaciÃ³n"
+              label="Ubicación"
               value={loc}
               onChange={(v) => setLoc(v as number | "all")}
               options={locOptionsAll}
@@ -1643,7 +1643,7 @@ export default function Widget() {
           </div>
 
           <div className="text-xs text-slate-400">
-            Filtro exclusivo de OperaciÃ³n y confiabilidad
+            Filtro exclusivo de Operación y confiabilidad
           </div>
         </div>
       )}

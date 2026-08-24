@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { scopedUrl, getApiHeaders } from "@/lib/config";
 
 type AIAnalysis = {
@@ -159,7 +159,7 @@ export default function AIManagementPage() {
       setCached(Boolean(data.cached));
       if (data.context) setContext(data.context);
     } catch (e: any) {
-      setError(e?.message || "No se pudo generar el anÃ¡lisis de IA.");
+      setError(e?.message || "No se pudo generar el análisis de IA.");
     } finally {
       setLoadingAI(false);
     }
@@ -193,20 +193,20 @@ export default function AIManagementPage() {
               </span>
               {analysis ? (
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-bold uppercase ${tone.badge}`}>
-                  {analysis.estado === "atencion" ? "AtenciÃ³n" : analysis.estado}
+                  {analysis.estado === "atencion" ? "Atención" : analysis.estado}
                 </span>
               ) : null}
             </div>
 
             <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
-              {analysis?.titulo ?? "AnÃ¡lisis de la operaciÃ³n"}
+              {analysis?.titulo ?? "Análisis de la operación"}
             </h2>
 
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               {loadingAI && !analysis
-                ? "Analizando el estado hidrÃ¡ulico, elÃ©ctrico y la disponibilidad de equipos..."
+                ? "Analizando el estado hidráulico, eléctrico y la disponibilidad de equipos..."
                 : analysis?.resumen ??
-                  "El estado determinÃ­stico de la red ya estÃ¡ disponible. El anÃ¡lisis de IA aparecerÃ¡ aquÃ­."}
+                  "El estado determinístico de la red ya está disponible. El análisis de IA aparecerá aquí."}
             </p>
 
             <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
@@ -226,18 +226,18 @@ export default function AIManagementPage() {
             disabled={loadingAI}
             className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
           >
-            {loadingAI ? "Analizando..." : "Reanalizar operaciÃ³n"}
+            {loadingAI ? "Analizando..." : "Reanalizar operación"}
           </button>
         </div>
       </section>
 
       {error ? (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <div className="font-bold">La capa de datos funciona, pero la IA requiere atenciÃ³n.</div>
+          <div className="font-bold">La capa de datos funciona, pero la IA requiere atención.</div>
           <div className="mt-1">{error}</div>
           {error.includes("OPENAI_API_KEY") ? (
             <div className="mt-2 text-xs">
-              ConfigurÃ¡ <b>OPENAI_API_KEY</b> en las variables de entorno del backend de Render.
+              Configurá <b>OPENAI_API_KEY</b> en las variables de entorno del backend de Render.
             </div>
           ) : null}
         </section>
@@ -247,12 +247,12 @@ export default function AIManagementPage() {
         <Metric
           label="Reserva"
           value={`${fmt(network.storage_pct_weighted)}%`}
-          help={`${fmtInt(network.stored_m3)} de ${fmtInt(network.storage_capacity_m3)} mÂ³`}
+          help={`${fmtInt(network.stored_m3)} de ${fmtInt(network.storage_capacity_m3)} m³`}
         />
         <Metric
           label="Tendencia 3 h"
           value={`${fmt(network.storage_trend_3h_pct_points)} pp`}
-          help={`${fmtInt(network.storage_change_m3_3h)} mÂ³`}
+          help={`${fmtInt(network.storage_change_m3_3h)} m³`}
         />
         <Metric
           label="Bombas"
@@ -267,10 +267,10 @@ export default function AIManagementPage() {
         <Metric
           label="Alertas abiertas"
           value={fmtInt(alerts.length)}
-          help={criticalAlerts ? `${criticalAlerts} crÃ­ticas` : "Sin crÃ­ticas"}
+          help={criticalAlerts ? `${criticalAlerts} críticas` : "Sin críticas"}
         />
         <Metric
-          label="Tanque mÃ­nimo"
+          label="Tanque mínimo"
           value={`${fmt(network.lowest_tank_pct)}%`}
           help={`${fmtInt(network.tanks_low)} bajo 30%`}
         />
@@ -288,7 +288,7 @@ export default function AIManagementPage() {
               ))
             ) : (
               <div className="text-sm text-slate-400">
-                {loadingAI ? "Procesando..." : "Sin hallazgos de IA todavÃ­a."}
+                {loadingAI ? "Procesando..." : "Sin hallazgos de IA todavía."}
               </div>
             )}
           </div>
@@ -305,7 +305,7 @@ export default function AIManagementPage() {
               ))
             ) : (
               <div className="text-sm text-blue-500/70">
-                {loadingAI ? "Preparando recomendaciones..." : "Sin recomendaciones todavÃ­a."}
+                {loadingAI ? "Preparando recomendaciones..." : "Sin recomendaciones todavía."}
               </div>
             )}
           </div>
@@ -340,7 +340,7 @@ export default function AIManagementPage() {
                 <div className="mt-1 text-sm leading-5 text-slate-700">{a.message}</div>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
                   {a.location_name ? <span>{a.location_name}</span> : null}
-                  <span>Ãšltima detecciÃ³n: {fmtDate(a.last_seen_at)}</span>
+                  <span>Última detección: {fmtDate(a.last_seen_at)}</span>
                 </div>
               </div>
             ))
@@ -353,7 +353,7 @@ export default function AIManagementPage() {
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 className="text-base font-black text-slate-950">Estado elÃ©ctrico por planta</h3>
+        <h3 className="text-base font-black text-slate-950">Estado eléctrico por planta</h3>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead>
@@ -363,7 +363,7 @@ export default function AIManagementPage() {
                 <th className="py-2 pr-3 text-right">FP</th>
                 <th className="py-2 pr-3 text-right">Bombas ON</th>
                 <th className="py-2 pr-3 text-right">Disponibles</th>
-                <th className="py-2 pr-3">MediciÃ³n</th>
+                <th className="py-2 pr-3">Medición</th>
               </tr>
             </thead>
             <tbody>

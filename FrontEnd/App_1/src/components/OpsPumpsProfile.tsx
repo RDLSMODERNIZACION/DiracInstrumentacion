@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -420,7 +420,7 @@ function PumpNamesBlock({
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
       <div className={`mb-1 text-[11px] font-semibold ${colorClass}`}>
-        {title} Â· {names?.length ?? 0}
+        {title} · {names?.length ?? 0}
       </div>
 
       {names && names.length > 0 ? (
@@ -506,7 +506,7 @@ function CustomTooltip({
 export default function OpsPumpsProfile({
   pumpsTs,
   comparePumpsTs,
-  compareLabel = "AuditorÃ­a",
+  compareLabel = "Auditoría",
   max,
   syncId,
   title = "Bombas ON",
@@ -644,7 +644,7 @@ export default function OpsPumpsProfile({
           <div className="text-sm font-semibold text-slate-700">{title}</div>
 
           <div className="mt-1 text-xs text-slate-400">
-            TocÃ¡ o pasÃ¡ por un punto del grÃ¡fico para ver quÃ© bombas estaban
+            Tocá o pasá por un punto del gráfico para ver qué bombas estaban
             encendidas en ese minuto.
           </div>
         </div>
@@ -670,7 +670,7 @@ export default function OpsPumpsProfile({
           )}
 
           <div className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">
-            MÃ¡x ON:{" "}
+            Máx ON:{" "}
             <span className="font-semibold">
               {fmtInt(summary.maxPoint?.value)}
             </span>
@@ -771,7 +771,7 @@ export default function OpsPumpsProfile({
                 <Area
                   type="stepAfter"
                   dataKey="offline"
-                  name="Sin comunicaciÃ³n"
+                  name="Sin comunicación"
                   stroke="#dc2626"
                   fill="#fecaca"
                   fillOpacity={0.35}
@@ -805,7 +805,7 @@ export default function OpsPumpsProfile({
                   stroke="#ffffff"
                   strokeWidth={2}
                   label={{
-                    value: `MÃ¡x ${fmtInt(summary.maxPoint.value)}`,
+                    value: `Máx ${fmtInt(summary.maxPoint.value)}`,
                     position: "top",
                     fill: "#059669",
                     fontSize: 11,
@@ -873,7 +873,7 @@ export default function OpsPumpsProfile({
             <PumpNamesBlock
               title="Encendidas"
               names={selectedRow.activePumpNames}
-              empty="No habÃ­a bombas encendidas o no llegÃ³ detalle."
+              empty="No había bombas encendidas o no llegó detalle."
               colorClass="text-emerald-700"
             />
 
@@ -885,7 +885,7 @@ export default function OpsPumpsProfile({
             />
 
             <PumpNamesBlock
-              title="Sin comunicaciÃ³n"
+              title="Sin comunicación"
               names={selectedRow.offlinePumpNames}
               empty="Sin bombas offline."
               colorClass="text-red-700"
@@ -897,7 +897,7 @@ export default function OpsPumpsProfile({
       {summary.maxPoint ? (
         <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
           <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-700">
-            MÃ¡ximo ON:{" "}
+            Máximo ON:{" "}
             <span className="font-semibold">
               {fmtInt(summary.maxPoint.value)}
             </span>{" "}
