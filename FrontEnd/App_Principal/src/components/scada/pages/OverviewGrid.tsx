@@ -293,6 +293,20 @@ export function OverviewGrid({
       const an = a.locId == null;
       const bn = b.locId == null;
       if (an !== bn) return an ? 1 : -1;
+
+      const orderOf = (g: Group) => {
+        const values = g.items
+          .map((it) => Number((it.obj as any)?.location_display_order))
+          .filter((v) => Number.isFinite(v));
+
+        return values.length ? Math.min(...values) : 999;
+      };
+
+      const ao = orderOf(a);
+      const bo = orderOf(b);
+
+      if (ao !== bo) return ao - bo;
+
       return a.groupName.localeCompare(b.groupName, "es", { sensitivity: "base" });
     });
 

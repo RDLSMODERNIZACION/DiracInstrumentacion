@@ -286,6 +286,7 @@ function mapTanks(rows: any[]): Tank[] {
       name,
       location_id,
       location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
 
       service_type,
@@ -297,10 +298,12 @@ function mapTanks(rows: any[]): Tank[] {
 
       locationId: location_id,
       locationName: location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
       location: {
         id: location_id,
         name: location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
         service_type,
         serviceType: service_type,
@@ -356,6 +359,7 @@ function mapPumps(rows: any[]): Pump[] {
       state,
       location_id,
       location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
 
       service_type,
@@ -363,10 +367,12 @@ function mapPumps(rows: any[]): Pump[] {
 
       locationId: location_id,
       locationName: location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
       location: {
         id: location_id,
         name: location_name,
+      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
         service_type,
         serviceType: service_type,
