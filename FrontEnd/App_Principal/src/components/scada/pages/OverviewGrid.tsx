@@ -325,23 +325,32 @@ export function OverviewGrid({
     if (it.kind === "tank") {
       const t = it.obj;
       const props = tankCardProps(t);
+
       return (
-        <div key={`wrap-t-${t.id}`} className="col-span-1 w-full justify-self-stretch">
+        <div
+          key={`wrap-t-${t.id}`}
+          className="dirac-tank-card w-full min-w-0"
+        >
           <TankCard tank={t} {...props} />
         </div>
       );
     }
+
     const p = it.obj;
     const props = pumpCardProps(p);
+
     return (
-      <div key={`wrap-p-${p.id}`} className="col-span-1 w-full justify-self-stretch">
+      <div
+        key={`wrap-p-${p.id}`}
+        className="dirac-pump-card w-full min-w-0"
+      >
         <PumpCard pump={p} {...props} />
       </div>
     );
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+<div className="space-y-4 sm:space-y-6">
       {/* Toolbar */}
       <div className="sticky top-[57px] z-20 flex flex-col gap-2 p-2.5 sm:static sm:gap-4 sm:p-4 rounded-xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm">
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-row sm:items-end sm:gap-4">
@@ -453,7 +462,7 @@ export function OverviewGrid({
               style={{ borderLeft: `6px solid ${acc.stripe}` }}
             >
               {/* Header del grupo */}
-              <div className="flex items-start justify-between gap-2 mb-2 sm:items-center sm:mb-3"
+              <div className="flex items-start justify-between gap-3 mb-3 sm:items-center"
                 role="button"
                 tabIndex={0}
                 onClick={() => setOpenGroupKey((curr) => (curr === g.key ? null : g.key))}
@@ -488,21 +497,24 @@ export function OverviewGrid({
                     {g.tanks} {g.tanks === 1 ? "tanque" : "tanques"} Â· {g.pumps} {g.pumps === 1 ? "bomba" : "bombas"}
                   </div>
                 </div>
-
-                <span
-                  className="shrink-0 px-2 py-1 rounded-full text-[11px] border"
-                  style={{ background: acc.pillBg, borderColor: acc.pillBd, color: acc.pillTx }}
-                >
-                  {g.serviceType === "cloacas" ? "Cloacas" : "Agua"}
-                </span>
                 <span className="ml-2 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-600">
                   {openGroupKey === g.key ? "-" : "+"}
                 </span>
               </div>
 
               {openGroupKey === g.key && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 sm:gap-3 items-stretch justify-items-stretch">
-                {g.items.map(renderItemCard)}
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start">
+                <div className="space-y-2">
+                  {g.items
+                    .filter((it) => it.kind === "tank")
+                    .map(renderItemCard)}
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                  {g.items
+                    .filter((it) => it.kind === "pump")
+                    .map(renderItemCard)}
+                </div>
               </div>
               )}
             </div>

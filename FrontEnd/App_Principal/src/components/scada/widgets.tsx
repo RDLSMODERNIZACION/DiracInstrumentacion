@@ -110,7 +110,7 @@ export function TankCard({
   return (
     <div
       className={[
-        "w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left",
+        "w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left xl:min-h-[150px]",
         "transition ",
         dimClass,
       ].join(" ")}
@@ -283,7 +283,7 @@ export function PumpCard({
     <div
       className={[
         "group relative block w-full min-w-0 overflow-hidden rounded-xl border",
-        "border-slate-200 bg-white px-3 py-3 text-left",
+        "border-slate-200 bg-white px-3 py-3 text-left sm:px-3 sm:py-3 xl:px-3 xl:py-2.5",
         "shadow-sm",
         "transition",
       ].join(" ")}
@@ -295,12 +295,12 @@ export function PumpCard({
             <span
               className={`h-2.5 w-2.5 shrink-0 rounded-full border border-black/20 ${ledClass}`}
             />
-            <div className="truncate font-mono text-[15px] font-black tracking-wide text-slate-900">
+            <div className="truncate font-mono text-[14px] font-black tracking-wide text-slate-900 sm:text-[15px]">
               {title}
             </div>
           </div>
 
-          <div className={`mt-3 font-mono text-[15px] font-bold tracking-[0.08em] ${stateClass}`}>
+          <div className={`mt-2 font-mono text-[13px] font-bold tracking-[0.08em] sm:text-[14px] ${stateClass}`}>
             {stateText}
           </div>
         </div>
@@ -321,9 +321,9 @@ export function PumpCard({
         </div>
       </div>
 
-      <div className="my-3 h-px bg-slate-200" />
+      <div className="my-2.5 h-px bg-slate-200" />
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] font-semibold text-slate-400">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] font-semibold text-slate-500 sm:text-[11px]">
         <span>{runningHours.toFixed(1)} h / 24h</span>
         <span className="text-slate-600">|</span>
         <span>{Math.round(starts24h)} arr.</span>
