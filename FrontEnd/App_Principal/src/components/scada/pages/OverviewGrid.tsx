@@ -103,6 +103,18 @@ function getServiceTypeFromAsset(a: any): ServiceType {
   return "agua";
 }
 
+function getPumpRole(p: any): "principal" | "auxiliar" {
+  const role = String(
+    p?.network_role ??
+    p?.rol_red ??
+    p?.role_network ??
+    ""
+  )
+    .trim()
+    .toLowerCase();
+
+  return role === "impulsion_principal" ? "principal" : "auxiliar";
+}
 export function OverviewGrid({
   plant,
   onOpenTank,
@@ -513,10 +525,70 @@ export function OverviewGrid({
                     .map(renderItemCard)}
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">
-                  {g.items
-                    .filter((it) => it.kind === "pump")
-                    .map(renderItemCard)}
+                <div className="space-y-3">
+                  {g.items.some(
+                    (it) => it.kind === "pump" && getPumpRole(it.obj) === "principal"
+                  ) && (
+                    <div>
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-blue-500" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                          Impulsion principal
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {
+                            g.items.filter(
+                              (it) =>
+                                it.kind === "pump" &&
+                                getPumpRole(it.obj) === "principal"
+                            ).length
+                          }
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                        {g.items
+                          .filter(
+                            (it) =>
+                              it.kind === "pump" &&
+                              getPumpRole(it.obj) === "principal"
+                          )
+                          .map(renderItemCard)}
+                      </div>
+                    </div>
+                  )}
+
+                  {g.items.some(
+                    (it) => it.kind === "pump" && getPumpRole(it.obj) === "auxiliar"
+                  ) && (
+                    <div>
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-slate-400" />
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                          Bombas auxiliares
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {
+                            g.items.filter(
+                              (it) =>
+                                it.kind === "pump" &&
+                                getPumpRole(it.obj) === "auxiliar"
+                            ).length
+                          }
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                        {g.items
+                          .filter(
+                            (it) =>
+                              it.kind === "pump" &&
+                              getPumpRole(it.obj) === "auxiliar"
+                          )
+                          .map(renderItemCard)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               )}
