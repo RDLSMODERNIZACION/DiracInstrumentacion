@@ -71,18 +71,34 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
   // ✅ sólo owner pueden acceder a Administración
   const canSeeAdmin = React.useMemo(() => (user?.role as any) === "owner", [user?.role]);
 
-  const [view, setView] = React.useState<View>("operaciones"); // vista actual
-  const openAdministration = React.useCallback(() => {
-    // Forzamos un login nuevo cada vez que se entra desde App_Principal.
-    try {
-      sessionStorage.removeItem("dirac.basic");
-    } catch {}
+  const [view, setView] = React.useState<View>("operaciones");
+  const [adminUsername, setAdminUsername] = React.useState("");
+  const [adminPassword, setAdminPassword] = React.useState("");
+  const [adminError, setAdminError] = React.useState("");
 
-    // Administracion se abre como aplicacion completa, no embebida.
-    window.location.assign(app3Src);
-  }, []);
+  const submitAdminLogin = React.useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      setAdminError("");
 
-  // 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
+      if (
+        adminUsername.trim().toLowerCase() !== "admin" ||
+        adminPassword !== "admin"
+      ) {
+        setAdminError("Usuario o contraseÃ±a incorrectos");
+        return;
+      }
+
+      try {
+        // Handoff de una sola vez para que /admin/ entre sin pedir login otra vez.
+        sessionStorage.setItem("dirac.admin.handoff", "1");
+      } catch {}
+
+      window.location.assign(app3Src);
+    },
+    [adminUsername, adminPassword]
+  ); // vista actual
+// 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
 
   // Pasamos allowedLocationIds para que el hook filtre lo que trae del backend
@@ -249,7 +265,65 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       if (!canSeeAdvanced) return noPermsBanner;
       return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />;
     }
-    return <EmbeddedAppFrame key={app3Src} src={app3Src} title="Administracion" />;
+
+    return (
+      <div className="min-h-[calc(100vh-58px)] bg-slate-50 px-4 py-10">
+        <div className="mx-auto w-full max-w-sm">
+          <form
+            onSubmit={submitAdminLogin}
+            className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+          >
+            <div className="mb-5">
+              <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+                Acceso restringido
+              </div>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">
+                AdministraciÃ³n
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                IngresÃ¡ las credenciales administrativas para continuar.
+              </p>
+            </div>
+
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              Usuario
+            </label>
+            <input
+              value={adminUsername}
+              onChange={(e) => setAdminUsername(e.target.value)}
+              autoComplete="username"
+              className="mb-4 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500"
+              placeholder="Usuario"
+            />
+
+            <label className="mb-1 block text-sm font-semibold text-slate-700">
+              ContraseÃ±a
+            </label>
+            <input
+              type="password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              autoComplete="current-password"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500"
+              placeholder="ContraseÃ±a"
+            />
+
+            {adminError ? (
+              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {adminError}
+              </div>
+            ) : null}
+
+            <button
+              type="submit"
+              className="mt-5 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800"
+            >
+              Entrar a AdministraciÃ³n
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   })();
 
   const companyBadge = user.company?.name ?? (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");

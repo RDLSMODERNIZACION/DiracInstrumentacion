@@ -25,7 +25,20 @@ function getApiBase() {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<AuthState>({ email: null, basicToken: null });
+  const [state, setState] = useState<AuthState>(() => {
+    try {
+      const handoff = sessionStorage.getItem("dirac.admin.handoff");
+      if (handoff === "1") {
+        sessionStorage.removeItem("dirac.admin.handoff");
+        return {
+          email: "admin",
+          basicToken: buildBasicToken("admin", "admin"),
+        };
+      }
+    } catch {}
+
+    return { email: null, basicToken: null };
+  });
 const getAuthHeader = useCallback(() => (state.basicToken ? { Authorization: state.basicToken } : {}), [state.basicToken]);
 
   const login = useCallback(async (email: string, password: string) => {
