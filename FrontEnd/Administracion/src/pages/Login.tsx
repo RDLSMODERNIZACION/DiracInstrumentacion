@@ -23,11 +23,11 @@ export default function Login() {
       <form onSubmit={submit} className="w-full max-w-sm bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
         <h1 className="text-xl font-semibold mb-4">DIRAC — Administración</h1>
 
-        <label className="block text-sm font-medium mb-1">Email</label>
-        <input className="w-full border rounded px-3 py-2 mb-3" type="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+        <label className="block text-sm font-medium mb-1">Usuario</label>
+        <input className="w-full border rounded px-3 py-2 mb-3" type="text" autocomplete="username" value={email} onChange={e=>setEmail(e.target.value)} required />
 
         <label className="block text-sm font-medium mb-1">Contraseña</label>
-        <input className="w-full border rounded px-3 py-2 mb-2" type="password" value={password} onChange={e=>setPassword(e.target.value)} required />
+        <input className="w-full border rounded px-3 py-2 mb-2" type="password" autocomplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required />
 
         {err && <div className="text-sm text-red-600 mb-2">{err}</div>}
 
