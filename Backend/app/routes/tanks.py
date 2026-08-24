@@ -81,6 +81,7 @@ def list_tanks_config(request: Request, response: Response):
       v.location_id,
       v.location_name,
       l.service_type as service_type,
+      l.display_order as location_display_order,
 
       t.material,
       t.fluido,
@@ -132,6 +133,7 @@ def list_tanks_config(request: Request, response: Response):
                 "name": r.get("name"),
                 "location_id": r.get("location_id"),
                 "location_name": r.get("location_name"),
+                "location_display_order": int(r["location_display_order"]) if r.get("location_display_order") is not None else 999,
 
                 "service_type": st,
 

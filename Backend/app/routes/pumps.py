@@ -64,6 +64,7 @@ def list_pumps_config(request: Request, response: Response):
       v.location_id,
       v.location_name,
       l.service_type AS service_type,
+      l.display_order AS location_display_order,
 
       p.marca,
       p.modelo,
@@ -119,6 +120,7 @@ def list_pumps_config(request: Request, response: Response):
                 "name": r["name"],
                 "location_id": r["location_id"],
                 "location_name": r["location_name"],
+                "location_display_order": int(r["location_display_order"]) if r.get("location_display_order") is not None else 999,
                 "service_type": st,
 
                 "state": r.get("state") or "stop",

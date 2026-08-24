@@ -23,6 +23,7 @@ type Tank = {
   name: string;
   location_id?: number | null;
   location_name?: string | null;
+  location_display_order?: number | null;
 
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
@@ -62,6 +63,7 @@ type Pump = {
   state?: "run" | "stop";
   location_id?: number | null;
   location_name?: string | null;
+  location_display_order?: number | null;
 
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
@@ -253,6 +255,7 @@ function mapTanks(rows: any[]): Tank[] {
     const name = String(r.name ?? `Tanque ${r.tank_id ?? r.id}`);
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
+    const location_display_order = toNumNullable(r.location_display_order);
     const levelPct =
       typeof r.level_pct === "number" ? r.level_pct : toNumNullable(r.level_pct);
     const age_sec =
@@ -283,6 +286,7 @@ function mapTanks(rows: any[]): Tank[] {
       name,
       location_id,
       location_name,
+      location_display_order,
 
       service_type,
       serviceType: service_type,
@@ -293,9 +297,11 @@ function mapTanks(rows: any[]): Tank[] {
 
       locationId: location_id,
       locationName: location_name,
+      location_display_order,
       location: {
         id: location_id,
         name: location_name,
+      location_display_order,
         service_type,
         serviceType: service_type,
       },
@@ -329,6 +335,7 @@ function mapPumps(rows: any[]): Pump[] {
     const name = String(r.name ?? `Bomba ${r.pump_id ?? r.id}`);
     const location_id = r.location_id ?? null;
     const location_name = r.location_name ?? null;
+    const location_display_order = toNumNullable(r.location_display_order);
     const state: "run" | "stop" = r.state === "run" ? "run" : "stop";
 
     const age_sec =
@@ -349,15 +356,18 @@ function mapPumps(rows: any[]): Pump[] {
       state,
       location_id,
       location_name,
+      location_display_order,
 
       service_type,
       serviceType: service_type,
 
       locationId: location_id,
       locationName: location_name,
+      location_display_order,
       location: {
         id: location_id,
         name: location_name,
+      location_display_order,
         service_type,
         serviceType: service_type,
       },

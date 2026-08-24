@@ -44,6 +44,7 @@ type Group = {
   locId: number | null;
   groupName: string;
   groupCode?: string | null;
+  displayOrder: number;
   // ✅ NUEVO: tipo de servicio del grupo (para pestañas y color)
   serviceType: ServiceType;
   items: GroupItem[];
@@ -214,7 +215,8 @@ export function OverviewGrid({
       locId: number | null,
       name?: string | null,
       code?: string | null,
-      serviceType: ServiceType = "agua"
+      serviceType: ServiceType = "agua",
+      displayOrder: number = 999
     ): Group => {
       const key = locId != null ? `loc:${locId}` : "none";
       let g = out.get(key);
@@ -224,6 +226,7 @@ export function OverviewGrid({
           locId,
           groupName: name ?? (locId == null ? "Sin localidad" : `Loc ${locId}`),
           groupCode: code ?? undefined,
+          displayOrder,
           serviceType,
           items: [],
           tanks: 0,
@@ -246,7 +249,7 @@ export function OverviewGrid({
 
       const serviceType = getServiceTypeFromAsset(t) ?? link?.serviceType ?? "agua";
 
-      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType);
+      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType, Number((t as any).location_display_order ?? 999));
       g.items.push({ kind: "tank", obj: t });
       g.tanks++;
     });
@@ -260,7 +263,7 @@ export function OverviewGrid({
 
       const serviceType = getServiceTypeFromAsset(p) ?? link?.serviceType ?? "agua";
 
-      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType);
+      const g = ensureGroup(locId, locName, link?.code ?? undefined, serviceType, Number((p as any).location_display_order ?? 999));
       g.items.push({ kind: "pump", obj: p });
       g.pumps++;
     });
