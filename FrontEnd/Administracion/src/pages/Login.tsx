@@ -3,8 +3,8 @@ import { useAuth } from "../lib/auth";
 
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("jefe@diracserviciosenergia.com");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 

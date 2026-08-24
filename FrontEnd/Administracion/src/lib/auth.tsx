@@ -41,18 +41,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getAuthHeader = useCallback(() => (state.basicToken ? { Authorization: state.basicToken } : {}), [state.basicToken]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const token = buildBasicToken(email.trim(), password);
+    const cleanEmail = email.trim();
+    const token = buildBasicToken(cleanEmail, password);
     const api = getApiBase();
-    const res = await fetch(`${api}/dirac/me/locations`, {
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: token },
+
+    // Primero validamos credenciales y obtenemos el perfil real.
+    const res = await fetch(`${api}/dirac/me`, {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: token,
+      },
       cache: "no-store",
     });
-    if (res.status === 401) throw new Error("Credenciales inválidas");
-    if (!res.ok) throw new Error(`Error de autenticación (${res.status})`);
+
+    if (res.status === 401) throw new Error("Credenciales invalidas");
+    if (!res.ok) throw new Error(`Error de autenticacion (${res.status})`);
+
     const ct = res.headers.get("content-type") || "";
-    if (!ct.toLowerCase().includes("application/json")) throw new Error("La URL de API no devuelve JSON.");
-    await res.json();
-    setState({ email, basicToken: token });
+    if (!ct.toLowerCase().includes("application/json")) {
+      throw new Error("La URL de API no devuelve JSON.");
+    }
+
+    const me = await res.json();
+
+    const isSuperadmin = Boolean(me?.user?.is_superadmin);
+    const companies = Array.isArray(me?.companies) ? me.companies : [];
+    const hasAdminRole = companies.some((c: any) => {
+      const role = String(c?.role ?? "").trim().toLowerCase();
+      return role === "owner" || role === "admin";
+    });
+
+    if (!isSuperadmin && !hasAdminRole) {
+      throw new Error(
+        "Usuario valido, pero sin permisos de Administracion."
+      );
+    }
+
+    // Token separado del login de Operaciones.
+    setState({ email: cleanEmail, basicToken: token });
   }, []);
 
   const logout = useCallback(() => {
