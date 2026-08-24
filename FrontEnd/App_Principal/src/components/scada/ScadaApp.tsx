@@ -85,7 +85,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
         adminUsername.trim().toLowerCase() !== "admin" ||
         adminPassword !== "admin"
       ) {
-        setAdminError("Usuario o contraseÃ±a incorrectos");
+        setAdminError("Usuario o contrase\u00f1a incorrectos");
         return;
       }
 
@@ -269,20 +269,15 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     return (
       <div className="min-h-[calc(100vh-58px)] bg-slate-50 px-4 py-10">
         <div className="mx-auto w-full max-w-sm">
-          <form
-            onSubmit={submitAdminLogin}
+          <form onSubmit={submitAdminLogin} autoComplete="off"
             className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
           >
             <div className="mb-5">
               <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
                 Acceso restringido
               </div>
-              <h2 className="mt-1 text-xl font-bold text-slate-900">
-                AdministraciÃ³n
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                IngresÃ¡ las credenciales administrativas para continuar.
-              </p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">{"Administraci\u00f3n"}</h2>
+              <p className="mt-1 text-sm text-slate-500">{"Ingres\u00e1 las credenciales administrativas para continuar."}</p>
             </div>
 
             <label className="mb-1 block text-sm font-semibold text-slate-700">
@@ -291,21 +286,19 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
             <input
               value={adminUsername}
               onChange={(e) => setAdminUsername(e.target.value)}
-              autoComplete="username"
+              autoComplete="off"
               className="mb-4 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500"
               placeholder="Usuario"
             />
 
-            <label className="mb-1 block text-sm font-semibold text-slate-700">
-              ContraseÃ±a
-            </label>
+            <label className="mb-1 block text-sm font-semibold text-slate-700">{"Contrase\u00f1a"}</label>
             <input
               type="password"
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-500"
-              placeholder="ContraseÃ±a"
+              placeholder={"Contrase\u00f1a"}
             />
 
             {adminError ? (
@@ -317,9 +310,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
             <button
               type="submit"
               className="mt-5 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800"
-            >
-              Entrar a AdministraciÃ³n
-            </button>
+            >{"Entrar a Administraci\u00f3n"}</button>
           </form>
         </div>
       </div>
@@ -346,7 +337,12 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <NavItem label="Operaciones" active={view === "operaciones"} onClick={() => setView("operaciones")} />
               <NavItem label="KPIs" active={view === "kpi"} onClick={() => setView("kpi")} />
               <NavItem label="Infraestructura" active={view === "infra"} onClick={() => setView("infra")} />
-              <NavItem label="Administración" active={view === "admin"} onClick={() => setView("admin")} />
+              <NavItem label="Administración" active={view === "admin"} onClick={() => {
+                setAdminUsername("");
+                setAdminPassword("");
+                setAdminError("");
+                setView("admin");
+              }} />
             </nav>
           </div>
 

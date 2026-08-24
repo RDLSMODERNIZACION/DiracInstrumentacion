@@ -1,7 +1,5 @@
 import React from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useAuth } from "../lib/auth";
-import Login from "./Login";
 import AdminLayout from "../layouts/AdminLayout";
 import Dashboard from "./Dashboard";
 import Companies from "./Companies";
@@ -14,10 +12,7 @@ import Valves from "./Valves";
 import Manifolds from "./Manifolds"; // 👈 nuevo
 
 export default function App() {
-  const { isAuthenticated } = useAuth();
-  if (!isAuthenticated) return <Login />;
-
-  return (
+return (
     <Routes>
       <Route element={<AdminLayout />}>
         <Route index element={<Dashboard />} />
