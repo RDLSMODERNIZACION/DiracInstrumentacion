@@ -72,6 +72,15 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
   const canSeeAdmin = React.useMemo(() => (user?.role as any) === "owner", [user?.role]);
 
   const [view, setView] = React.useState<View>("operaciones"); // vista actual
+  const openAdministration = React.useCallback(() => {
+    // Forzamos un login nuevo cada vez que se entra desde App_Principal.
+    try {
+      sessionStorage.removeItem("dirac.basic");
+    } catch {}
+
+    // Administracion se abre como aplicacion completa, no embebida.
+    window.location.assign(app3Src);
+  }, []);
 
   // 🔁 Pausar polling cuando hay faceplate abierto o no estamos en "operaciones"
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;

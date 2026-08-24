@@ -25,20 +25,8 @@ function getApiBase() {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<AuthState>(() => {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as AuthState) : { email: null, basicToken: null };
-    } catch {
-      return { email: null, basicToken: null };
-    }
-  });
-
-  useEffect(() => {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
-
-  const getAuthHeader = useCallback(() => (state.basicToken ? { Authorization: state.basicToken } : {}), [state.basicToken]);
+  const [state, setState] = useState<AuthState>({ email: null, basicToken: null });
+const getAuthHeader = useCallback(() => (state.basicToken ? { Authorization: state.basicToken } : {}), [state.basicToken]);
 
   const login = useCallback(async (email: string, password: string) => {
     const username = email.trim().toLowerCase();
