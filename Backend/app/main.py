@@ -1,4 +1,4 @@
-﻿# app/main.py
+# app/main.py
 import os
 import logging
 
@@ -15,7 +15,7 @@ from app.services.telegram_reporter import start_telegram_reporter, stop_telegra
 # ===== Telegram test router =====
 from app.services.telegram_test import router as telegram_test_router
 
-# ===== Rutas base (operaciÃ³n / visualizaciÃ³n) =====
+# ===== Rutas base (operación / visualización) =====
 from app.routes.tanks import router as tanks_router
 from app.routes.pumps import router as pumps_router
 from app.routes.ingest import router as ingest_router
@@ -24,7 +24,7 @@ from app.routes.arduino_controler import router as arduino_router
 # Infraestructura (lectura)
 from app.routes.infraestructura import router as infraestructura_router
 
-# Infraestructura (ediciÃ³n)
+# Infraestructura (edición)
 from app.routes.infra_edit.edit import router as infra_edit_router
 
 # ===== PLC =====
@@ -33,13 +33,13 @@ from app.routes.plc import router as plc_router
 # ===== KPI =====
 from app.routes.kpi import router as kpi_router
 
-# ===== Dirac (operaciÃ³n) =====
+# ===== Dirac (operación) =====
 from app.routes.dirac.me import router as dirac_me_router
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
 
-# ===== AdministraciÃ³n =====
+# ===== Administración =====
 from app.routes.dirac_admin.companies import router as admin_companies_router
 from app.routes.dirac_admin.users import router as admin_users_router
 from app.routes.dirac_admin.locations import router as admin_locations_router
@@ -51,6 +51,7 @@ from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 # ===== Componentes =====
 from app.routes.components.manifold_signals import router as manifold_signals_router
 from app.routes.components.network_analyzers import router as network_analyzers_router
+from app.routes.components.pump_energy import router as pump_energy_router
 
 # ===== Mapa =====
 # Este router agrupador incluye:
@@ -171,7 +172,7 @@ def health_db():
         )
 
 
-# ===== Rutas (operaciÃ³n base) =====
+# ===== Rutas (operación base) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
@@ -185,13 +186,13 @@ app.include_router(infra_edit_router)
 app.include_router(plc_router)
 app.include_router(kpi_router)
 
-# ===== Dirac (operaciÃ³n) =====
+# ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
-# ===== AdministraciÃ³n =====
+# ===== Administración =====
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
@@ -203,6 +204,7 @@ app.include_router(admin_manifolds_router)
 # ===== Componentes =====
 app.include_router(manifold_signals_router)
 app.include_router(network_analyzers_router)
+app.include_router(pump_energy_router)
 
 # ===== Mapa =====
 app.include_router(mapa_router, prefix="/mapa", tags=["mapa"])
