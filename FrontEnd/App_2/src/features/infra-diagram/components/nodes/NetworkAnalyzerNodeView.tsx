@@ -21,6 +21,14 @@ function firstNum(...values: any[]): number | null {
   return null;
 }
 
+// ABB M4M devuelve 0x7FFFFFFF para un signed 32-bit no disponible.
+// Si el Node-RED viejo lo escala como kW termina llegando 21474.83647.
+function isInvalidAbbStat(v: any): boolean {
+  const n = toNum(v);
+  if (n === null) return false;
+  return Math.abs(n - 21474.83647) < 0.02 || n > 10000;
+}
+
 function pickSignal(signals: any, keys: string[]) {
   if (!signals) return null;
   for (const key of keys) {
@@ -261,8 +269,11 @@ export default function NetworkAnalyzerNodeView({
   const raw = latest?.raw ?? null;
 
   const pKW = firstNum(latest?.p_kw, rawPick(raw, ["p_kw", "power_kw"]), pickSignal(signals, ["p_kw", "power_kw", "kw"]));
-  const avgPKW = firstNum(latest?.avg_p_kw);
-  const maxPKW = firstNum(latest?.max_p_kw);
+  const avgPKWRaw = firstNum(latest?.avg_p_kw);
+  const maxPKWRaw = firstNum(latest?.max_p_kw);
+  const invalidAbbStats = isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw);
+  const avgPKW = invalidAbbStats ? null : avgPKWRaw;
+  const maxPKW = invalidAbbStats ? null : maxPKWRaw;
   const qKvar = firstNum(latest?.q_kvar, rawPick(raw, ["q_kvar"]), pickSignal(signals, ["q_kvar", "kvar"]));
   const sKva = firstNum(latest?.s_kva, rawPick(raw, ["s_kva"]), pickSignal(signals, ["s_kva", "kva"]));
   const pf = firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
@@ -275,9 +286,17 @@ export default function NetworkAnalyzerNodeView({
   const i3 = firstNum(latest?.i_l3, rawPick(raw, ["i_l3", "i3"]));
 
   const lowPf = pf !== null && pf < 0.96;
-  const clockStatsUnavailable = online && (avgPKW === null || maxPKW === null);
+  const clockStatsUnavailable = online && (invalidAbbStats || avgPKW === null || maxPKW === null);
   const name = typeof n.name === "string" && n.name.trim() ? n.name.trim() : "Eléctrico";
-  const border = !analyzerId ? "#ef4444" : !online ? "#94a3b8" : lowPf ? "#f59e0b" : "#64748b";
+  const border = !analyzerId
+    ? "#ef4444"
+    : !online
+    ? "#94a3b8"
+    : clockStatsUnavailable
+    ? "#f59e0b"
+    : lowPf
+    ? "#f59e0b"
+    : "#64748b";
   const powerColor = !online ? "#64748b" : "#0f172a";
 
   function onMouseDown(e: React.MouseEvent<SVGGElement>) {
@@ -313,6 +332,7 @@ export default function NetworkAnalyzerNodeView({
 
   const tipLines = [
     `Actual: ${fmt(pKW, 1)} kW`,
+    clockStatsUnavailable ? "⚠ Media/Máx ABB no disponibles · revisar fecha/hora" : "",
     avgPKW !== null ? `Media ABB: ${fmt(avgPKW, 1)} kW` : "Media ABB: --",
     maxPKW !== null ? `Máx ABB: ${fmt(maxPKW, 1)} kW` : "Máx ABB: --",
     pf !== null ? `FP: ${fmt(pf, 2)}${lowPf ? " (bajo)" : ""}` : "",
@@ -330,7 +350,7 @@ export default function NetworkAnalyzerNodeView({
       <text x={x} y={y + 20} fill={color} style={{ fontSize: 18, fontWeight: 950 }}>
         {value === null ? "--" : fmt(value, 1)}
       </text>
-      <text x={x + 57} y={y + 20} fill="#64748b" style={{ fontSize: 9, fontWeight: 800 }}>{unit}</text>
+      <text x={x + 57} y={y + 20} fill="#64748b" style={{ fontSize: 9, fontWeight: 800 }}>{value === null ? "" : unit}</text>
     </g>
   );
 
@@ -351,48 +371,54 @@ export default function NetworkAnalyzerNodeView({
         onMouseLeave={() => hideTip?.()}
         style={{ cursor: enabled ? "move" : "pointer" }}
       >
-        <rect x={x0} y={y0} width={CARD_W} height={CARD_H} rx={12} fill="#f8fafc" stroke={border} strokeWidth={lowPf && online ? 2.4 : 1.6} />
+        <rect x={x0} y={y0} width={CARD_W} height={CARD_H} rx={12} fill="#f8fafc" stroke={border} strokeWidth={clockStatsUnavailable || (lowPf && online) ? 2.4 : 1.6} />
         <text x={x0 + 12} y={y0 + 18} fill="#64748b" style={{ fontSize: 9, fontWeight: 900, letterSpacing: 0.7, pointerEvents: "none" }}>⚡ ELÉCTRICO</text>
         <text x={x0 + CARD_W / 2} y={y0 + 49} textAnchor="middle" fill={powerColor} style={{ fontSize: 22, fontWeight: 950, pointerEvents: "none" }}>{fmt(pKW, 1)}</text>
         <text x={x0 + CARD_W / 2} y={y0 + 63} textAnchor="middle" fill="#64748b" style={{ fontSize: 10, fontWeight: 800, pointerEvents: "none" }}>kW</text>
-        <circle cx={x0 + CARD_W - 12} cy={y0 + 13} r={4} fill={!online ? "#94a3b8" : lowPf ? "#f59e0b" : "#22c55e"} />
+        <circle cx={x0 + CARD_W - 12} cy={y0 + 13} r={4} fill={!online ? "#94a3b8" : clockStatsUnavailable ? "#f59e0b" : lowPf ? "#f59e0b" : "#22c55e"} />
       </g>
 
       {expanded && !enabled && (
         <g>
-          <rect x={panelX} y={panelY} width={PANEL_W} height={PANEL_H} rx={14} fill="#ffffff" stroke="#94a3b8" strokeWidth={1.4} onMouseDown={(e) => e.stopPropagation()} />
+          <rect x={panelX} y={panelY} width={PANEL_W} height={PANEL_H} rx={14} fill="#ffffff" stroke={clockStatsUnavailable ? "#f59e0b" : "#94a3b8"} strokeWidth={clockStatsUnavailable ? 2 : 1.4} onMouseDown={(e) => e.stopPropagation()} />
 
           <text x={panelX + 18} y={panelY + 25} fill="#0f172a" style={{ fontSize: 15, fontWeight: 950 }}>{name}</text>
           <text x={panelX + PANEL_W - 18} y={panelY + 25} textAnchor="end" fill={online ? "#16a34a" : "#94a3b8"} style={{ fontSize: 10, fontWeight: 900 }}>{online ? "ONLINE" : "OFFLINE"}</text>
-          <line x1={panelX + 16} y1={panelY + 37} x2={panelX + PANEL_W - 16} y2={panelY + 37} stroke="#e2e8f0" />
+          {clockStatsUnavailable && (
+            <g>
+              <rect x={panelX + PANEL_W - 168} y={panelY + 32} width={150} height={19} rx={9.5} fill="#fff7ed" stroke="#f59e0b" />
+              <text x={panelX + PANEL_W - 93} y={panelY + 45} textAnchor="middle" fill="#b45309" style={{ fontSize: 8.5, fontWeight: 950 }}>⚠ REVISAR ABB · FECHA/HORA</text>
+            </g>
+          )}
+          <line x1={panelX + 16} y1={panelY + 55} x2={panelX + PANEL_W - 16} y2={panelY + 55} stroke="#e2e8f0" />
 
-          {metric("POTENCIA ACTUAL", pKW, "kW", panelX + 18, panelY + 57)}
-          {metric("MEDIA ABB", avgPKW, "kW", panelX + 164, panelY + 57, avgPKW === null ? "#94a3b8" : "#0f172a")}
-          {metric("MÁXIMO ABB", maxPKW, "kW", panelX + 310, panelY + 57, maxPKW === null ? "#94a3b8" : "#0f172a")}
+          {metric("POTENCIA ACTUAL", pKW, "kW", panelX + 18, panelY + 75)}
+          {metric("MEDIA ABB", avgPKW, "kW", panelX + 164, panelY + 75, avgPKW === null ? "#d97706" : "#0f172a")}
+          {metric("MÁXIMO ABB", maxPKW, "kW", panelX + 310, panelY + 75, maxPKW === null ? "#d97706" : "#0f172a")}
 
-          <line x1={panelX + 16} y1={panelY + 105} x2={panelX + PANEL_W - 16} y2={panelY + 105} stroke="#e2e8f0" />
-          <text x={panelX + 18} y={panelY + 123} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>RED</text>
-          {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 143)}
-          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 143)}
-          {smallRow("PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
-          {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 143)}
-          {smallRow("V12", v12, "V", panelX + 18, panelY + 164)}
-          {smallRow("V23", v23, "V", panelX + 122, panelY + 164)}
-          {smallRow("V31", v31, "V", panelX + 226, panelY + 164)}
-          {smallRow("I1", i1, "A", panelX + 18, panelY + 185)}
-          {smallRow("I2", i2, "A", panelX + 122, panelY + 185)}
-          {smallRow("I3", i3, "A", panelX + 226, panelY + 185)}
+          <line x1={panelX + 16} y1={panelY + 123} x2={panelX + PANEL_W - 16} y2={panelY + 123} stroke="#e2e8f0" />
+          <text x={panelX + 18} y={panelY + 141} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>RED</text>
+          {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 161)}
+          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 161)}
+          {smallRow("PF", pf, "PF", panelX + 226, panelY + 161, lowPf)}
+          {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 161)}
+          {smallRow("V12", v12, "V", panelX + 18, panelY + 182)}
+          {smallRow("V23", v23, "V", panelX + 122, panelY + 182)}
+          {smallRow("V31", v31, "V", panelX + 226, panelY + 182)}
+          {smallRow("I1", i1, "A", panelX + 18, panelY + 203)}
+          {smallRow("I2", i2, "A", panelX + 122, panelY + 203)}
+          {smallRow("I3", i3, "A", panelX + 226, panelY + 203)}
 
-          <line x1={panelX + 16} y1={panelY + 201} x2={panelX + PANEL_W - 16} y2={panelY + 201} stroke="#e2e8f0" />
-          <text x={panelX + 18} y={panelY + 220} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>BOMBAS ASOCIADAS · ANÁLISIS INDIVIDUAL (30 DÍAS)</text>
+          <line x1={panelX + 16} y1={panelY + 219} x2={panelX + PANEL_W - 16} y2={panelY + 219} stroke="#e2e8f0" />
+          <text x={panelX + 18} y={panelY + 238} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>BOMBAS ASOCIADAS · ANÁLISIS INDIVIDUAL (30 DÍAS)</text>
 
           {energyErr ? (
-            <text x={panelX + 18} y={panelY + 244} fill="#dc2626" style={{ fontSize: 10, fontWeight: 800 }}>No se pudo cargar análisis de bombas</text>
+            <text x={panelX + 18} y={panelY + 262} fill="#dc2626" style={{ fontSize: 10, fontWeight: 800 }}>No se pudo cargar análisis de bombas</text>
           ) : pumps.length === 0 ? (
-            <text x={panelX + 18} y={panelY + 244} fill="#94a3b8" style={{ fontSize: 10, fontWeight: 800 }}>Sin bombas asociadas a este analizador</text>
+            <text x={panelX + 18} y={panelY + 262} fill="#94a3b8" style={{ fontSize: 10, fontWeight: 800 }}>Sin bombas asociadas a este analizador</text>
           ) : (
             pumps.map((pump, idx) => {
-              const y = panelY + 244 + idx * 27;
+              const y = panelY + 262 + idx * 27;
               const run = String(pump.last_state ?? "").toLowerCase() === "run";
               return (
                 <g key={pump.pump_id}>
@@ -419,7 +445,7 @@ export default function NetworkAnalyzerNodeView({
             style={{ fontSize: 9, fontWeight: 800 }}
           >
             {clockStatsUnavailable
-              ? "Media/Máximo ABB no disponibles: verificar fecha y hora del analizador"
+              ? "Media/Máximo ABB no disponibles: revisar fecha y hora del analizador"
               : lowPf
               ? "Factor de potencia bajo (< 0.96)"
               : latestErr
