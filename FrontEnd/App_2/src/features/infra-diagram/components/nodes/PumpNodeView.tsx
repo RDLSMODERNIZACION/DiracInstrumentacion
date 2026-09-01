@@ -11,8 +11,10 @@ type PumpElectricalEstimate = {
   pump?: {
     pump_id?: number;
     current_a_est?: number | null;
-    current_a_est_raw?: number | null;
-    current_a_sd?: number | null;
+    current_a_vector_raw?: number | null;
+    current_a_vector_sd?: number | null;
+    current_a_direct_raw?: number | null;
+    current_a_direct_sd?: number | null;
     current_a_min_theoretical?: number | null;
     current_confidence?: string | null;
     operating_kw_est?: number | null;
@@ -32,6 +34,14 @@ function extractPumpId(n: any): number | null {
     }
   }
   return null;
+}
+
+function confidenceLabel(v?: string | null) {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "high") return "alta";
+  if (s === "medium") return "media";
+  if (s === "low") return "baja";
+  return "insuficiente";
 }
 
 export default function PumpNodeView({
@@ -141,19 +151,33 @@ export default function PumpNodeView({
   );
 
   const estimatedCurrent = Number(electrical?.pump?.current_a_est ?? NaN);
-  const hasDirectCurrent = Number.isFinite(directCurrent);
+  const validStarts = Number(electrical?.pump?.valid_starts ?? 0);
+  const hasDirectCurrent = Number.isFinite(directCurrent) && directCurrent >= 0;
   const hasEstimatedCurrent = Number.isFinite(estimatedCurrent) && estimatedCurrent > 0;
 
+  const deviationPct = hasDirectCurrent && hasEstimatedCurrent
+    ? ((directCurrent - estimatedCurrent) / estimatedCurrent) * 100
+    : null;
+  const abnormalCurrent = deviationPct !== null && Math.abs(deviationPct) > 15;
+
   const currentText = hasDirectCurrent
-    ? `${directCurrent.toFixed(1)} A`
+    ? `I ${directCurrent.toFixed(1)} A`
     : hasEstimatedCurrent
-    ? `≈${estimatedCurrent.toFixed(1)} A`
-    : "-- A";
+    ? `I est. ≈${estimatedCurrent.toFixed(1)} A`
+    : "I est. -- A";
+
+  const currentColor = abnormalCurrent
+    ? "#dc2626"
+    : hasEstimatedCurrent && !hasDirectCurrent
+    ? "#0369a1"
+    : "#334155";
 
   const currentTooltip = hasDirectCurrent
-    ? `Corriente: ${directCurrent.toFixed(1)} A`
+    ? hasEstimatedCurrent
+      ? `Corriente medida: ${directCurrent.toFixed(1)} A · referencia est.: ${estimatedCurrent.toFixed(1)} A · desvío ${deviationPct! >= 0 ? "+" : ""}${deviationPct!.toFixed(1)}%${abnormalCurrent ? " (FUERA DE RANGO)" : " (normal)"}`
+      : `Corriente medida: ${directCurrent.toFixed(1)} A`
     : hasEstimatedCurrent
-    ? `Corriente estimada: ${estimatedCurrent.toFixed(1)} A (${electrical?.pump?.current_confidence ?? "estimada"})`
+    ? `Corriente estimada normal: ${estimatedCurrent.toFixed(1)} A · ${validStarts} arranques · confianza ${confidenceLabel(electrical?.pump?.current_confidence)}`
     : "Corriente estimada: sin datos confiables";
 
   const motorFill = !online
@@ -166,6 +190,8 @@ export default function PumpNodeView({
 
   const motorStroke = tapSelected
     ? "#0ea5e9"
+    : abnormalCurrent
+    ? "#dc2626"
     : !online
     ? "#94a3b8"
     : maintenance
@@ -182,8 +208,9 @@ export default function PumpNodeView({
     `Modo: Manual`,
     currentTooltip,
     electrical?.pump?.operating_kw_est != null
-      ? `Potencia estimada: ${Number(electrical.pump.operating_kw_est).toFixed(1)} kW`
+      ? `Potencia normal estimada: ${Number(electrical.pump.operating_kw_est).toFixed(1)} kW`
       : "",
+    hasEstimatedCurrent ? "Referencia calculada con firma eléctrica ABB (30 días)" : "",
   ].filter(Boolean);
 
   const handlePointerDown = (e: React.PointerEvent<SVGGElement>) => {
@@ -236,15 +263,14 @@ export default function PumpNodeView({
           {name}
         </text>
 
-        <rect x={-48} y={-16} width={70} height={34} rx={12} fill={motorFill} stroke={motorStroke} strokeWidth={tapSelected ? 4 : 2.3} />
+        <rect x={-48} y={-16} width={70} height={34} rx={12} fill={motorFill} stroke={motorStroke} strokeWidth={tapSelected || abnormalCurrent ? 3 : 2.3} />
 
         {[-30, -14, 2].map((x) => (
           <line key={x} x1={x} y1={-13} x2={x} y2={15} stroke="#fff" strokeWidth={2} opacity={0.25} style={{ pointerEvents: "none" }} />
         ))}
 
         <rect x={22} y={-9} width={12} height={18} rx={4} fill="#dbe3ea" stroke="#64748b" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
-
-        <circle cx={43} cy={5} r={18} fill="#f8fafc" stroke={motorStroke} strokeWidth={tapSelected ? 3.6 : 2.4} style={{ pointerEvents: "none" }} />
+        <circle cx={43} cy={5} r={18} fill="#f8fafc" stroke={motorStroke} strokeWidth={tapSelected || abnormalCurrent ? 3 : 2.4} style={{ pointerEvents: "none" }} />
 
         <g transform="translate(43 5)" style={{ pointerEvents: "none" }}>
           <g>
@@ -263,7 +289,7 @@ export default function PumpNodeView({
         <g style={{ pointerEvents: "none" }}>
           <rect x={-42} y={41} width={22} height={17} rx={7} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={1} />
           <text x={-31} y={53} textAnchor="middle" fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>{controlMode}</text>
-          <text x={-12} y={53} textAnchor="start" fill={hasEstimatedCurrent && !hasDirectCurrent ? "#0369a1" : "#334155"} style={{ fontSize: 11, fontWeight: 900 }}>
+          <text x={-12} y={53} textAnchor="start" fill={currentColor} style={{ fontSize: 10.5, fontWeight: 900 }}>
             {currentText}
           </text>
         </g>
@@ -285,9 +311,9 @@ export default function PumpNodeView({
         {name}
       </text>
 
-      <rect x={-18} y={-36} width={36} height={48} rx={10} fill={motorFill} stroke={motorStroke} strokeWidth={tapSelected ? 4 : 2.2} />
+      <rect x={-18} y={-36} width={36} height={48} rx={10} fill={motorFill} stroke={motorStroke} strokeWidth={tapSelected || abnormalCurrent ? 3 : 2.2} />
       <path d="M -18 -28 Q 0 -45 18 -28 L 18 -21 L -18 -21 Z" fill="#dbe3ea" stroke="#64748b" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
-      <circle cx={0} cy={20} r={17} fill="#f8fafc" stroke={motorStroke} strokeWidth={tapSelected ? 3.6 : 2.3} style={{ pointerEvents: "none" }} />
+      <circle cx={0} cy={20} r={17} fill="#f8fafc" stroke={motorStroke} strokeWidth={tapSelected || abnormalCurrent ? 3 : 2.3} style={{ pointerEvents: "none" }} />
 
       <g transform="translate(0 20)" style={{ pointerEvents: "none" }}>
         <g>
@@ -306,7 +332,7 @@ export default function PumpNodeView({
       <g style={{ pointerEvents: "none" }}>
         <rect x={-30} y={54} width={22} height={17} rx={7} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={1} />
         <text x={-19} y={66} textAnchor="middle" fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>{controlMode}</text>
-        <text x={-2} y={66} textAnchor="start" fill={hasEstimatedCurrent && !hasDirectCurrent ? "#0369a1" : "#334155"} style={{ fontSize: 11, fontWeight: 900 }}>
+        <text x={-2} y={66} textAnchor="start" fill={currentColor} style={{ fontSize: 10.5, fontWeight: 900 }}>
           {currentText}
         </text>
       </g>
