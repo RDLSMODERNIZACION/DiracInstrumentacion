@@ -83,6 +83,22 @@ def _load_pumps(cur, analyzer_id: int, days: int):
                                     and j.jump_ts + interval '90 seconds'
                 ) as steady_kw,
                 (
+                    select avg(rr.q_kvar)
+                    from public.network_analyzer_readings rr
+                    where rr.analyzer_id = %(analyzer_id)s
+                      and rr.q_kvar is not null
+                      and rr.ts between j.jump_ts - interval '45 seconds'
+                                    and j.jump_ts - interval '5 seconds'
+                ) as baseline_q_kvar,
+                (
+                    select avg(rr.q_kvar)
+                    from public.network_analyzer_readings rr
+                    where rr.analyzer_id = %(analyzer_id)s
+                      and rr.q_kvar is not null
+                      and rr.ts between j.jump_ts + interval '30 seconds'
+                                    and j.jump_ts + interval '90 seconds'
+                ) as steady_q_kvar,
+                (
                     select avg((rr.i_l1 + rr.i_l2 + rr.i_l3) / 3.0)
                     from public.network_analyzer_readings rr
                     where rr.analyzer_id = %(analyzer_id)s
@@ -109,7 +125,14 @@ def _load_pumps(cur, analyzer_id: int, days: int):
             from jumps j
         ),
         valid_features as (
-            select *
+            select
+                *,
+                (steady_kw - baseline_kw) as delta_p_kw,
+                case
+                    when steady_q_kvar is not null and baseline_q_kvar is not null
+                    then (steady_q_kvar - baseline_q_kvar)
+                    else null
+                end as delta_q_kvar
             from features
             where baseline_kw is not null
               and steady_kw is not null
@@ -137,17 +160,33 @@ def _load_pumps(cur, analyzer_id: int, days: int):
                 ls.state as last_state,
                 ls.created_at as last_state_at,
                 count(vf.event_id)::int as valid_starts,
-                avg(vf.steady_kw - vf.baseline_kw) as operating_kw_est_raw,
-                stddev_samp(vf.steady_kw - vf.baseline_kw) as operating_kw_sd_raw,
+                avg(vf.delta_p_kw) as operating_kw_est_raw,
+                stddev_samp(vf.delta_p_kw) as operating_kw_sd_raw,
                 avg(vf.jump_kw) as avg_start_step_kw_raw,
                 max(vf.jump_kw) as max_start_step_kw_raw,
                 avg(vf.steady_a - vf.baseline_a) filter (
                     where vf.steady_a is not null and vf.baseline_a is not null
-                ) as current_a_est_raw,
+                ) as direct_current_a_raw,
                 stddev_samp(vf.steady_a - vf.baseline_a) filter (
                     where vf.steady_a is not null and vf.baseline_a is not null
-                ) as current_a_sd_raw,
-                avg(vf.steady_v) filter (where vf.steady_v is not null) as avg_v_ll_raw
+                ) as direct_current_a_sd_raw,
+                avg(vf.steady_v) filter (where vf.steady_v is not null) as avg_v_ll_raw,
+                avg(
+                    (sqrt(vf.delta_p_kw * vf.delta_p_kw + vf.delta_q_kvar * vf.delta_q_kvar) * 1000.0)
+                    / (sqrt(3.0) * vf.steady_v)
+                ) filter (
+                    where vf.delta_q_kvar is not null
+                      and vf.steady_v is not null
+                      and vf.steady_v > 0
+                ) as vector_current_a_raw,
+                stddev_samp(
+                    (sqrt(vf.delta_p_kw * vf.delta_p_kw + vf.delta_q_kvar * vf.delta_q_kvar) * 1000.0)
+                    / (sqrt(3.0) * vf.steady_v)
+                ) filter (
+                    where vf.delta_q_kvar is not null
+                      and vf.steady_v is not null
+                      and vf.steady_v > 0
+                ) as vector_current_a_sd_raw
             from public.pump_power_analyzers ppa
             join public.pumps p on p.id = ppa.pump_id
             left join valid_features vf on vf.pump_id = p.id
@@ -165,42 +204,71 @@ def _load_pumps(cur, analyzer_id: int, days: int):
             round(operating_kw_sd_raw::numeric, 2) as operating_kw_sd,
             round(avg_start_step_kw_raw::numeric, 2) as avg_start_step_kw,
             round(max_start_step_kw_raw::numeric, 2) as max_start_step_kw,
-            round(current_a_est_raw::numeric, 2) as current_a_est_raw,
-            round(current_a_sd_raw::numeric, 2) as current_a_sd,
+            round(direct_current_a_raw::numeric, 2) as current_a_direct_raw,
+            round(direct_current_a_sd_raw::numeric, 2) as current_a_direct_sd,
+            round(vector_current_a_raw::numeric, 2) as current_a_vector_raw,
+            round(vector_current_a_sd_raw::numeric, 2) as current_a_vector_sd,
             round(avg_v_ll_raw::numeric, 1) as avg_v_ll,
             case
                 when operating_kw_est_raw is null or avg_v_ll_raw is null or avg_v_ll_raw <= 0 then null
                 else round((operating_kw_est_raw * 1000.0 / (sqrt(3.0) * avg_v_ll_raw))::numeric, 2)
             end as current_a_min_theoretical,
             case
-                when current_a_est_raw is null
-                  or operating_kw_est_raw is null
-                  or avg_v_ll_raw is null
-                  or avg_v_ll_raw <= 0
-                  or valid_starts < 3
-                then null
-                when current_a_est_raw < (operating_kw_est_raw * 1000.0 / (sqrt(3.0) * avg_v_ll_raw)) * 0.90
-                then null
-                when current_a_sd_raw is not null
-                 and current_a_sd_raw > greatest(15.0, abs(current_a_est_raw) * 0.40)
-                then null
-                else round(current_a_est_raw::numeric, 1)
+                when vector_current_a_raw is not null
+                  and valid_starts >= 3
+                  and (
+                    vector_current_a_sd_raw is null
+                    or vector_current_a_sd_raw <= greatest(12.0, abs(vector_current_a_raw) * 0.35)
+                  )
+                then round(vector_current_a_raw::numeric, 1)
+                when direct_current_a_raw is not null
+                  and operating_kw_est_raw is not null
+                  and avg_v_ll_raw is not null
+                  and avg_v_ll_raw > 0
+                  and valid_starts >= 3
+                  and direct_current_a_raw >= (operating_kw_est_raw * 1000.0 / (sqrt(3.0) * avg_v_ll_raw)) * 0.90
+                  and (
+                    direct_current_a_sd_raw is null
+                    or direct_current_a_sd_raw <= greatest(15.0, abs(direct_current_a_raw) * 0.40)
+                  )
+                then round(direct_current_a_raw::numeric, 1)
+                else null
             end as current_a_est,
             case
-                when current_a_est_raw is null
-                  or operating_kw_est_raw is null
-                  or avg_v_ll_raw is null
-                  or avg_v_ll_raw <= 0
-                  or valid_starts < 3
-                then 'insufficient'
-                when current_a_est_raw < (operating_kw_est_raw * 1000.0 / (sqrt(3.0) * avg_v_ll_raw)) * 0.90
-                then 'invalid'
-                when current_a_sd_raw is not null
-                 and current_a_sd_raw > greatest(15.0, abs(current_a_est_raw) * 0.40)
-                then 'low'
-                when valid_starts >= 8 then 'high'
-                else 'medium'
-            end as current_confidence
+                when vector_current_a_raw is not null
+                  and valid_starts >= 8
+                  and (
+                    vector_current_a_sd_raw is null
+                    or vector_current_a_sd_raw <= greatest(12.0, abs(vector_current_a_raw) * 0.25)
+                  )
+                then 'high'
+                when vector_current_a_raw is not null
+                  and valid_starts >= 3
+                  and (
+                    vector_current_a_sd_raw is null
+                    or vector_current_a_sd_raw <= greatest(12.0, abs(vector_current_a_raw) * 0.35)
+                  )
+                then 'medium'
+                when direct_current_a_raw is not null
+                  and operating_kw_est_raw is not null
+                  and avg_v_ll_raw is not null
+                  and avg_v_ll_raw > 0
+                  and valid_starts >= 3
+                  and direct_current_a_raw >= (operating_kw_est_raw * 1000.0 / (sqrt(3.0) * avg_v_ll_raw)) * 0.90
+                then 'medium'
+                else 'insufficient'
+            end as current_confidence,
+            case
+                when vector_current_a_raw is not null
+                  and valid_starts >= 3
+                  and (
+                    vector_current_a_sd_raw is null
+                    or vector_current_a_sd_raw <= greatest(12.0, abs(vector_current_a_raw) * 0.35)
+                  )
+                then 'delta_pq'
+                when direct_current_a_raw is not null then 'delta_i'
+                else null
+            end as current_method
         from agg
         order by name
         """,
