@@ -22,6 +22,19 @@ type PumpElectricalEstimate = {
   };
 };
 
+type PumpOfficialReference = {
+  pump_id?: number;
+  pump_name?: string | null;
+  measured_at?: string | null;
+  source?: string | null;
+  i_l1_a?: number | null;
+  i_l2_a?: number | null;
+  i_l3_a?: number | null;
+  i_avg_a?: number | null;
+  startup_type?: string | null;
+  notes?: string | null;
+};
+
 function extractPumpId(n: any): number | null {
   const candidates = [n?.pump_id, n?.pumpId, n?.id];
   for (const c of candidates) {
@@ -42,6 +55,11 @@ function confidenceLabel(v?: string | null) {
   if (s === "medium") return "media";
   if (s === "low") return "baja";
   return "insuficiente";
+}
+
+function pctDiff(value: number, reference: number) {
+  if (!Number.isFinite(value) || !Number.isFinite(reference) || reference === 0) return null;
+  return ((value - reference) / reference) * 100;
 }
 
 export default function PumpNodeView({
@@ -99,10 +117,12 @@ export default function PumpNodeView({
 
   const pumpId = React.useMemo(() => extractPumpId(n), [n]);
   const [electrical, setElectrical] = React.useState<PumpElectricalEstimate | null>(null);
+  const [official, setOfficial] = React.useState<PumpOfficialReference | null>(null);
 
   React.useEffect(() => {
     if (!pumpId) {
       setElectrical(null);
+      setOfficial(null);
       return;
     }
 
@@ -113,23 +133,39 @@ export default function PumpNodeView({
     async function tick() {
       ctrl = new AbortController();
       try {
-        const r = await fetch(
-          `${API_BASE}/components/network_analyzers/pump-energy/by-pump/${pumpId}?days=30`,
-          {
+        const [energyRes, referenceRes] = await Promise.all([
+          fetch(`${API_BASE}/components/network_analyzers/pump-energy/by-pump/${pumpId}?days=30`, {
             method: "GET",
             headers: { Accept: "application/json" },
             cache: "no-store",
             signal: ctrl.signal,
-          }
-        );
+          }),
+          fetch(`${API_BASE}/components/network_analyzers/pump-reference/${pumpId}`, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+            signal: ctrl.signal,
+          }),
+        ]);
+
         if (!alive) return;
-        if (!r.ok) {
-          setElectrical(null);
+
+        if (energyRes.ok) {
+          setElectrical((await energyRes.json()) as PumpElectricalEstimate);
         } else {
-          setElectrical((await r.json()) as PumpElectricalEstimate);
+          setElectrical(null);
+        }
+
+        if (referenceRes.ok) {
+          setOfficial((await referenceRes.json()) as PumpOfficialReference);
+        } else {
+          setOfficial(null);
         }
       } catch {
-        if (alive) setElectrical(null);
+        if (alive) {
+          setElectrical(null);
+          setOfficial(null);
+        }
       } finally {
         if (alive) timer = setTimeout(tick, 30000);
       }
@@ -143,42 +179,74 @@ export default function PumpNodeView({
     };
   }, [pumpId]);
 
-  const directCurrent = Number(
+  const liveCurrent = Number(
     (n as any).current_a ??
     (n as any).amperes ??
     (n as any).current ??
     NaN
   );
-
-  const estimatedCurrent = Number(electrical?.pump?.current_a_est ?? NaN);
+  const officialCurrent = Number(official?.i_avg_a ?? NaN);
+  const abbEstimatedCurrent = Number(electrical?.pump?.current_a_est ?? NaN);
   const validStarts = Number(electrical?.pump?.valid_starts ?? 0);
-  const hasDirectCurrent = Number.isFinite(directCurrent) && directCurrent >= 0;
-  const hasEstimatedCurrent = Number.isFinite(estimatedCurrent) && estimatedCurrent > 0;
 
-  const deviationPct = hasDirectCurrent && hasEstimatedCurrent
-    ? ((directCurrent - estimatedCurrent) / estimatedCurrent) * 100
+  const hasLiveCurrent = Number.isFinite(liveCurrent) && liveCurrent >= 0;
+  const hasOfficialCurrent = Number.isFinite(officialCurrent) && officialCurrent > 0;
+  const hasAbbEstimatedCurrent = Number.isFinite(abbEstimatedCurrent) && abbEstimatedCurrent > 0;
+
+  const liveVsOfficialPct = hasLiveCurrent && hasOfficialCurrent
+    ? pctDiff(liveCurrent, officialCurrent)
     : null;
-  const abnormalCurrent = deviationPct !== null && Math.abs(deviationPct) > 15;
+  const abbVsOfficialPct = hasAbbEstimatedCurrent && hasOfficialCurrent
+    ? pctDiff(abbEstimatedCurrent, officialCurrent)
+    : null;
 
-  const currentText = hasDirectCurrent
-    ? `I ${directCurrent.toFixed(1)} A`
-    : hasEstimatedCurrent
-    ? `I est. ≈${estimatedCurrent.toFixed(1)} A`
-    : "I est. -- A";
+  // Solo una corriente EN VIVO fuera de la referencia oficial puede alarmar la bomba.
+  // La diferencia ABB vs pinza se usa como control/calibración del modelo, no como falla del equipo.
+  const abnormalCurrent = liveVsOfficialPct !== null && Math.abs(liveVsOfficialPct) > 15;
+
+  const currentText = hasLiveCurrent
+    ? `I ${liveCurrent.toFixed(1)} A`
+    : hasOfficialCurrent
+    ? `I ref. ${officialCurrent.toFixed(1)} A`
+    : hasAbbEstimatedCurrent
+    ? `I est. ≈${abbEstimatedCurrent.toFixed(1)} A`
+    : "I -- A";
 
   const currentColor = abnormalCurrent
     ? "#dc2626"
-    : hasEstimatedCurrent && !hasDirectCurrent
+    : hasOfficialCurrent
+    ? "#0f766e"
+    : hasAbbEstimatedCurrent
     ? "#0369a1"
     : "#334155";
 
-  const currentTooltip = hasDirectCurrent
-    ? hasEstimatedCurrent
-      ? `Corriente medida: ${directCurrent.toFixed(1)} A · referencia est.: ${estimatedCurrent.toFixed(1)} A · desvío ${deviationPct! >= 0 ? "+" : ""}${deviationPct!.toFixed(1)}%${abnormalCurrent ? " (FUERA DE RANGO)" : " (normal)"}`
-      : `Corriente medida: ${directCurrent.toFixed(1)} A`
-    : hasEstimatedCurrent
-    ? `Corriente estimada normal: ${estimatedCurrent.toFixed(1)} A · ${validStarts} arranques · confianza ${confidenceLabel(electrical?.pump?.current_confidence)}`
-    : "Corriente estimada: sin datos confiables";
+  const modelStatus = abbVsOfficialPct === null
+    ? "sin comparación"
+    : Math.abs(abbVsOfficialPct) <= 15
+    ? "modelo ABB alineado"
+    : Math.abs(abbVsOfficialPct) <= 25
+    ? "modelo ABB a revisar"
+    : "modelo ABB desviado";
+
+  const currentTooltip = hasLiveCurrent
+    ? hasOfficialCurrent
+      ? `Corriente en vivo: ${liveCurrent.toFixed(1)} A · referencia oficial: ${officialCurrent.toFixed(1)} A · desvío ${liveVsOfficialPct! >= 0 ? "+" : ""}${liveVsOfficialPct!.toFixed(1)}%${abnormalCurrent ? " (FUERA DE RANGO)" : " (normal)"}`
+      : `Corriente en vivo: ${liveCurrent.toFixed(1)} A`
+    : hasOfficialCurrent
+    ? `Corriente oficial de referencia (pinza): ${officialCurrent.toFixed(1)} A`
+    : hasAbbEstimatedCurrent
+    ? `Corriente estimada ABB: ${abbEstimatedCurrent.toFixed(1)} A`
+    : "Corriente: sin referencia";
+
+  const abbComparisonTooltip = hasOfficialCurrent && hasAbbEstimatedCurrent
+    ? `Modelo ABB: ${abbEstimatedCurrent.toFixed(1)} A · vs pinza ${abbVsOfficialPct! >= 0 ? "+" : ""}${abbVsOfficialPct!.toFixed(1)}% · ${modelStatus}`
+    : hasAbbEstimatedCurrent
+    ? `Modelo ABB: ${abbEstimatedCurrent.toFixed(1)} A · ${validStarts} arranques · confianza ${confidenceLabel(electrical?.pump?.current_confidence)}`
+    : "";
+
+  const phaseTooltip = hasOfficialCurrent && (official?.i_l1_a != null || official?.i_l2_a != null || official?.i_l3_a != null)
+    ? `Pinza fases: I1 ${official?.i_l1_a ?? "--"} A · I2 ${official?.i_l2_a ?? "--"} A · I3 ${official?.i_l3_a ?? "--"} A`
+    : "";
 
   const motorFill = !online
     ? "#cbd5e1"
@@ -207,10 +275,12 @@ export default function PumpNodeView({
     `Montaje: ${orientation === "horizontal" ? "Horizontal" : "Vertical"}`,
     `Modo: Manual`,
     currentTooltip,
+    phaseTooltip,
+    official?.startup_type ? `Arranque: ${official.startup_type}` : "",
+    abbComparisonTooltip,
     electrical?.pump?.operating_kw_est != null
-      ? `Potencia normal estimada: ${Number(electrical.pump.operating_kw_est).toFixed(1)} kW`
+      ? `Potencia normal estimada ABB: ${Number(electrical.pump.operating_kw_est).toFixed(1)} kW`
       : "",
-    hasEstimatedCurrent ? "Referencia calculada con firma eléctrica ABB (30 días)" : "",
   ].filter(Boolean);
 
   const handlePointerDown = (e: React.PointerEvent<SVGGElement>) => {
