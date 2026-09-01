@@ -21,8 +21,6 @@ function firstNum(...values: any[]): number | null {
   return null;
 }
 
-// ABB M4M devuelve 0x7FFFFFFF para un signed 32-bit no disponible.
-// Si el Node-RED viejo lo escala como kW termina llegando 21474.83647.
 function isInvalidAbbStat(v: any): boolean {
   const n = toNum(v);
   if (n === null) return false;
@@ -86,37 +84,6 @@ type LatestReading = {
   source?: string | null;
 };
 
-type PumpEnergyRow = {
-  pump_id: number;
-  name: string;
-  location_id?: number | null;
-  potencia_kw?: number | null;
-  tipo_arranque?: string | null;
-  expected_power_kw?: number | null;
-  last_state?: string | null;
-  last_state_at?: string | null;
-  valid_starts?: number | null;
-  operating_kw_est?: number | null;
-  operating_kw_sd?: number | null;
-  avg_start_step_kw?: number | null;
-  max_start_step_kw?: number | null;
-};
-
-type PumpEnergySummary = {
-  analyzer?: {
-    id: number;
-    name?: string | null;
-    location_name?: string | null;
-    ts?: string | null;
-    p_kw?: number | null;
-    avg_p_kw?: number | null;
-    max_p_kw?: number | null;
-    pf?: number | null;
-  };
-  window_days: number;
-  pumps: PumpEnergyRow[];
-};
-
 function extractAnalyzerId(n: UINode & any): number | null {
   const candidates = [n?.analyzer_id, n?.analyzerId, n?.analyzer?.id];
   for (const c of candidates) {
@@ -171,6 +138,7 @@ export default function NetworkAnalyzerNodeView({
   const CARD_W = 118;
   const CARD_H = 72;
   const PANEL_W = 460;
+  const PANEL_H = 235;
   const PANEL_GAP = 14;
 
   const x0 = pos.x - CARD_W / 2;
@@ -180,8 +148,6 @@ export default function NetworkAnalyzerNodeView({
   const [latest, setLatest] = useState<LatestReading | null>(null);
   const [latestErr, setLatestErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [energy, setEnergy] = useState<PumpEnergySummary | null>(null);
-  const [energyErr, setEnergyErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -196,6 +162,7 @@ export default function NetworkAnalyzerNodeView({
         }
         return;
       }
+
       ctrl = new AbortController();
       try {
         const row = await fetchJson<LatestReading>(
@@ -222,38 +189,6 @@ export default function NetworkAnalyzerNodeView({
   }, [analyzerId]);
 
   useEffect(() => {
-    if (!expanded || enabled || !analyzerId) return;
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let ctrl: AbortController | null = null;
-
-    async function tick() {
-      ctrl = new AbortController();
-      try {
-        const row = await fetchJson<PumpEnergySummary>(
-          `${API_BASE}/components/network_analyzers/${analyzerId}/pump-energy?days=30`,
-          ctrl.signal
-        );
-        if (!alive) return;
-        setEnergy(row);
-        setEnergyErr(null);
-      } catch (err: any) {
-        if (!alive) return;
-        setEnergyErr(err?.message ?? String(err));
-      } finally {
-        if (alive) timer = setTimeout(tick, 15000);
-      }
-    }
-
-    tick();
-    return () => {
-      alive = false;
-      ctrl?.abort();
-      if (timer) clearTimeout(timer);
-    };
-  }, [expanded, enabled, analyzerId]);
-
-  useEffect(() => {
     if (enabled) setExpanded(false);
   }, [enabled]);
 
@@ -268,12 +203,17 @@ export default function NetworkAnalyzerNodeView({
   const signals = n.signals ?? null;
   const raw = latest?.raw ?? null;
 
-  const pKW = firstNum(latest?.p_kw, rawPick(raw, ["p_kw", "power_kw"]), pickSignal(signals, ["p_kw", "power_kw", "kw"]));
+  const pKW = firstNum(
+    latest?.p_kw,
+    rawPick(raw, ["p_kw", "power_kw"]),
+    pickSignal(signals, ["p_kw", "power_kw", "kw"])
+  );
   const avgPKWRaw = firstNum(latest?.avg_p_kw);
   const maxPKWRaw = firstNum(latest?.max_p_kw);
   const invalidAbbStats = isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw);
   const avgPKW = invalidAbbStats ? null : avgPKWRaw;
   const maxPKW = invalidAbbStats ? null : maxPKWRaw;
+
   const qKvar = firstNum(latest?.q_kvar, rawPick(raw, ["q_kvar"]), pickSignal(signals, ["q_kvar", "kvar"]));
   const sKva = firstNum(latest?.s_kva, rawPick(raw, ["s_kva"]), pickSignal(signals, ["s_kva", "kva"]));
   const pf = firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
@@ -288,27 +228,30 @@ export default function NetworkAnalyzerNodeView({
   const lowPf = pf !== null && pf < 0.96;
   const clockStatsUnavailable = online && (invalidAbbStats || avgPKW === null || maxPKW === null);
   const name = typeof n.name === "string" && n.name.trim() ? n.name.trim() : "Eléctrico";
+
   const border = !analyzerId
     ? "#ef4444"
     : !online
     ? "#94a3b8"
-    : clockStatsUnavailable
-    ? "#f59e0b"
-    : lowPf
+    : clockStatsUnavailable || lowPf
     ? "#f59e0b"
     : "#64748b";
+
   const powerColor = !online ? "#64748b" : "#0f172a";
 
   function onMouseDown(e: React.MouseEvent<SVGGElement>) {
     e.stopPropagation();
+
     if (!enabled) {
       setExpanded((v) => !v);
       return;
     }
+
     const svg = e.currentTarget.ownerSVGElement;
     if (!svg) return;
     const startSvg = clientToSvg(svg, e.clientX, e.clientY);
     if (!startSvg) return;
+
     const startPos = getPos(n.id) ?? { x: n.x, y: n.y };
     let last = { x: startPos.x, y: startPos.y };
 
@@ -321,42 +264,61 @@ export default function NetworkAnalyzerNodeView({
       };
       setPos(n.id, last.x, last.y);
     }
+
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       onDragEnd?.(last.x, last.y);
     }
+
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }
 
   const tipLines = [
     `Actual: ${fmt(pKW, 1)} kW`,
-    clockStatsUnavailable ? "⚠ Media/Máx ABB no disponibles · revisar fecha/hora" : "",
     avgPKW !== null ? `Media ABB: ${fmt(avgPKW, 1)} kW` : "Media ABB: --",
     maxPKW !== null ? `Máx ABB: ${fmt(maxPKW, 1)} kW` : "Máx ABB: --",
     pf !== null ? `FP: ${fmt(pf, 2)}${lowPf ? " (bajo)" : ""}` : "",
     online ? "Online" : "Sin comunicación",
   ].filter(Boolean);
 
-  const pumps = energy?.pumps ?? [];
-  const PANEL_H = 290 + Math.max(0, pumps.length) * 27;
   const panelX = x0 + CARD_W + PANEL_GAP;
   const panelY = y0 - 12;
 
-  const metric = (label: string, value: number | null, unit: string, x: number, y: number, color = "#0f172a") => (
+  const metric = (
+    label: string,
+    value: number | null,
+    unit: string,
+    x: number,
+    y: number,
+    color = "#0f172a"
+  ) => (
     <g key={`${label}-${x}-${y}`}>
-      <text x={x} y={y} fill="#64748b" style={{ fontSize: 9, fontWeight: 900, letterSpacing: 0.5 }}>{label}</text>
+      <text x={x} y={y} fill="#64748b" style={{ fontSize: 9, fontWeight: 900, letterSpacing: 0.5 }}>
+        {label}
+      </text>
       <text x={x} y={y + 20} fill={color} style={{ fontSize: 18, fontWeight: 950 }}>
         {value === null ? "--" : fmt(value, 1)}
       </text>
-      <text x={x + 57} y={y + 20} fill="#64748b" style={{ fontSize: 9, fontWeight: 800 }}>{value === null ? "" : unit}</text>
+      <text x={x + 57} y={y + 20} fill="#64748b" style={{ fontSize: 9, fontWeight: 800 }}>
+        {value === null ? "" : unit}
+      </text>
     </g>
   );
 
-  const smallRow = (label: string, value: number | null, unit: string, x: number, y: number, alarm = false) => (
+  const smallRow = (
+    label: string,
+    value: number | null,
+    unit: string,
+    x: number,
+    y: number,
+    alarm = false
+  ) => (
     <g key={`${label}-${x}-${y}`}>
-      <text x={x} y={y} fill="#64748b" style={{ fontSize: 10, fontWeight: 800 }}>{label}</text>
+      <text x={x} y={y} fill="#64748b" style={{ fontSize: 10, fontWeight: 800 }}>
+        {label}
+      </text>
       <text x={x + 38} y={y} fill={alarm ? "#dc2626" : "#0f172a"} style={{ fontSize: 11, fontWeight: 900 }}>
         {value === null ? "--" : `${fmt(value, unit === "PF" ? 2 : 1)}${unit === "PF" ? "" : ` ${unit}`}`}
       </text>
@@ -371,89 +333,89 @@ export default function NetworkAnalyzerNodeView({
         onMouseLeave={() => hideTip?.()}
         style={{ cursor: enabled ? "move" : "pointer" }}
       >
-        <rect x={x0} y={y0} width={CARD_W} height={CARD_H} rx={12} fill="#f8fafc" stroke={border} strokeWidth={clockStatsUnavailable || (lowPf && online) ? 2.4 : 1.6} />
-        <text x={x0 + 12} y={y0 + 18} fill="#64748b" style={{ fontSize: 9, fontWeight: 900, letterSpacing: 0.7, pointerEvents: "none" }}>⚡ ELÉCTRICO</text>
-        <text x={x0 + CARD_W / 2} y={y0 + 49} textAnchor="middle" fill={powerColor} style={{ fontSize: 22, fontWeight: 950, pointerEvents: "none" }}>{fmt(pKW, 1)}</text>
-        <text x={x0 + CARD_W / 2} y={y0 + 63} textAnchor="middle" fill="#64748b" style={{ fontSize: 10, fontWeight: 800, pointerEvents: "none" }}>kW</text>
-        <circle cx={x0 + CARD_W - 12} cy={y0 + 13} r={4} fill={!online ? "#94a3b8" : clockStatsUnavailable ? "#f59e0b" : lowPf ? "#f59e0b" : "#22c55e"} />
+        <rect
+          x={x0}
+          y={y0}
+          width={CARD_W}
+          height={CARD_H}
+          rx={12}
+          fill="#f8fafc"
+          stroke={border}
+          strokeWidth={clockStatsUnavailable || (lowPf && online) ? 2.4 : 1.6}
+        />
+        <text x={x0 + 12} y={y0 + 18} fill="#64748b" style={{ fontSize: 9, fontWeight: 900, letterSpacing: 0.7, pointerEvents: "none" }}>
+          ⚡ ELÉCTRICO
+        </text>
+        <text x={x0 + CARD_W / 2} y={y0 + 49} textAnchor="middle" fill={powerColor} style={{ fontSize: 22, fontWeight: 950, pointerEvents: "none" }}>
+          {fmt(pKW, 1)}
+        </text>
+        <text x={x0 + CARD_W / 2} y={y0 + 63} textAnchor="middle" fill="#64748b" style={{ fontSize: 10, fontWeight: 800, pointerEvents: "none" }}>
+          kW
+        </text>
+        <circle
+          cx={x0 + CARD_W - 12}
+          cy={y0 + 13}
+          r={4}
+          fill={!online ? "#94a3b8" : clockStatsUnavailable || lowPf ? "#f59e0b" : "#22c55e"}
+        />
       </g>
 
       {expanded && !enabled && (
         <g>
-          <rect x={panelX} y={panelY} width={PANEL_W} height={PANEL_H} rx={14} fill="#ffffff" stroke={clockStatsUnavailable ? "#f59e0b" : "#94a3b8"} strokeWidth={clockStatsUnavailable ? 2 : 1.4} onMouseDown={(e) => e.stopPropagation()} />
+          <rect
+            x={panelX}
+            y={panelY}
+            width={PANEL_W}
+            height={PANEL_H}
+            rx={14}
+            fill="#ffffff"
+            stroke={clockStatsUnavailable ? "#f59e0b" : "#94a3b8"}
+            strokeWidth={clockStatsUnavailable ? 2 : 1.4}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
 
-          <text x={panelX + 18} y={panelY + 25} fill="#0f172a" style={{ fontSize: 15, fontWeight: 950 }}>{name}</text>
-          <text x={panelX + PANEL_W - 18} y={panelY + 25} textAnchor="end" fill={online ? "#16a34a" : "#94a3b8"} style={{ fontSize: 10, fontWeight: 900 }}>{online ? "ONLINE" : "OFFLINE"}</text>
-          {clockStatsUnavailable && (
-            <g>
-              <rect x={panelX + PANEL_W - 168} y={panelY + 32} width={150} height={19} rx={9.5} fill="#fff7ed" stroke="#f59e0b" />
-              <text x={panelX + PANEL_W - 93} y={panelY + 45} textAnchor="middle" fill="#b45309" style={{ fontSize: 8.5, fontWeight: 950 }}>⚠ REVISAR ABB · FECHA/HORA</text>
-            </g>
-          )}
-          <line x1={panelX + 16} y1={panelY + 55} x2={panelX + PANEL_W - 16} y2={panelY + 55} stroke="#e2e8f0" />
-
-          {metric("POTENCIA ACTUAL", pKW, "kW", panelX + 18, panelY + 75)}
-          {metric("MEDIA ABB", avgPKW, "kW", panelX + 164, panelY + 75, avgPKW === null ? "#d97706" : "#0f172a")}
-          {metric("MÁXIMO ABB", maxPKW, "kW", panelX + 310, panelY + 75, maxPKW === null ? "#d97706" : "#0f172a")}
-
-          <line x1={panelX + 16} y1={panelY + 123} x2={panelX + PANEL_W - 16} y2={panelY + 123} stroke="#e2e8f0" />
-          <text x={panelX + 18} y={panelY + 141} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>RED</text>
-          {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 161)}
-          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 161)}
-          {smallRow("PF", pf, "PF", panelX + 226, panelY + 161, lowPf)}
-          {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 161)}
-          {smallRow("V12", v12, "V", panelX + 18, panelY + 182)}
-          {smallRow("V23", v23, "V", panelX + 122, panelY + 182)}
-          {smallRow("V31", v31, "V", panelX + 226, panelY + 182)}
-          {smallRow("I1", i1, "A", panelX + 18, panelY + 203)}
-          {smallRow("I2", i2, "A", panelX + 122, panelY + 203)}
-          {smallRow("I3", i3, "A", panelX + 226, panelY + 203)}
-
-          <line x1={panelX + 16} y1={panelY + 219} x2={panelX + PANEL_W - 16} y2={panelY + 219} stroke="#e2e8f0" />
-          <text x={panelX + 18} y={panelY + 238} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>BOMBAS ASOCIADAS · ANÁLISIS INDIVIDUAL (30 DÍAS)</text>
-
-          {energyErr ? (
-            <text x={panelX + 18} y={panelY + 262} fill="#dc2626" style={{ fontSize: 10, fontWeight: 800 }}>No se pudo cargar análisis de bombas</text>
-          ) : pumps.length === 0 ? (
-            <text x={panelX + 18} y={panelY + 262} fill="#94a3b8" style={{ fontSize: 10, fontWeight: 800 }}>Sin bombas asociadas a este analizador</text>
-          ) : (
-            pumps.map((pump, idx) => {
-              const y = panelY + 262 + idx * 27;
-              const run = String(pump.last_state ?? "").toLowerCase() === "run";
-              return (
-                <g key={pump.pump_id}>
-                  <circle cx={panelX + 22} cy={y - 4} r={4} fill={run ? "#22c55e" : "#94a3b8"} />
-                  <text x={panelX + 34} y={y} fill="#0f172a" style={{ fontSize: 10, fontWeight: 900 }}>{pump.name}</text>
-                  <text x={panelX + 205} y={y} fill="#475569" style={{ fontSize: 10, fontWeight: 800 }}>
-                    {pump.operating_kw_est == null ? "Potencia: --" : `Potencia: ${fmt(pump.operating_kw_est, 1)} kW`}
-                  </text>
-                  <text x={panelX + 320} y={y} fill="#475569" style={{ fontSize: 10, fontWeight: 800 }}>
-                    {`Arranques válidos: ${pump.valid_starts ?? 0}`}
-                  </text>
-                  <text x={panelX + 34} y={y + 12} fill="#94a3b8" style={{ fontSize: 8.5, fontWeight: 700 }}>
-                    {pump.avg_start_step_kw == null ? "Salto de arranque: --" : `Salto medio: +${fmt(pump.avg_start_step_kw, 1)} kW · máximo observado: +${fmt(pump.max_start_step_kw, 1)} kW`}
-                  </text>
-                </g>
-              );
-            })
-          )}
-
-          <text
-            x={panelX + 18}
-            y={panelY + PANEL_H - 14}
-            fill={clockStatsUnavailable ? "#d97706" : lowPf ? "#d97706" : latestErr ? "#dc2626" : "#94a3b8"}
-            style={{ fontSize: 9, fontWeight: 800 }}
-          >
-            {clockStatsUnavailable
-              ? "Media/Máximo ABB no disponibles: revisar fecha y hora del analizador"
-              : lowPf
-              ? "Factor de potencia bajo (< 0.96)"
-              : latestErr
-              ? "Sin lectura reciente"
-              : latest?.ts
-              ? `Última lectura: ${new Date(latest.ts).toLocaleTimeString()}`
-              : ""}
+          <text x={panelX + 18} y={panelY + 25} fill="#0f172a" style={{ fontSize: 15, fontWeight: 950 }}>
+            {name}
           </text>
+          <text x={panelX + PANEL_W - 18} y={panelY + 25} textAnchor="end" fill={online ? "#16a34a" : "#94a3b8"} style={{ fontSize: 10, fontWeight: 900 }}>
+            {online ? "ONLINE" : "OFFLINE"}
+          </text>
+
+          <line x1={panelX + 16} y1={panelY + 37} x2={panelX + PANEL_W - 16} y2={panelY + 37} stroke="#e2e8f0" />
+
+          {metric("POTENCIA ACTUAL", pKW, "kW", panelX + 18, panelY + 57)}
+          {metric("MEDIA ABB", avgPKW, "kW", panelX + 164, panelY + 57, avgPKW === null ? "#d97706" : "#0f172a")}
+          {metric("MÁXIMO ABB", maxPKW, "kW", panelX + 310, panelY + 57, maxPKW === null ? "#d97706" : "#0f172a")}
+
+          <line x1={panelX + 16} y1={panelY + 105} x2={panelX + PANEL_W - 16} y2={panelY + 105} stroke="#e2e8f0" />
+          <text x={panelX + 18} y={panelY + 123} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>
+            RED
+          </text>
+
+          {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 143)}
+          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 143)}
+          {smallRow("PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
+          {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 143)}
+
+          {smallRow("V12", v12, "V", panelX + 18, panelY + 164)}
+          {smallRow("V23", v23, "V", panelX + 122, panelY + 164)}
+          {smallRow("V31", v31, "V", panelX + 226, panelY + 164)}
+
+          {smallRow("I1", i1, "A", panelX + 18, panelY + 185)}
+          {smallRow("I2", i2, "A", panelX + 122, panelY + 185)}
+          {smallRow("I3", i3, "A", panelX + 226, panelY + 185)}
+
+          {clockStatsUnavailable && (
+            <text x={panelX + 18} y={panelY + 218} fill="#d97706" style={{ fontSize: 9, fontWeight: 900 }}>
+              ⚠ Media/Máximo ABB no disponibles: revisar fecha y hora del analizador
+            </text>
+          )}
+
+          {!clockStatsUnavailable && latestErr && (
+            <text x={panelX + 18} y={panelY + 218} fill="#dc2626" style={{ fontSize: 9, fontWeight: 900 }}>
+              Sin lectura reciente
+            </text>
+          )}
         </g>
       )}
     </g>
