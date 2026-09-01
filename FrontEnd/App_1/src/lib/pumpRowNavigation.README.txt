@@ -1,0 +1,1 @@
+Navigation helper installed for KPI pump rows.
