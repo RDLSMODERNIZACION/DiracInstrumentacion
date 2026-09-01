@@ -52,14 +52,9 @@ from app.routes.dirac_admin.manifolds import router as admin_manifolds_router
 from app.routes.components.manifold_signals import router as manifold_signals_router
 from app.routes.components.network_analyzers import router as network_analyzers_router
 from app.routes.components.pump_energy import router as pump_energy_router
+from app.routes.components.pump_reference import router as pump_reference_router
 
 # ===== Mapa =====
-# Este router agrupador incluye:
-# - /mapa/mapasagua/...
-# - /mapa/sim/...
-# - /mapa/pipes/{pipe_id}/connect
-# - /mapa/nodes/...
-# - /mapa/contours/...
 from app.routes.mapa import router as mapa_router
 
 
@@ -107,7 +102,6 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
-# ===== Global exception handler =====
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logging.exception(
@@ -117,15 +111,11 @@ async def global_exception_handler(request, exc):
         exc_info=exc,
     )
     return JSONResponse(
-        {
-            "ok": False,
-            "detail": str(exc),
-            "path": request.url.path,
-        },
+        {"ok": False, "detail": str(exc), "path": request.url.path},
         status_code=500,
     )
 
-# ===== Health =====
+
 @app.get("/", tags=["health"])
 def root():
     return {
@@ -155,44 +145,28 @@ def health_db():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("select 1")
             cur.fetchone()
-
-        return {
-            "ok": True,
-            "db": "up",
-        }
-
+        return {"ok": True, "db": "up"}
     except Exception:
         logging.exception("DB health check failed")
-        return JSONResponse(
-            {
-                "ok": False,
-                "db": "down",
-            },
-            status_code=503,
-        )
+        return JSONResponse({"ok": False, "db": "down"}, status_code=503)
 
 
-# ===== Rutas (operación base) =====
 app.include_router(tanks_router)
 app.include_router(pumps_router)
 app.include_router(ingest_router)
 app.include_router(arduino_router)
 
-# ===== Infraestructura =====
 app.include_router(infraestructura_router)
 app.include_router(infra_edit_router)
 
-# ===== PLC / KPI =====
 app.include_router(plc_router)
 app.include_router(kpi_router)
 
-# ===== Dirac (operación) =====
 app.include_router(dirac_me_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 
-# ===== Administración =====
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
 app.include_router(admin_locations_router)
@@ -201,19 +175,15 @@ app.include_router(admin_pumps_router)
 app.include_router(admin_valves_router)
 app.include_router(admin_manifolds_router)
 
-# ===== Componentes =====
 app.include_router(manifold_signals_router)
 app.include_router(network_analyzers_router)
 app.include_router(pump_energy_router)
+app.include_router(pump_reference_router)
 
-# ===== Mapa =====
 app.include_router(mapa_router, prefix="/mapa", tags=["mapa"])
-
-# ===== Telegram test =====
 app.include_router(telegram_test_router)
 
 
-# ===== Startup / Shutdown =====
 @app.on_event("startup")
 def _startup():
     start_telegram_reporter()
