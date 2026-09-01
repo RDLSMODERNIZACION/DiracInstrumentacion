@@ -14,12 +14,8 @@ body {
 }
 
 /* KPI > Operación y confiabilidad:
-   ocultamos las 4 tarjetas resumen y el gráfico diario.
-   Se conservan filtros, tabla mensual e historial. */
+   ocultamos solo las 4 tarjetas resumen.
+   Se conservan el gráfico diario, filtros, tabla mensual e historial. */
 .space-y-6.p-6 > .space-y-5 > section.grid {
-  display: none !important;
-}
-
-.space-y-6.p-6 > .space-y-5 > section:has(.recharts-responsive-container) {
   display: none !important;
 }
