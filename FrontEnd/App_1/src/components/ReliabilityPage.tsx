@@ -253,9 +253,9 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
     setError("");
     Promise.all([
       fetchJson<{ items: PumpDailyRow[] }>("/kpi/operation-reliability/pump-daily", { month, location_id: locParam }),
-      fetchJson<{ items: PumpRankingRow[] }>("/kpi/operation-reliability/pump-ranking", { month, location_id: locParam, limit: 200 }),
+      fetchJson<{ items: PumpRankingRow[] }>("/kpi/operation-reliability/pump-ranking", { month, location_id: locParam, limit: 100 }),
       fetchJson<{ items: TankDailyRow[] }>("/kpi/operation-reliability/tank-daily", { month, location_id: locParam }),
-      fetchJson<{ items: TankRankingRow[] }>("/kpi/operation-reliability/tank-ranking", { month, location_id: locParam, limit: 200 }),
+      fetchJson<{ items: TankRankingRow[] }>("/kpi/operation-reliability/tank-ranking", { month, location_id: locParam, limit: 100 }),
     ])
       .then(([pd, pr, td, tr]) => {
         if (!alive) return;
