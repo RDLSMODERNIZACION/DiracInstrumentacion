@@ -19,9 +19,9 @@ const LOGO_SRC = "/img/logodirac.jpeg";
 
 const heroSlides = [
   {
-    eyebrow: "Ingeniería aplicada",
-    title: "Soluciones eléctricas e industriales que funcionan en campo.",
-    text: "Ingeniería, automatización, instrumentación y energía para municipalidades, industrias y operaciones críticas.",
+    eyebrow: "Ingeniería eléctrica",
+    title: "Proyectos BT y MT, bancos de capacitores y puesta a tierra certificada.",
+    text: "Desarrollamos proyectos eléctricos de baja y media tensión, instalamos bancos de capacitores y realizamos certificación de puesta a tierra según Resolución 902/15.",
     image: "/img/tableros-electricos.jpeg",
   },
   {
