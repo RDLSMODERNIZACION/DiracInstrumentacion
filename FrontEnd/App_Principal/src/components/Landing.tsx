@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   ArrowRight,
-  BatteryCharging,
   Camera,
   ChevronLeft,
   ChevronRight,
@@ -61,32 +60,16 @@ const teamVehicles = [
 
 const products = [
   {
-    icon: SunMedium,
-    title: "Luminarias solares",
-    category: "Venta directa",
-    text: "Iluminación autónoma para calles, plazas, accesos, predios, playones y caminos.",
-    image: "/img/luminaria-solar.jpeg",
+    title: "Farola solar 400W",
+    image: "/img/productos/luminaria-solar-400w.png",
   },
   {
-    icon: Zap,
-    title: "Paneles solares",
-    category: "Venta directa",
-    text: "Módulos fotovoltaicos para instalaciones residenciales, comerciales, industriales y sistemas remotos.",
-    image: "/img/paneles-solares.jpg",
+    title: "Farola solar All in One",
+    image: "/img/productos/luminaria-solar-all-in-one.png",
   },
   {
-    icon: BatteryCharging,
-    title: "Inversores y baterías",
-    category: "Venta directa",
-    text: "Equipamiento para conversión, respaldo y almacenamiento de energía en sistemas solares.",
-    image: "/img/paneles-solares.jpg",
-  },
-  {
-    icon: Camera,
-    title: "Cámaras solares 4G",
-    category: "Venta directa",
-    text: "Videovigilancia autónoma para ubicaciones sin energía ni conectividad fija.",
-    image: "/img/luminaria-solar.jpeg",
+    title: "Panel solar de alto rendimiento",
+    image: "/img/productos/panel-solar-alto-rendimiento.png",
   },
 ];
 
@@ -117,11 +100,11 @@ export default function Landing() {
         .dl-hero-bottom{position:absolute;left:0;right:0;bottom:0;z-index:6;border-top:1px solid rgba(255,255,255,.14);background:rgba(2,12,22,.42);backdrop-filter:blur(12px)}.dl-hero-control{min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:20px}.dl-dots{display:flex;align-items:center;gap:9px}.dl-dot{width:38px;height:3px;border:0;padding:0;background:rgba(255,255,255,.25);cursor:pointer;overflow:hidden;border-radius:99px}.dl-dot.active::after{content:"";display:block;width:100%;height:100%;background:var(--green);transform-origin:left;animation:dlProgress 5.6s linear forwards}@keyframes dlProgress{from{transform:scaleX(0)}to{transform:scaleX(1)}}.dl-slide-info{display:flex;align-items:center;gap:14px;color:rgba(255,255,255,.72);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.1em}.dl-arrows{display:flex;gap:8px}.dl-arrow{width:40px;height:40px;display:grid;place-items:center;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05);color:white;cursor:pointer}.dl-arrow:hover{background:rgba(255,255,255,.12)}
         .dl-section{padding:88px 0}.dl-section.white{background:#fff}.dl-section.paper{background:var(--paper);border-top:1px solid var(--line)}.dl-section-head{display:grid;grid-template-columns:minmax(0,.95fr) minmax(300px,.55fr);gap:50px;align-items:end;margin-bottom:38px}.dl-kicker{display:flex;align-items:center;gap:11px;margin-bottom:15px;color:var(--green-dark);font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}.dl-kicker::before{content:"";width:34px;height:2px;background:var(--green)}.dl-section-head h2{margin:0;font-size:clamp(36px,4.6vw,61px);line-height:1;letter-spacing:-.045em}.dl-section-head p{margin:0;color:var(--muted);font-size:16px;line-height:1.7}
         .dl-project-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.dl-project{position:relative;min-height:390px;border-radius:24px;overflow:hidden;background:#102335;border:1px solid rgba(6,21,37,.1)}.dl-project img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .5s ease}.dl-project:hover img{transform:scale(1.035)}.dl-project::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(3,13,24,.92) 0%,rgba(3,13,24,.28) 58%,rgba(3,13,24,.04) 100%)}.dl-project-copy{position:absolute;z-index:2;left:0;right:0;bottom:0;padding:28px;color:white}.dl-project-copy small{color:#bfe8a7;font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}.dl-project-copy h3{margin:8px 0 10px;font-size:28px;line-height:1.04;letter-spacing:-.035em}.dl-project-copy p{margin:0;max-width:540px;color:rgba(255,255,255,.7);font-size:14px;line-height:1.55}
-        .dl-product-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}.dl-product{display:grid;grid-template-rows:240px 1fr;min-height:455px;overflow:hidden;border:1px solid var(--line);border-radius:22px;background:white;transition:transform .25s ease,box-shadow .25s ease}.dl-product:hover{transform:translateY(-4px);box-shadow:0 24px 60px rgba(12,28,44,.11)}.dl-product-media{position:relative;overflow:hidden;background:#eef2f4}.dl-product-media img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .45s ease}.dl-product:hover .dl-product-media img{transform:scale(1.035)}.dl-product-media::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(6,21,37,.28),transparent 48%)}.dl-product-icon{position:absolute;z-index:2;left:18px;bottom:18px;width:46px;height:46px;display:grid;place-items:center;border-radius:13px;background:rgba(255,255,255,.94);color:var(--green-dark);box-shadow:0 10px 30px rgba(0,0,0,.14)}.dl-product-copy{padding:22px;display:flex;flex-direction:column}.dl-product-copy small{color:var(--green-dark);font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.dl-product-copy h3{margin:8px 0 10px;font-size:23px;line-height:1.05;letter-spacing:-.035em}.dl-product-copy p{margin:0;color:var(--muted);font-size:14px;line-height:1.6;flex:1}.dl-consult{margin-top:18px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:850}.dl-consult:hover{color:var(--green-dark)}
+        .dl-product-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}.dl-product{display:block;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:24px;background:white;transition:transform .25s ease,box-shadow .25s ease;box-shadow:0 18px 44px rgba(12,28,44,.07)}.dl-product:hover{transform:translateY(-4px);box-shadow:0 26px 62px rgba(12,28,44,.12)}.dl-product-media{position:relative;overflow:hidden;background:white;height:620px;display:flex;align-items:center;justify-content:center;padding:10px}.dl-product-media.catalog-clean::before,.dl-product-media.catalog-clean::after{display:none!important}.dl-product-media img{width:100%;height:100%;object-fit:contain;display:block;background:white;transform:none!important}.dl-product:hover .dl-product-media img{transform:none!important}.dl-product-copy,.dl-product-icon{display:none!important}
         .dl-proof{padding:82px 0;background:var(--navy);color:white}.dl-proof-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:64px;align-items:center}.dl-proof h2{margin:0;font-size:clamp(36px,4.5vw,58px);line-height:1;letter-spacing:-.045em}.dl-proof p{color:rgba(236,242,247,.7);font-size:16px;line-height:1.7}.dl-proof-list{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dl-proof-item{padding:22px;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.045)}.dl-proof-item svg{color:var(--green);margin-bottom:14px}.dl-proof-item strong{display:block;font-size:16px}.dl-proof-item span{display:block;margin-top:5px;color:rgba(236,242,247,.62);font-size:12px;line-height:1.45}
         .dl-cta{padding:66px 0;background:white;border-top:1px solid var(--line)}.dl-cta-inner{display:flex;align-items:center;justify-content:space-between;gap:30px}.dl-cta h2{margin:0;font-size:clamp(30px,4vw,48px);line-height:1.05;letter-spacing:-.04em}.dl-cta p{margin:10px 0 0;color:var(--muted)}.dl-contact{display:flex;gap:10px;flex-wrap:wrap}.dl-contact a{min-height:46px;display:inline-flex;align-items:center;gap:8px;padding:0 16px;border:1px solid var(--line);border-radius:10px;background:white;font-size:13px;font-weight:800}.dl-footer{padding:24px 0;background:#f8fafb;border-top:1px solid var(--line);color:var(--muted);font-size:13px}.dl-footer-inner{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}.dl-footer strong{color:var(--ink)}
-        @media(max-width:980px){.dl-links{display:none}.dl-menu-btn{display:block}.dl-login.desktop{display:none}.dl-mobile{position:absolute;top:76px;left:0;right:0;background:white;border-bottom:1px solid var(--line);padding:18px 20px 24px;display:grid;gap:8px;box-shadow:0 18px 34px rgba(0,0,0,.08)}.dl-mobile a{padding:12px 4px;font-weight:800}.dl-mobile .dl-login{margin-top:6px;color:white;padding:0 16px}.dl-section-head,.dl-proof-grid{grid-template-columns:1fr}.dl-product-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dl-project-grid{grid-template-columns:1fr}.dl-hero h1{font-size:clamp(44px,8vw,72px)}}
-        @media(max-width:640px){.dl-shell{width:min(100% - 28px,1200px)}.dl-brand-copy span{display:none}.dl-hero{min-height:660px;height:calc(100svh - 70px)}.dl-nav-inner{min-height:70px}.dl-hero-grid{align-items:flex-end;padding-bottom:120px}.dl-hero h1{font-size:42px;line-height:.98}.dl-hero p{font-size:15px;line-height:1.58}.dl-actions{display:grid;grid-template-columns:1fr}.dl-primary,.dl-secondary{width:100%}.dl-slide::after{background:linear-gradient(0deg,rgba(3,13,24,.96) 0%,rgba(3,13,24,.75) 52%,rgba(3,13,24,.3) 100%)}.dl-slide-info{display:none}.dl-hero-control{min-height:68px}.dl-section{padding:68px 0}.dl-section-head{gap:18px}.dl-product-grid{grid-template-columns:1fr}.dl-product{grid-template-rows:220px 1fr;min-height:440px}.dl-project{min-height:330px}.dl-proof-list{grid-template-columns:1fr}.dl-cta-inner{align-items:flex-start;flex-direction:column}.dl-contact{display:grid;width:100%}.dl-contact a{width:100%}}
+        @media(max-width:980px){.dl-links{display:none}.dl-menu-btn{display:block}.dl-login.desktop{display:none}.dl-mobile{position:absolute;top:76px;left:0;right:0;background:white;border-bottom:1px solid var(--line);padding:18px 20px 24px;display:grid;gap:8px;box-shadow:0 18px 34px rgba(0,0,0,.08)}.dl-mobile a{padding:12px 4px;font-weight:800}.dl-mobile .dl-login{margin-top:6px;color:white;padding:0 16px}.dl-section-head,.dl-proof-grid{grid-template-columns:1fr}.dl-product-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dl-product-media{height:560px}.dl-project-grid{grid-template-columns:1fr}.dl-hero h1{font-size:clamp(44px,8vw,72px)}}
+        @media(max-width:640px){.dl-shell{width:min(100% - 28px,1200px)}.dl-brand-copy span{display:none}.dl-hero{min-height:660px;height:calc(100svh - 70px)}.dl-nav-inner{min-height:70px}.dl-hero-grid{align-items:flex-end;padding-bottom:120px}.dl-hero h1{font-size:42px;line-height:.98}.dl-hero p{font-size:15px;line-height:1.58}.dl-actions{display:grid;grid-template-columns:1fr}.dl-primary,.dl-secondary{width:100%}.dl-slide::after{background:linear-gradient(0deg,rgba(3,13,24,.96) 0%,rgba(3,13,24,.75) 52%,rgba(3,13,24,.3) 100%)}.dl-slide-info{display:none}.dl-hero-control{min-height:68px}.dl-section{padding:68px 0}.dl-section-head{gap:18px}.dl-product-grid{grid-template-columns:1fr}.dl-product-media{height:620px;padding:6px}.dl-project{min-height:330px}.dl-proof-list{grid-template-columns:1fr}.dl-cta-inner{align-items:flex-start;flex-direction:column}.dl-contact{display:grid;width:100%}.dl-contact a{width:100%}}
       `}</style>
 
       <nav className="dl-nav">
@@ -191,10 +174,10 @@ export default function Landing() {
           <div className="dl-shell">
             <div className="dl-section-head">
               <div><div className="dl-kicker">Catálogo comercial</div><h2>Productos para venta directa.</h2></div>
-              <p>Priorizamos los productos de consulta y provisión directa: iluminación solar, generación fotovoltaica, almacenamiento y seguridad autónoma.</p>
+              <p>Farolas solares y paneles fotovoltaicos listos para provisión directa. Mostramos únicamente los productos comerciales disponibles.</p>
             </div>
             <div className="dl-product-grid">
-              {products.map((product)=>{const Icon=product.icon;return <article className="dl-product" key={product.title}><div className="dl-product-media"><img src={product.image} alt={product.title}/><div className="dl-product-icon"><Icon size={22}/></div></div><div className="dl-product-copy"><small>{product.category}</small><h3>{product.title}</h3><p>{product.text}</p><a className="dl-consult" href={`mailto:administracion@diracserviciosenergia.com?subject=Consulta ${encodeURIComponent(product.title)}`}>Consultar <ArrowRight size={15}/></a></div></article>})}
+              {products.map((product)=><article className="dl-product" key={product.title}><div className="dl-product-media catalog-clean"><img src={product.image} alt={product.title}/></div></article>)}
             </div>
           </div>
         </section>
