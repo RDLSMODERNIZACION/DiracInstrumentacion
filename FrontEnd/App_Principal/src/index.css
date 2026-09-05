@@ -531,3 +531,36 @@ body {
     min-height: 560px !important;
   }
 }
+
+/* Nuestro equipo: camión limpio, sin letras ni oscurecido encima */
+.dl #equipo .dl-project-copy {
+  display: none !important;
+}
+
+.dl #equipo .dl-project::before,
+.dl #equipo .dl-project::after {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+}
+
+.dl #equipo .dl-project-grid > .dl-project:first-child {
+  background: #eef3f6 !important;
+  border: 1px solid rgba(7,21,37,.08) !important;
+  box-shadow: 0 26px 70px rgba(7,21,37,.10) !important;
+}
+
+.dl #equipo .dl-project-grid > .dl-project:first-child img {
+  filter: brightness(1.08) saturate(1.03) contrast(1.02) !important;
+  object-fit: cover !important;
+  transform: none !important;
+}
+
+.dl #equipo .dl-project-grid > .dl-project:first-child:hover img {
+  transform: scale(1.015) !important;
+}
+
+.dl #equipo .dl-project-grid > .dl-project:first-child:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 32px 80px rgba(7,21,37,.14) !important;
+}
