@@ -44,30 +44,18 @@ const heroSlides = [
   },
 ];
 
-const projects = [
+const teamVehicles = [
   {
-    category: "Automatización e instrumentación",
-    title: "Tableros y control industrial",
-    text: "Diseño, armado, integración y puesta en servicio de tableros eléctricos y de automatización.",
-    image: "/img/tableros-electricos.jpeg",
-  },
-  {
-    category: "Trabajo en campo",
-    title: "Montaje y asistencia con hidrogrúa",
-    text: "Capacidad operativa para instalaciones, mantenimiento, luminaria, columnas y trabajos en altura.",
+    category: "Trabajo en altura y montaje",
+    title: "Camión JMC N-900 con hidrogrúa",
+    text: "Unidad equipada para montajes, luminaria, tableros, tendidos y asistencia técnica. Habilitada para trabajos en campos petroleros.",
     image: "/img/hidrogrua-dirac.jpg",
   },
   {
-    category: "Mantenimiento eléctrico",
-    title: "Diagnóstico y mantenimiento de transformadores",
-    text: "Inspección, medición y mantenimiento para mejorar disponibilidad y seguridad de las instalaciones.",
-    image: "/img/mantenimiento-transformadores.jpeg",
-  },
-  {
-    category: "Telemetría",
-    title: "Monitoreo remoto de activos",
-    text: "Supervisión de variables, estados, alarmas y eventos para infraestructura distribuida.",
-    image: "/img/scada-preview.png",
+    category: "Movilidad técnica 4x4",
+    title: "Toyota Hilux de servicio",
+    text: "Movilidad para personal, instrumental, herramientas y asistencia operativa. Habilitada para trabajos en campos petroleros y operación en yacimientos.",
+    image: "/img/camioneta-dirac.jpg",
   },
 ];
 
@@ -143,7 +131,7 @@ export default function Landing() {
             <span className="dl-brand-copy"><strong>DIRAC</strong><span>Servicios Energía</span></span>
           </a>
           <div className="dl-links">
-            <a href="#obras">Nuestras obras</a>
+            <a href="#equipo">Nuestro equipo</a>
             <a href="#productos">Catálogo</a>
             <a href="#empresa">Empresa</a>
             <a href="#contacto">Contacto</a>
@@ -153,7 +141,7 @@ export default function Landing() {
         </div>
         {mobileOpen && (
           <div className="dl-mobile">
-            <a href="#obras" onClick={() => setMobileOpen(false)}>Nuestras obras</a>
+            <a href="#equipo" onClick={() => setMobileOpen(false)}>Nuestro equipo</a>
             <a href="#productos" onClick={() => setMobileOpen(false)}>Catálogo</a>
             <a href="#empresa" onClick={() => setMobileOpen(false)}>Empresa</a>
             <a href="#contacto" onClick={() => setMobileOpen(false)}>Contacto</a>
@@ -173,7 +161,7 @@ export default function Landing() {
               <h1>{heroSlides[slide].title}</h1>
               <p>{heroSlides[slide].text}</p>
               <div className="dl-actions">
-                <a className="dl-primary" href="#obras">Nuestras obras <ArrowRight size={17}/></a>
+                <a className="dl-primary" href="#equipo">Nuestro equipo <ArrowRight size={17}/></a>
                 <a className="dl-secondary" href="#productos">Ver catálogo</a>
               </div>
             </div>
@@ -187,14 +175,14 @@ export default function Landing() {
           </div>
         </section>
 
-        <section className="dl-section paper" id="obras">
+        <section className="dl-section paper" id="equipo">
           <div className="dl-shell">
             <div className="dl-section-head">
-              <div><div className="dl-kicker">Nuestras obras</div><h2>Ingeniería ejecutada en campo.</h2></div>
-              <p>Una selección de trabajos que muestra nuestra capacidad en automatización, energía, mantenimiento y telemetría.</p>
+              <div><div className="dl-kicker">Nuestro equipo</div><h2>Movilidad preparada para operación en campo.</h2></div>
+              <p>Contamos con unidades propias para montaje, mantenimiento y asistencia técnica, habilitadas para trabajos en campos petroleros y operación en yacimientos.</p>
             </div>
             <div className="dl-project-grid">
-              {projects.map((project)=><article className="dl-project" key={project.title}><img src={project.image} alt={project.title}/><div className="dl-project-copy"><small>{project.category}</small><h3>{project.title}</h3><p>{project.text}</p></div></article>)}
+              {teamVehicles.map((vehicle)=><article className="dl-project" key={vehicle.title}><img src={vehicle.image} alt={vehicle.title}/><div className="dl-project-copy"><small>{vehicle.category}</small><h3>{vehicle.title}</h3><p>{vehicle.text}</p></div></article>)}
             </div>
           </div>
         </section>
