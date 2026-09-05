@@ -139,7 +139,6 @@ body {
   line-height: 1.62;
 }
 
-/* Barra de capacidades integrada debajo de las unidades */
 .dl #equipo .dl-project-grid::after {
   content: "UNIDADES PROPIAS   •   SOPORTE TÉCNICO   •   OPERACIÓN EN YACIMIENTOS   •   MOVILIDAD 4x4";
   grid-column: 1 / -1;
@@ -161,7 +160,6 @@ body {
   box-shadow: 0 12px 34px rgba(7,21,37,.06);
 }
 
-/* Franja solar entre Nuestro equipo y Catálogo */
 .dl #equipo::after {
   content: "ENERGÍA SOLAR   •   ON-GRID — AUTOCONSUMO Y AHORRO   •   OFF-GRID — AUTONOMÍA PARA SITIOS REMOTOS";
   position: relative;
@@ -250,7 +248,6 @@ body {
   }
 }
 
-/* ===== Ajuste 2026-09-05: equipo con un solo camión + layout dividido ===== */
 .dl #equipo > .dl-shell {
   display: grid;
   grid-template-columns: minmax(300px, .78fr) minmax(520px, 1.22fr);
@@ -297,7 +294,6 @@ body {
   content: "UNIDAD PROPIA   •   TRABAJOS EN ALTURA   •   CAMPOS PETROLEROS   •   ASISTENCIA TÉCNICA";
 }
 
-/* Franja solar full-bleed, de punta a punta */
 .dl #equipo::after {
   width: 100vw;
   max-width: none;
@@ -357,4 +353,38 @@ body {
     font-size: 11px;
     line-height: 1.55;
   }
+}
+
+/* Catálogo: usar imágenes comerciales identificadas en /public/img/productos */
+.dl #productos .dl-product:nth-child(1) .dl-product-media img,
+.dl #productos .dl-product:nth-child(2) .dl-product-media img {
+  display: none;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media::before,
+.dl #productos .dl-product:nth-child(2) .dl-product-media::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  transition: transform .45s ease, opacity .35s ease;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media::before {
+  background-image: url('/img/productos/luminaria-solar-400w.png');
+}
+
+.dl #productos .dl-product:nth-child(1):hover .dl-product-media::before {
+  background-image: url('/img/productos/luminaria-solar-all-in-one.png');
+  transform: scale(1.025);
+}
+
+.dl #productos .dl-product:nth-child(2) .dl-product-media::before {
+  background-image: url('/img/productos/panel-solar-alto-rendimiento.png');
+}
+
+.dl #productos .dl-product:nth-child(2):hover .dl-product-media::before {
+  transform: scale(1.025);
 }
