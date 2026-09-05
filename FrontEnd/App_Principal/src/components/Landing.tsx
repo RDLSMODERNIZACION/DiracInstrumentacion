@@ -36,9 +36,9 @@ const heroSlides = [
     image: "/img/paneles-solares.jpg",
   },
   {
-    eyebrow: "Mantenimiento y diagnóstico",
-    title: "Disponibilidad, seguridad y continuidad operativa.",
-    text: "Mediciones, mantenimiento preventivo y predictivo, calidad de energía y diagnóstico de instalaciones.",
+    eyebrow: "Gestión y ahorro energético",
+    title: "Controlá consumos, recibí alertas y detectá oportunidades de ahorro.",
+    text: "Aplicaciones para analizar facturas, hacer seguimiento de medidores, comparar consumos, detectar desvíos y generar alertas para mejorar la gestión energética.",
     image: "/img/mantenimiento-transformadores.jpeg",
   },
 ];
