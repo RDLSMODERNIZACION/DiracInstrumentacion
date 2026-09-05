@@ -38,6 +38,7 @@ from app.routes.dirac.me import router as dirac_me_router
 from app.routes.dirac.companies import router as dirac_companies_router
 from app.routes.dirac.locations import router as dirac_locations_router
 from app.routes.dirac.pumps import router as dirac_pumps_router
+from app.routes.dirac.activity import router as dirac_activity_router
 
 # ===== Administración =====
 from app.routes.dirac_admin.companies import router as admin_companies_router
@@ -166,6 +167,7 @@ app.include_router(dirac_me_router)
 app.include_router(dirac_companies_router)
 app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
+app.include_router(dirac_activity_router)
 
 app.include_router(admin_companies_router)
 app.include_router(admin_users_router)
