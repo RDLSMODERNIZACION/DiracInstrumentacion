@@ -76,7 +76,6 @@ body {
   display: none !important;
 }
 
-/* El camión queda suelto, integrado a la composición y sin caja */
 .dl #equipo .dl-project-grid > .dl-project:first-child {
   position: relative;
   width: 126%;
@@ -118,7 +117,6 @@ body {
   content: none !important;
 }
 
-/* Franja solar de punta a punta */
 .dl #equipo::after {
   content: "ENERGÍA SOLAR   •   ON-GRID — AUTOCONSUMO Y AHORRO   •   OFF-GRID — AUTONOMÍA PARA SITIOS REMOTOS";
   position: relative;
@@ -151,7 +149,6 @@ body {
   padding-top: 96px;
 }
 
-/* ===== Catálogo: solo las 3 piezas comerciales ===== */
 .dl #productos .dl-product-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   gap: 22px !important;
@@ -306,13 +303,7 @@ body {
 }
 
 .dl .dl-login::before {
-  content: "Iniciar sesión" !important;
-  display: inline-block !important;
-  color: #fff !important;
-}
-
-.dl .dl-login {
-  font-size: 0 !important;
+  content: none !important;
 }
 
 .dl .dl-login:hover {
