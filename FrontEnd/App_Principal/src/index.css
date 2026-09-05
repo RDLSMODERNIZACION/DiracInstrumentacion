@@ -477,3 +477,57 @@ body {
     min-height: 520px;
   }
 }
+
+/* Corrección definitiva catálogo: 3 piezas reales, sin hover que reemplace imágenes */
+.dl #productos .dl-product-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 22px !important;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media img,
+.dl #productos .dl-product:nth-child(2) .dl-product-media img,
+.dl #productos .dl-product:nth-child(3) .dl-product-media img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+.dl #productos .dl-product .dl-product-media::before,
+.dl #productos .dl-product .dl-product-media::after {
+  display: none !important;
+  content: none !important;
+  background-image: none !important;
+}
+
+.dl #productos .dl-product-media {
+  height: 650px !important;
+  min-height: 650px !important;
+  padding: 8px !important;
+  background: #fff !important;
+}
+
+.dl #productos .dl-product {
+  border-radius: 22px !important;
+  background: #fff !important;
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .dl #productos .dl-product-media {
+    height: 600px !important;
+    min-height: 600px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .dl #productos .dl-product-media {
+    height: 560px !important;
+    min-height: 560px !important;
+  }
+}
