@@ -3,7 +3,7 @@ import React from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 
-const navItem = (to: string, label: string) =>
+const navItem = () =>
   ({ isActive }: { isActive: boolean }) =>
     `block px-2 py-1 rounded ${isActive ? "bg-slate-200" : "hover:bg-slate-100"}`;
 
@@ -18,26 +18,28 @@ export default function AdminLayout() {
         </Link>
 
         <nav className="space-y-1 text-sm">
-          <NavLink to="/companies" className={navItem("/companies", "Empresas")}>
+          <NavLink to="/companies" className={navItem()}>
             Empresas
           </NavLink>
-          <NavLink to="/users" className={navItem("/users", "Usuarios")}>
+          <NavLink to="/users" className={navItem()}>
             Usuarios
           </NavLink>
-          <NavLink to="/locations" className={navItem("/locations", "Localizaciones")}>
+          <NavLink to="/activity" className={navItem()}>
+            Actividad de usuarios
+          </NavLink>
+          <NavLink to="/locations" className={navItem()}>
             Localizaciones
           </NavLink>
-          <NavLink to="/tanks" className={navItem("/tanks", "Tanques")}>
+          <NavLink to="/tanks" className={navItem()}>
             Tanques
           </NavLink>
-          <NavLink to="/pumps" className={navItem("/pumps", "Bombas")}>
+          <NavLink to="/pumps" className={navItem()}>
             Bombas
           </NavLink>
-          <NavLink to="/valves" className={navItem("/valves", "Válvulas")}>
+          <NavLink to="/valves" className={navItem()}>
             Válvulas
           </NavLink>
-          {/* 👇 Nuevo item */}
-          <NavLink to="/manifolds" className={navItem("/manifolds", "Manifolds")}>
+          <NavLink to="/manifolds" className={navItem()}>
             Manifolds
           </NavLink>
         </nav>
@@ -50,7 +52,7 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 p-6">
+      <main className="flex-1 p-6 min-w-0">
         <Outlet />
       </main>
     </div>
