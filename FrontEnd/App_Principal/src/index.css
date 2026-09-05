@@ -367,8 +367,9 @@ body {
   position: absolute;
   inset: 0;
   background-position: center;
-  background-size: cover;
+  background-size: contain;
   background-repeat: no-repeat;
+  background-color: #fff;
   transition: transform .45s ease, opacity .35s ease;
 }
 
@@ -378,7 +379,7 @@ body {
 
 .dl #productos .dl-product:nth-child(1):hover .dl-product-media::before {
   background-image: url('/img/productos/luminaria-solar-all-in-one.png');
-  transform: scale(1.025);
+  transform: none;
 }
 
 .dl #productos .dl-product:nth-child(2) .dl-product-media::before {
@@ -386,5 +387,42 @@ body {
 }
 
 .dl #productos .dl-product:nth-child(2):hover .dl-product-media::before {
-  transform: scale(1.025);
+  transform: none;
+}
+
+/* Catálogo limpio: mostrar la pieza completa, sin overlays ni iconos */
+.dl #productos .dl-product {
+  grid-template-rows: 360px 1fr;
+}
+
+.dl #productos .dl-product-media {
+  background: #fff;
+}
+
+.dl #productos .dl-product-media::after,
+.dl #productos .dl-product-icon {
+  display: none !important;
+}
+
+.dl #productos .dl-product-media img {
+  object-fit: contain !important;
+  background: #fff;
+  transform: none !important;
+}
+
+.dl #productos .dl-product:hover .dl-product-media img,
+.dl #productos .dl-product:hover .dl-product-media::before {
+  transform: none !important;
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product {
+    grid-template-rows: 330px 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product {
+    grid-template-rows: 390px 1fr;
+  }
 }
