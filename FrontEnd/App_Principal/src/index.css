@@ -2,7 +2,201 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tus estilos personalizados */
 body {
   @apply bg-slate-50 text-slate-800;
+}
+
+/* Sección Nuestro equipo — landing pública */
+.dl #equipo {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 86% 8%, rgba(118, 201, 68, .10), transparent 26%),
+    radial-gradient(circle at 8% 78%, rgba(31, 84, 126, .08), transparent 30%),
+    linear-gradient(180deg, #f8fafb 0%, #f2f6f7 100%);
+}
+
+.dl #equipo::before {
+  content: "";
+  position: absolute;
+  width: 620px;
+  height: 620px;
+  right: -240px;
+  top: -300px;
+  border: 1px solid rgba(7, 21, 37, .055);
+  border-radius: 42% 58% 65% 35%;
+  transform: rotate(18deg);
+  pointer-events: none;
+}
+
+.dl #equipo .dl-section-head {
+  position: relative;
+  z-index: 2;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, .62fr);
+  align-items: end;
+  margin-bottom: 34px;
+}
+
+.dl #equipo .dl-section-head h2 {
+  max-width: 760px;
+  font-size: clamp(42px, 5vw, 68px);
+  letter-spacing: -.055em;
+  line-height: .98;
+}
+
+.dl #equipo .dl-section-head p {
+  max-width: 460px;
+  padding-left: 22px;
+  border-left: 2px solid rgba(118, 201, 68, .75);
+  color: #536174;
+}
+
+.dl #equipo .dl-project-grid {
+  position: relative;
+  z-index: 2;
+  gap: 22px;
+}
+
+.dl #equipo .dl-project {
+  min-height: 520px;
+  border: 1px solid rgba(7, 21, 37, .10);
+  border-radius: 30px;
+  box-shadow: 0 26px 70px rgba(7, 21, 37, .12);
+  isolation: isolate;
+  background: #0a1c2d;
+  transition: transform .35s ease, box-shadow .35s ease;
+}
+
+.dl #equipo .dl-project:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 34px 86px rgba(7, 21, 37, .17);
+}
+
+.dl #equipo .dl-project img {
+  filter: saturate(.94) contrast(1.02) brightness(1.03);
+  transform: scale(1.001);
+}
+
+.dl #equipo .dl-project:hover img {
+  transform: scale(1.045);
+}
+
+.dl #equipo .dl-project::after {
+  background:
+    linear-gradient(to top, rgba(3, 14, 25, .98) 0%, rgba(3, 14, 25, .88) 26%, rgba(3, 14, 25, .30) 62%, rgba(3, 14, 25, .03) 100%);
+}
+
+.dl #equipo .dl-project::before {
+  content: "HABILITADO PARA CAMPOS PETROLEROS";
+  position: absolute;
+  z-index: 3;
+  top: 22px;
+  right: 22px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid rgba(255,255,255,.23);
+  border-radius: 999px;
+  background: rgba(5, 21, 34, .76);
+  backdrop-filter: blur(12px);
+  color: #e8f7df;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .09em;
+  box-shadow: 0 10px 28px rgba(0,0,0,.16);
+}
+
+.dl #equipo .dl-project-copy {
+  padding: 30px 30px 32px;
+}
+
+.dl #equipo .dl-project-copy small {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 11px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: rgba(118, 201, 68, .15);
+  border: 1px solid rgba(150, 225, 105, .28);
+  color: #b9ef98;
+  letter-spacing: .10em;
+}
+
+.dl #equipo .dl-project-copy h3 {
+  max-width: 520px;
+  margin: 5px 0 10px;
+  font-size: clamp(28px, 2.5vw, 38px);
+  letter-spacing: -.045em;
+}
+
+.dl #equipo .dl-project-copy p {
+  max-width: 560px;
+  color: rgba(244, 248, 250, .74);
+  font-size: 14px;
+  line-height: 1.62;
+}
+
+/* Barra de capacidades integrada debajo de las unidades */
+.dl #equipo .dl-project-grid::after {
+  content: "UNIDADES PROPIAS   •   SOPORTE TÉCNICO   •   OPERACIÓN EN YACIMIENTOS   •   MOVILIDAD 4x4";
+  grid-column: 1 / -1;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 22px;
+  border: 1px solid rgba(7, 21, 37, .08);
+  border-radius: 17px;
+  background: rgba(255,255,255,.72);
+  backdrop-filter: blur(12px);
+  color: #465466;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  word-spacing: .25em;
+  text-align: center;
+  box-shadow: 0 12px 34px rgba(7,21,37,.06);
+}
+
+@media (max-width: 980px) {
+  .dl #equipo .dl-section-head {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .dl #equipo .dl-section-head p {
+    max-width: 680px;
+  }
+  .dl #equipo .dl-project {
+    min-height: 470px;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #equipo .dl-section-head h2 {
+    font-size: 38px;
+  }
+  .dl #equipo .dl-section-head p {
+    padding-left: 16px;
+  }
+  .dl #equipo .dl-project {
+    min-height: 430px;
+    border-radius: 24px;
+  }
+  .dl #equipo .dl-project::before {
+    top: 14px;
+    right: 14px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 8px;
+  }
+  .dl #equipo .dl-project-copy {
+    padding: 24px;
+  }
+  .dl #equipo .dl-project-grid::after {
+    justify-content: flex-start;
+    font-size: 9px;
+    line-height: 1.5;
+  }
 }
