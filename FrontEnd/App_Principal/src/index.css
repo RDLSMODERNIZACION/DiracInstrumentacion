@@ -129,6 +129,7 @@ body {
   margin: 5px 0 10px;
   font-size: clamp(28px, 2.5vw, 38px);
   letter-spacing: -.045em;
+  display: none;
 }
 
 .dl #equipo .dl-project-copy p {
