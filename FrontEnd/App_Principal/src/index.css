@@ -426,3 +426,54 @@ body {
     grid-template-rows: 390px 1fr;
   }
 }
+
+/* Catálogo visual puro: solo la imagen, sin textos ni acciones */
+.dl #productos .dl-product {
+  display: block !important;
+  min-height: 0 !important;
+  background: #fff;
+  border: 1px solid rgba(7,21,37,.08);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 14px 36px rgba(7,21,37,.06);
+}
+
+.dl #productos .dl-product-copy {
+  display: none !important;
+}
+
+.dl #productos .dl-product-media {
+  height: 500px !important;
+  min-height: 500px;
+  display: block;
+  background: #fff;
+}
+
+.dl #productos .dl-product-media img,
+.dl #productos .dl-product-media::before {
+  width: 100%;
+  height: 100%;
+  object-fit: contain !important;
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+}
+
+.dl #productos .dl-product:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 22px 48px rgba(7,21,37,.10);
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product-media {
+    height: 470px !important;
+    min-height: 470px;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product-media {
+    height: 520px !important;
+    min-height: 520px;
+  }
+}
