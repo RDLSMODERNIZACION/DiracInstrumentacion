@@ -139,7 +139,6 @@ body {
   line-height: 1.62;
 }
 
-/* Barra de capacidades integrada debajo de las unidades */
 .dl #equipo .dl-project-grid::after {
   content: "UNIDADES PROPIAS   •   SOPORTE TÉCNICO   •   OPERACIÓN EN YACIMIENTOS   •   MOVILIDAD 4x4";
   grid-column: 1 / -1;
@@ -161,7 +160,6 @@ body {
   box-shadow: 0 12px 34px rgba(7,21,37,.06);
 }
 
-/* Franja solar entre Nuestro equipo y Catálogo */
 .dl #equipo::after {
   content: "ENERGÍA SOLAR   •   ON-GRID — AUTOCONSUMO Y AHORRO   •   OFF-GRID — AUTONOMÍA PARA SITIOS REMOTOS";
   position: relative;
@@ -250,7 +248,6 @@ body {
   }
 }
 
-/* ===== Ajuste 2026-09-05: equipo con un solo camión + layout dividido ===== */
 .dl #equipo > .dl-shell {
   display: grid;
   grid-template-columns: minmax(300px, .78fr) minmax(520px, 1.22fr);
@@ -297,7 +294,6 @@ body {
   content: "UNIDAD PROPIA   •   TRABAJOS EN ALTURA   •   CAMPOS PETROLEROS   •   ASISTENCIA TÉCNICA";
 }
 
-/* Franja solar full-bleed, de punta a punta */
 .dl #equipo::after {
   width: 100vw;
   max-width: none;
@@ -356,5 +352,182 @@ body {
     margin-bottom: -22px;
     font-size: 11px;
     line-height: 1.55;
+  }
+}
+
+/* Catálogo: usar imágenes comerciales identificadas en /public/img/productos */
+.dl #productos .dl-product:nth-child(1) .dl-product-media img,
+.dl #productos .dl-product:nth-child(2) .dl-product-media img {
+  display: none;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media::before,
+.dl #productos .dl-product:nth-child(2) .dl-product-media::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-color: #fff;
+  transition: transform .45s ease, opacity .35s ease;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media::before {
+  background-image: url('/img/productos/luminaria-solar-400w.png');
+}
+
+.dl #productos .dl-product:nth-child(1):hover .dl-product-media::before {
+  background-image: url('/img/productos/luminaria-solar-all-in-one.png');
+  transform: none;
+}
+
+.dl #productos .dl-product:nth-child(2) .dl-product-media::before {
+  background-image: url('/img/productos/panel-solar-alto-rendimiento.png');
+}
+
+.dl #productos .dl-product:nth-child(2):hover .dl-product-media::before {
+  transform: none;
+}
+
+/* Catálogo limpio: mostrar la pieza completa, sin overlays ni iconos */
+.dl #productos .dl-product {
+  grid-template-rows: 360px 1fr;
+}
+
+.dl #productos .dl-product-media {
+  background: #fff;
+}
+
+.dl #productos .dl-product-media::after,
+.dl #productos .dl-product-icon {
+  display: none !important;
+}
+
+.dl #productos .dl-product-media img {
+  object-fit: contain !important;
+  background: #fff;
+  transform: none !important;
+}
+
+.dl #productos .dl-product:hover .dl-product-media img,
+.dl #productos .dl-product:hover .dl-product-media::before {
+  transform: none !important;
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product {
+    grid-template-rows: 330px 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product {
+    grid-template-rows: 390px 1fr;
+  }
+}
+
+/* Catálogo visual puro: solo la imagen, sin textos ni acciones */
+.dl #productos .dl-product {
+  display: block !important;
+  min-height: 0 !important;
+  background: #fff;
+  border: 1px solid rgba(7,21,37,.08);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 14px 36px rgba(7,21,37,.06);
+}
+
+.dl #productos .dl-product-copy {
+  display: none !important;
+}
+
+.dl #productos .dl-product-media {
+  height: 500px !important;
+  min-height: 500px;
+  display: block;
+  background: #fff;
+}
+
+.dl #productos .dl-product-media img,
+.dl #productos .dl-product-media::before {
+  width: 100%;
+  height: 100%;
+  object-fit: contain !important;
+  background-size: contain !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+}
+
+.dl #productos .dl-product:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 22px 48px rgba(7,21,37,.10);
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product-media {
+    height: 470px !important;
+    min-height: 470px;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product-media {
+    height: 520px !important;
+    min-height: 520px;
+  }
+}
+
+/* Corrección definitiva catálogo: 3 piezas reales, sin hover que reemplace imágenes */
+.dl #productos .dl-product-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 22px !important;
+}
+
+.dl #productos .dl-product:nth-child(1) .dl-product-media img,
+.dl #productos .dl-product:nth-child(2) .dl-product-media img,
+.dl #productos .dl-product:nth-child(3) .dl-product-media img {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+.dl #productos .dl-product .dl-product-media::before,
+.dl #productos .dl-product .dl-product-media::after {
+  display: none !important;
+  content: none !important;
+  background-image: none !important;
+}
+
+.dl #productos .dl-product-media {
+  height: 650px !important;
+  min-height: 650px !important;
+  padding: 8px !important;
+  background: #fff !important;
+}
+
+.dl #productos .dl-product {
+  border-radius: 22px !important;
+  background: #fff !important;
+}
+
+@media (max-width: 980px) {
+  .dl #productos .dl-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .dl #productos .dl-product-media {
+    height: 600px !important;
+    min-height: 600px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl #productos .dl-product-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .dl #productos .dl-product-media {
+    height: 560px !important;
+    min-height: 560px !important;
   }
 }
