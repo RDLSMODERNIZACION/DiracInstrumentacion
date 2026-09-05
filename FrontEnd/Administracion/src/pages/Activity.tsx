@@ -1,5 +1,4 @@
 import React from "react";
-import { useApi } from "../lib/api";
 
 type ActivityRow = {
   id: number;
@@ -21,6 +20,22 @@ type ActivityRow = {
   duration_minutes?: number | string | null;
   is_online?: boolean;
 };
+
+function apiBase() {
+  const env = (import.meta as any)?.env?.VITE_API_BASE?.trim?.();
+  if (env) return env;
+  return "https://diracinstrumentacion.onrender.com";
+}
+
+function mainAuthHeader(): Record<string, string> {
+  try {
+    const raw = sessionStorage.getItem("dirac.basic");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed?.basicToken) return { Authorization: parsed.basicToken };
+  } catch {}
+  return {};
+}
 
 function fmtDate(value?: string | null) {
   if (!value) return "—";
@@ -49,7 +64,6 @@ function locationLabel(row: ActivityRow) {
 }
 
 export default function Activity() {
-  const { getJSON } = useApi();
   const [rows, setRows] = React.useState<ActivityRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
@@ -57,14 +71,27 @@ export default function Activity() {
   const load = React.useCallback(async () => {
     try {
       setError("");
-      const data = await getJSON("/dirac/activity/sessions?limit=200");
+      const headers = mainAuthHeader();
+      if (!headers.Authorization) {
+        throw new Error("No se encontró la sesión del usuario principal. Entrá a Administración desde el panel principal.");
+      }
+
+      const res = await fetch(`${apiBase()}/dirac/activity/sessions?limit=200`, {
+        headers: { Accept: "application/json", ...headers },
+        cache: "no-store",
+      });
+
+      if (res.status === 403) throw new Error("Tu usuario no tiene permisos para ver la actividad.");
+      if (!res.ok) throw new Error(`Error ${res.status} al cargar actividad`);
+
+      const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
       setLoading(false);
     }
-  }, [getJSON]);
+  }, []);
 
   React.useEffect(() => {
     load();
