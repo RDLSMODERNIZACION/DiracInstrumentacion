@@ -33,6 +33,23 @@ function clientInfo() {
 export default function ActivityTracker({ section }: { section: string }) {
   const api = useAuthedFetch();
   const sessionRef = React.useRef<number | null>(null);
+  const [activeSection, setActiveSection] = React.useState(section);
+
+  React.useEffect(() => {
+    setActiveSection(section);
+  }, [section]);
+
+  React.useEffect(() => {
+    const known = new Set(["Operaciones", "KPIs", "Infraestructura", "Administración", "Actividad"]);
+    const onClick = (event: MouseEvent) => {
+      const el = event.target as HTMLElement | null;
+      const button = el?.closest?.("button");
+      const label = button?.textContent?.trim() || "";
+      if (known.has(label)) setActiveSection(label === "Actividad" ? "Actividad de usuarios" : label);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
 
   const ensureSession = React.useCallback(async () => {
     if (sessionRef.current) return sessionRef.current;
@@ -47,7 +64,7 @@ export default function ActivityTracker({ section }: { section: string }) {
       method: "POST",
       body: JSON.stringify({
         ...clientInfo(),
-        current_section: section,
+        current_section: activeSection,
         current_path: window.location.pathname,
       }),
     });
@@ -60,7 +77,7 @@ export default function ActivityTracker({ section }: { section: string }) {
     sessionRef.current = id;
     sessionStorage.setItem(SESSION_KEY, String(id));
     return id;
-  }, [api, section]);
+  }, [api, activeSection]);
 
   const ping = React.useCallback(async () => {
     try {
@@ -70,7 +87,7 @@ export default function ActivityTracker({ section }: { section: string }) {
         method: "POST",
         body: JSON.stringify({
           session_id: sessionId,
-          current_section: section,
+          current_section: activeSection,
           current_path: window.location.pathname,
         }),
       });
@@ -81,7 +98,7 @@ export default function ActivityTracker({ section }: { section: string }) {
     } catch {
       // Auditoría no debe interrumpir la operación del SCADA.
     }
-  }, [api, ensureSession, section]);
+  }, [api, ensureSession, activeSection]);
 
   React.useEffect(() => {
     ping();
