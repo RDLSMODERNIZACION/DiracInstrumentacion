@@ -160,6 +160,36 @@ body {
   box-shadow: 0 12px 34px rgba(7,21,37,.06);
 }
 
+/* Franja solar entre Nuestro equipo y Catálogo */
+.dl #equipo::after {
+  content: "ENERGÍA SOLAR   •   ON-GRID — AUTOCONSUMO Y AHORRO   •   OFF-GRID — AUTONOMÍA PARA SITIOS REMOTOS";
+  position: relative;
+  z-index: 3;
+  width: min(1200px, calc(100% - 40px));
+  min-height: 118px;
+  margin: 42px auto -30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 34px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 24px;
+  background:
+    linear-gradient(90deg, rgba(4,18,31,.95) 0%, rgba(5,28,46,.82) 45%, rgba(10,49,62,.74) 100%),
+    url('/img/paneles-solares.jpg') center 58% / cover no-repeat;
+  color: #f5fbff;
+  text-align: center;
+  font-size: clamp(13px, 1.35vw, 17px);
+  font-weight: 850;
+  letter-spacing: .075em;
+  line-height: 1.65;
+  box-shadow: 0 24px 70px rgba(7,21,37,.18);
+}
+
+.dl #equipo + #productos {
+  padding-top: 96px;
+}
+
 @media (max-width: 980px) {
   .dl #equipo .dl-section-head {
     grid-template-columns: 1fr;
@@ -170,6 +200,12 @@ body {
   }
   .dl #equipo .dl-project {
     min-height: 470px;
+  }
+  .dl #equipo::after {
+    min-height: 104px;
+    margin-top: 34px;
+    padding: 22px 26px;
+    letter-spacing: .05em;
   }
 }
 
@@ -198,5 +234,17 @@ body {
     justify-content: flex-start;
     font-size: 9px;
     line-height: 1.5;
+  }
+  .dl #equipo::after {
+    width: min(100% - 28px, 1200px);
+    min-height: 96px;
+    margin: 30px auto -24px;
+    border-radius: 20px;
+    padding: 18px 20px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .dl #equipo + #productos {
+    padding-top: 82px;
   }
 }
