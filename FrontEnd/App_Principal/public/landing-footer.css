@@ -1,0 +1,172 @@
+/* Refinamiento visual del bloque de contacto y footer de la landing */
+.dl .dl-cta {
+  position: relative !important;
+  overflow: hidden !important;
+  padding: 92px 0 52px !important;
+  border-top: 1px solid rgba(7, 21, 37, .06) !important;
+  background:
+    radial-gradient(circle at 12% 14%, rgba(118, 201, 68, .13), transparent 24%),
+    radial-gradient(circle at 88% 10%, rgba(12, 54, 82, .10), transparent 26%),
+    linear-gradient(180deg, #f8fbf9 0%, #edf3f1 100%) !important;
+}
+
+.dl .dl-cta::before {
+  content: "";
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  right: -220px;
+  bottom: -330px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(118, 201, 68, .16), transparent 68%);
+  pointer-events: none;
+}
+
+.dl .dl-cta-inner {
+  position: relative !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.15fr) minmax(330px, .7fr) !important;
+  align-items: center !important;
+  gap: 46px !important;
+  padding: 44px 46px !important;
+  border: 1px solid rgba(7, 21, 37, .08) !important;
+  border-radius: 30px !important;
+  background: rgba(255,255,255,.86) !important;
+  backdrop-filter: blur(14px) !important;
+  box-shadow: 0 28px 72px rgba(7,21,37,.09) !important;
+}
+
+.dl .dl-cta-inner > div:first-child::before {
+  content: "COTIZACIONES Y CONSULTAS";
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: #4e9c27;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: .13em;
+}
+
+.dl .dl-cta-inner > div:first-child::after {
+  content: "";
+  position: absolute;
+}
+
+.dl .dl-cta h2 {
+  margin: 0 !important;
+  max-width: 760px !important;
+  font-size: clamp(38px, 4.3vw, 58px) !important;
+  line-height: 1.02 !important;
+  letter-spacing: -.05em !important;
+  color: #071525 !important;
+}
+
+.dl .dl-cta p {
+  margin: 14px 0 0 !important;
+  max-width: 650px !important;
+  color: #687588 !important;
+  font-size: 17px !important;
+  line-height: 1.65 !important;
+}
+
+.dl .dl-contact {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 12px !important;
+  width: 100% !important;
+}
+
+.dl .dl-contact a {
+  min-height: 54px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 9px !important;
+  padding: 0 18px !important;
+  border: 1px solid rgba(7, 21, 37, .10) !important;
+  border-radius: 14px !important;
+  background: #fff !important;
+  color: #071525 !important;
+  font-size: 13px !important;
+  font-weight: 850 !important;
+  box-shadow: 0 10px 28px rgba(7,21,37,.05) !important;
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease !important;
+}
+
+.dl .dl-contact a:last-child {
+  grid-column: 1 / -1 !important;
+  background: #071525 !important;
+  color: #fff !important;
+  border-color: #071525 !important;
+}
+
+.dl .dl-contact a:hover {
+  transform: translateY(-2px) !important;
+  border-color: rgba(118,201,68,.55) !important;
+  box-shadow: 0 16px 34px rgba(7,21,37,.11) !important;
+}
+
+.dl .dl-contact a:last-child:hover {
+  background: #0b253e !important;
+}
+
+.dl .dl-footer {
+  padding: 26px 0 !important;
+  border-top: 1px solid rgba(255,255,255,.06) !important;
+  background: linear-gradient(180deg, #081927 0%, #061525 100%) !important;
+  color: rgba(238,244,248,.62) !important;
+  font-size: 13px !important;
+}
+
+.dl .dl-footer-inner {
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 24px !important;
+  flex-wrap: wrap !important;
+}
+
+.dl .dl-footer strong {
+  color: #fff !important;
+}
+
+@media (max-width: 980px) {
+  .dl .dl-cta-inner {
+    grid-template-columns: 1fr !important;
+    gap: 30px !important;
+  }
+  .dl .dl-contact {
+    max-width: 620px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .dl .dl-cta {
+    padding: 68px 0 34px !important;
+  }
+  .dl .dl-cta-inner {
+    padding: 28px 22px !important;
+    border-radius: 22px !important;
+  }
+  .dl .dl-cta h2 {
+    font-size: 36px !important;
+  }
+  .dl .dl-cta p {
+    font-size: 15px !important;
+  }
+  .dl .dl-contact {
+    grid-template-columns: 1fr !important;
+  }
+  .dl .dl-contact a:last-child {
+    grid-column: auto !important;
+  }
+  .dl .dl-footer-inner {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+}
