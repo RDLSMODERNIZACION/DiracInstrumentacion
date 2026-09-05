@@ -5,6 +5,8 @@ import ScadaApp from "./ScadaApp";
 import { Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Login from "../auth/Login";
 import Landing from "../Landing";
+import ActivityTracker from "../activity/ActivityTracker";
+import ActivityPanel from "../activity/ActivityPanel";
 import { useAuth, useAuthedFetch } from "../../lib/auth";
 
 type MeLocation = {
@@ -177,22 +179,28 @@ export default function AppRoot() {
     );
   }
 
+  const trackedSection = loc.pathname === "/actividad" ? "Actividad de usuarios" : "Aplicación";
+
   return (
-    <Routes>
-      <Route path="/login" element={<Navigate to="/" replace />} />
+    <>
+      <ActivityTracker section={trackedSection} />
+      <Routes>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/actividad" element={<ActivityPanel />} />
 
-      <Route
-        path="/*"
-        element={
-          <ScadaApp
-            initialUser={user}
-            allowedLocationIds={allowedLocationIds}
-            selectedCompanyId={companyId}
-          />
-        }
-      />
+        <Route
+          path="/*"
+          element={
+            <ScadaApp
+              initialUser={user}
+              allowedLocationIds={allowedLocationIds}
+              selectedCompanyId={companyId}
+            />
+          }
+        />
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
