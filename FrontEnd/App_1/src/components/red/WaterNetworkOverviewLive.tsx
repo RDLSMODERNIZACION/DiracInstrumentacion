@@ -39,6 +39,11 @@ type Props = {
   onSelectTankIds?: (ids: number[] | "all") => void;
 };
 
+// Tanques que pertenecen a DISTRIBUCIÓN.
+// El TK 160 (id 21, Planta Nueva) pertenece a IMPULSIÓN y no debe
+// mostrarse ni participar de los promedios/gráficos de tanques de distribución.
+const DISTRIBUTION_TANK_IDS = [7, 8, 9, 10, 11, 12];
+
 function cleanLocation(v?: string | null) {
   const s = String(v ?? "").trim();
   if (!s) return "Sin ubicación";
@@ -102,6 +107,13 @@ export default function WaterNetworkOverviewLive({
   const [editValues, setEditValues] = useState<
     Record<number, { disponible: boolean; descripcion: string }>
   >({});
+
+  // Al entrar a la vista principal dejamos seleccionado exclusivamente el
+  // conjunto de distribución. Así TK 160 / Planta Nueva no entra en el
+  // TankLevelChart ni en los promedios derivados de tankTs.
+  useEffect(() => {
+    onSelectTankIds?.(DISTRIBUTION_TANK_IDS);
+  }, [onSelectTankIds]);
 
   useEffect(() => {
     let mounted = true;
@@ -257,7 +269,7 @@ export default function WaterNetworkOverviewLive({
   }, [availability, pumpLayout, pumpSummaryById]);
 
   const tankGroups = useMemo(() => {
-    const PRINCIPAL = new Set([7, 8, 9, 10, 11, 12, 21]);
+    const PRINCIPAL = new Set(DISTRIBUTION_TANK_IDS);
     const groups = new Map<string, any[]>();
 
     for (const id of PRINCIPAL) {
@@ -474,14 +486,14 @@ export default function WaterNetworkOverviewLive({
           <div className="mb-3">
             <button
               type="button"
-              onClick={() => onSelectTankIds?.("all")}
+              onClick={() => onSelectTankIds?.(DISTRIBUTION_TANK_IDS)}
               className="text-left text-sm font-bold text-slate-800 transition hover:text-blue-700"
-              title="Ver todos los tanques principales"
+              title="Ver todos los tanques principales de distribución"
             >
               Tanques de distribución
             </button>
             <div className="text-xs text-slate-400">
-              Principales: Hormigón, TK 1000, TK1, TK2, TK3, Pulmón y TK 160
+              Principales: Hormigón, TK 1000, TK1, TK2, TK3 y Pulmón
             </div>
           </div>
 
