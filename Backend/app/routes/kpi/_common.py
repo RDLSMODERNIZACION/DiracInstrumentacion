@@ -1,11 +1,16 @@
 # app/routes/kpi/_common.py
 import logging
+import os
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, List, Any
 
 logger = logging.getLogger("kpi")
 LOCAL_TZ = "America/Argentina/Buenos_Aires"
+
+# Ventana única de conexión para dispositivos mostrados en Operaciones.
+# Bombas y tanques permanecen visibles hasta superar este tiempo sin datos.
+DEVICE_CONNECTED_WINDOW_MIN = int(os.getenv("DEVICE_CONNECTED_WINDOW_MIN", "3"))
 
 # ==== helpers de tiempo ====
 def _ft_defaults(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
@@ -63,7 +68,7 @@ def _log_distinct_company_of_locations(cur, endpoint: str, company_id: Optional[
         logger.exception("[KPI] %s error auditando company_id de locations: %s", endpoint, e)
 
 __all__ = [
-    "logger", "LOCAL_TZ",
+    "logger", "LOCAL_TZ", "DEVICE_CONNECTED_WINDOW_MIN",
     "_ft_defaults", "_as_float", "_as_int", "_as_bool",
     "_compute_alarm", "_log_scope", "_log_rows", "_log_distinct_company_of_locations",
 ]
