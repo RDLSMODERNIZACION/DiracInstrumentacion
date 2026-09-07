@@ -13,6 +13,7 @@ from app.db import get_conn
 from ._common import (
     logger,
     LOCAL_TZ,
+    DEVICE_CONNECTED_WINDOW_MIN,
     _ft_defaults,
     _log_scope,
     _log_rows,
@@ -405,13 +406,14 @@ def operation_tanks_summary_24h(
     Optimizado:
       - No usa kpi.v_operation_tank_summary_24h.
       - Calcula directo desde public.tank_ingest.
-      - Usa kpi.v_tanks_with_config solo para umbrales/config/online.
+      - Usa kpi.v_tanks_with_config solo para umbrales/config.
+      - El estado online se calcula con la misma ventana que bombas.
     """
     ids = _parse_ids(tank_ids)
 
     dt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     df = dt - timedelta(hours=24)
-    online_from = dt - timedelta(minutes=5)
+    online_from = dt - timedelta(minutes=DEVICE_CONNECTED_WINDOW_MIN)
 
     sql_items = f"""
         with scope as (
@@ -475,8 +477,6 @@ def operation_tanks_summary_24h(
                 c.low_low_pct,
                 c.high_pct,
                 c.high_high_pct,
-                c.age_sec,
-                c.online,
                 c.alarma
             from {TANKS_WITH_CONFIG_VIEW} c
             join scope s
@@ -508,17 +508,17 @@ def operation_tanks_summary_24h(
                 cfg.high_high_pct,
 
                 case
-                    when cfg.age_sec is not null then cfg.age_sec
                     when latest.last_level_at is not null then
                         extract(epoch from (%(dt)s::timestamptz - latest.last_level_at))::int
                     else null
                 end as age_sec,
 
-                coalesce(
-                    cfg.online,
-                    latest.last_level_at is not null and latest.last_level_at >= %(online_from)s,
-                    false
-                ) as online,
+                case
+                    when latest.last_level_at is not null
+                     and latest.last_level_at >= %(online_from)s
+                    then true
+                    else false
+                end as online,
 
                 coalesce(cfg.alarma, 'normal') as alarma
 
