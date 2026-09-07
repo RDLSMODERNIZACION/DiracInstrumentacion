@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, HTTPException, Header
 from psycopg.rows import dict_row
 
 from app.db import get_conn
+from ._common import DEVICE_CONNECTED_WINDOW_MIN
 
 router = APIRouter(prefix="/kpi/bombas", tags=["kpi-bombas"])
 
@@ -33,7 +34,7 @@ OP_PUMP_EVENTS = (
     os.getenv("OP_PUMP_EVENTS") or "kpi.v_operation_pump_events"
 ).strip()
 
-PUMP_CONNECTED_WINDOW_MIN = int(os.getenv("PUMP_CONNECTED_WINDOW_MIN", "5"))
+PUMP_CONNECTED_WINDOW_MIN = DEVICE_CONNECTED_WINDOW_MIN
 
 DEFAULT_BUCKET = (os.getenv("KPI_PUMPS_BUCKET") or "5min").strip()
 
