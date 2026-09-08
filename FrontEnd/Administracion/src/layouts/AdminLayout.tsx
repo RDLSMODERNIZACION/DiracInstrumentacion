@@ -8,19 +8,19 @@ const navItem = () =>
     `block px-2 py-1 rounded ${isActive ? "bg-slate-200" : "hover:bg-slate-100"}`;
 
 export default function AdminLayout() {
-  const { logout, email } = useAuth();
+  const { logout, email, companyName } = useAuth();
 
   return (
     <div className="min-h-screen flex">
       <aside className="w-64 bg-white border-r p-4 flex flex-col">
-        <Link to="/" className="block font-bold mb-4">
+        <Link to="/" className="block font-bold mb-1">
           DIRAC Admin
         </Link>
+        <div className="mb-4 text-xs font-semibold text-slate-500">
+          {companyName ?? "Empresa"}
+        </div>
 
         <nav className="space-y-1 text-sm">
-          <NavLink to="/companies" className={navItem()}>
-            Empresas
-          </NavLink>
           <NavLink to="/users" className={navItem()}>
             Usuarios
           </NavLink>
@@ -44,9 +44,10 @@ export default function AdminLayout() {
           </NavLink>
         </nav>
 
-        <div className="mt-auto pt-4 text-xs text-slate-500">
-          <div>{email}</div>
-          <button onClick={logout} className="underline">
+        <div className="mt-auto pt-4 text-xs text-slate-500 border-t">
+          <div className="font-semibold text-slate-700">{companyName}</div>
+          <div className="mt-1">{email}</div>
+          <button onClick={logout} className="mt-2 underline">
             Salir
           </button>
         </div>
