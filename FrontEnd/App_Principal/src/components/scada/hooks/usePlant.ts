@@ -24,10 +24,8 @@ type Tank = {
   location_id?: number | null;
   location_name?: string | null;
   location_display_order?: number | null;
-
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
-
   locationId?: number | null;
   locationName?: string | null;
   location?: {
@@ -36,7 +34,6 @@ type Tank = {
     service_type?: ServiceType | null;
     serviceType?: ServiceType | null;
   };
-
   levelPct?: number | null;
   age_sec?: number | null;
   ageSec?: number | null;
@@ -44,7 +41,6 @@ type Tank = {
   alarm?: "normal" | "alerta" | "critico";
   latest?: any;
   thresholds?: Thresholds;
-
   material?: string | null;
   fluid?: string | null;
   install_year?: number | null;
@@ -52,7 +48,6 @@ type Tank = {
   location_text?: string | null;
   locationText?: string | null;
   capacity_m3?: number | null;
-
   capacityL?: number | null;
   volumeL?: number | null;
 };
@@ -64,10 +59,8 @@ type Pump = {
   location_id?: number | null;
   location_name?: string | null;
   location_display_order?: number | null;
-
   service_type?: ServiceType | null;
   serviceType?: ServiceType | null;
-
   locationId?: number | null;
   locationName?: string | null;
   location?: {
@@ -76,18 +69,14 @@ type Pump = {
     service_type?: ServiceType | null;
     serviceType?: ServiceType | null;
   };
-
   age_sec?: number | null;
   ageSec?: number | null;
   online?: boolean | null;
-
   latest_event_id?: number | null;
   event_ts?: string | null;
   latest_hb_id?: number | null;
   hb_ts?: string | null;
   latest?: any;
-
-  // ficha técnica de bomba
   brand?: string | null;
   model?: string | null;
   serial_number?: string | null;
@@ -102,7 +91,6 @@ type Pump = {
   start_type?: string | null;
   startType?: string | null;
   criticality?: string | null;
-
   available?: boolean;
   availability_description?: string | null;
   availability_type?: string | null;
@@ -126,6 +114,7 @@ type UsePlant = {
 };
 
 const ONLINE_DEAD_SEC = 180;
+const MIN_VISIBLE_POLL_MS = 5_000;
 
 const API_BASE =
   (window as any).__API_BASE__ ||
@@ -140,8 +129,6 @@ type JsonCacheEntry = {
 
 const JSON_CACHE: Record<string, JsonCacheEntry> = Object.create(null);
 const FRONT_TTL_MS = 8_000;
-
-/** Si tus /tanks/config y /pumps/config ya no requieren auth, dejalo en false para evitar preflight */
 const CONFIG_ENDPOINTS_PUBLIC = true;
 
 function buildHeaders(withAuth: boolean) {
@@ -153,11 +140,13 @@ function buildHeaders(withAuth: boolean) {
 
 async function fetchJSON(path: string, opts?: { withAuth?: boolean }) {
   const withAuth = opts?.withAuth ?? true;
-  const url = `${API_BASE}${path}`;
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${API_BASE}${path}${sep}_live=${Date.now()}`;
 
   const res = await fetch(url, {
     method: "GET",
     headers: buildHeaders(withAuth),
+    cache: "no-store",
   });
 
   if (!res.ok) {
@@ -178,11 +167,10 @@ async function getJSON(
 ) {
   const ttlMs = opts?.ttlMs ?? FRONT_TTL_MS;
   const withAuth = opts?.withAuth ?? true;
-
   const now = Date.now();
   const ent = JSON_CACHE[path];
 
-  if (ent?.data !== undefined && now - ent.ts < ttlMs) {
+  if (ttlMs > 0 && ent?.data !== undefined && now - ent.ts < ttlMs) {
     return ent.data;
   }
 
@@ -264,21 +252,17 @@ function mapTanks(rows: any[]): Tank[] {
 
     const alarm: Tank["alarm"] =
       typeof r.alarma === "string" &&
-      (r.alarma === "normal" ||
-        r.alarma === "alerta" ||
-        r.alarma === "critico")
+      (r.alarma === "normal" || r.alarma === "alerta" || r.alarma === "critico")
         ? r.alarma
         : "normal";
 
     const service_type = extractServiceType(r);
-
     const capacity_m3 = toNumNullable(r.capacity_m3);
     const capacityL = capacity_m3 != null ? capacity_m3 * 1000 : null;
     const volumeL =
       capacityL != null && typeof levelPct === "number"
         ? (capacityL * levelPct) / 100
         : null;
-
     const install_year = toNumNullable(r.install_year ?? r.anio_instalacion);
 
     return {
@@ -286,32 +270,22 @@ function mapTanks(rows: any[]): Tank[] {
       name,
       location_id,
       location_name,
-      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
-
       service_type,
       serviceType: service_type,
-
       online,
       levelPct,
       alarm,
-
       locationId: location_id,
       locationName: location_name,
-      location_display_order: toNumNullable(r.location_display_order),
-      location_display_order,
       location: {
         id: location_id,
         name: location_name,
-      location_display_order: toNumNullable(r.location_display_order),
-      location_display_order,
         service_type,
         serviceType: service_type,
       },
-
       ageSec: age_sec,
       age_sec,
-
       material: r.material ?? null,
       fluid: r.fluid ?? r.fluido ?? null,
       install_year,
@@ -321,7 +295,6 @@ function mapTanks(rows: any[]): Tank[] {
       capacity_m3,
       capacityL,
       volumeL,
-
       thresholds: {
         lowCritical: toNumOr(DEFAULT_THRESHOLDS.lowCritical, r.low_low_pct),
         lowWarning: toNumOr(DEFAULT_THRESHOLDS.lowWarning, r.low_pct),
@@ -340,13 +313,10 @@ function mapPumps(rows: any[]): Pump[] {
     const location_name = r.location_name ?? null;
     const location_display_order = toNumNullable(r.location_display_order);
     const state: "run" | "stop" = r.state === "run" ? "run" : "stop";
-
     const age_sec =
       typeof r.age_sec === "number" ? r.age_sec : toNumNullable(r.age_sec);
     const online = normOnline(r.online, age_sec);
-
     const service_type = extractServiceType(r);
-
     const install_year = toNumNullable(r.install_year);
     const flow_nominal_m3h = toNumNullable(r.flow_nominal_m3h);
     const head_nominal_mca = toNumNullable(r.head_nominal_mca);
@@ -359,35 +329,25 @@ function mapPumps(rows: any[]): Pump[] {
       state,
       location_id,
       location_name,
-      location_display_order: toNumNullable(r.location_display_order),
       location_display_order,
-
       service_type,
       serviceType: service_type,
-
       locationId: location_id,
       locationName: location_name,
-      location_display_order: toNumNullable(r.location_display_order),
-      location_display_order,
       location: {
         id: location_id,
         name: location_name,
-      location_display_order: toNumNullable(r.location_display_order),
-      location_display_order,
         service_type,
         serviceType: service_type,
       },
-
       latest: r.event_ts ? { ts: r.event_ts } : undefined,
       ageSec: age_sec,
       age_sec,
       online,
-
       latest_event_id: r.latest_event_id ?? null,
       event_ts: r.event_ts ?? null,
       latest_hb_id: r.latest_hb_id ?? null,
       hb_ts: r.hb_ts ?? null,
-
       brand: r.brand ?? null,
       model: r.model ?? null,
       serial_number: r.serial_number ?? null,
@@ -402,7 +362,6 @@ function mapPumps(rows: any[]): Pump[] {
       start_type: r.start_type ?? null,
       startType: r.start_type ?? null,
       criticality: r.criticality ?? null,
-
       available:
         typeof r.available === "boolean"
           ? r.available
@@ -470,16 +429,23 @@ export function usePlant(
 
   const fetchAll = React.useCallback(async () => {
     if (inflightRef.current) return;
+    if (document.visibilityState === "hidden") return;
+
     inflightRef.current = true;
 
     try {
       setErr(null);
-
       const withAuthForConfig = !CONFIG_ENDPOINTS_PUBLIC;
 
       const [tanksRes, pumpsRes] = await Promise.allSettled([
-        getFirstJSON(["/tanks/config"], { withAuth: withAuthForConfig }),
-        getFirstJSON(["/pumps/config"], { withAuth: withAuthForConfig }),
+        getFirstJSON(["/tanks/config"], {
+          withAuth: withAuthForConfig,
+          ttlMs: 0,
+        }),
+        getFirstJSON(["/pumps/config"], {
+          withAuth: withAuthForConfig,
+          ttlMs: 0,
+        }),
       ]);
 
       const tanksOk =
@@ -490,7 +456,6 @@ export function usePlant(
       const mappedTanks = tanksOk
         ? mapTanks(tanksRes.value as any[])
         : plantRef.current.tanks;
-
       const mappedPumps = pumpsOk
         ? mapPumps(pumpsRes.value as any[])
         : plantRef.current.pumps;
@@ -502,7 +467,6 @@ export function usePlant(
 
       const passLoc = (locId: any) =>
         !filterSet || (locId != null && filterSet.has(Number(locId)));
-
       const st = opts?.serviceType ?? "all";
       const passSvc = (svc: any) =>
         st === "all" ? true : normServiceType(svc) === st;
@@ -510,7 +474,6 @@ export function usePlant(
       const filtTanks = mappedTanks.filter(
         (t) => passLoc(getLocId(t)) && passSvc(t.service_type ?? t.location?.service_type)
       );
-
       const filtPumps = mappedPumps.filter(
         (p) => passLoc(getLocId(p)) && passSvc(p.service_type ?? p.location?.service_type)
       );
@@ -541,9 +504,16 @@ export function usePlant(
 
   React.useEffect(() => {
     let timer: number | null = null;
+    const effectivePollMs = pollMs > 0 ? Math.max(pollMs, MIN_VISIBLE_POLL_MS) : 0;
 
     const start = () => {
-      if (pollMs > 0 && timer == null) timer = window.setInterval(fetchAll, pollMs);
+      if (
+        effectivePollMs > 0 &&
+        timer == null &&
+        document.visibilityState === "visible"
+      ) {
+        timer = window.setInterval(fetchAll, effectivePollMs);
+      }
     };
 
     const stop = () => {
@@ -553,21 +523,32 @@ export function usePlant(
       }
     };
 
-    fetchAll();
-    start();
+    if (document.visibilityState === "visible") {
+      fetchAll();
+      start();
+    }
+
+    const refreshNow = () => {
+      if (document.visibilityState !== "visible") return;
+      fetchAll();
+      start();
+    };
 
     const onVis = () => {
-      if (document.visibilityState === "hidden") stop();
-      else {
-        fetchAll();
-        start();
+      if (document.visibilityState === "hidden") {
+        stop();
+      } else {
+        refreshNow();
       }
     };
 
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", refreshNow);
+
     return () => {
       stop();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", refreshNow);
     };
   }, [fetchAll, pollMs]);
 
