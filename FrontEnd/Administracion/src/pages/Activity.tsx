@@ -1,4 +1,5 @@
 import React from "react";
+import { useAuth } from "../lib/auth";
 
 type ActivityRow = {
   id: number;
@@ -25,16 +26,6 @@ function apiBase() {
   const env = (import.meta as any)?.env?.VITE_API_BASE?.trim?.();
   if (env) return env;
   return "https://diracinstrumentacion.onrender.com";
-}
-
-function mainAuthHeader(): Record<string, string> {
-  try {
-    const raw = sessionStorage.getItem("dirac.basic");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (parsed?.basicToken) return { Authorization: parsed.basicToken };
-  } catch {}
-  return {};
 }
 
 function fmtDate(value?: string | null) {
@@ -64,6 +55,7 @@ function locationLabel(row: ActivityRow) {
 }
 
 export default function Activity() {
+  const { companyId, companyName, getAuthHeader } = useAuth();
   const [rows, setRows] = React.useState<ActivityRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
@@ -71,17 +63,17 @@ export default function Activity() {
   const load = React.useCallback(async () => {
     try {
       setError("");
-      const headers = mainAuthHeader();
-      if (!headers.Authorization) {
-        throw new Error("No se encontró la sesión del usuario principal. Entrá a Administración desde el panel principal.");
-      }
+      if (companyId == null) throw new Error("No hay una empresa activa para Administración.");
 
-      const res = await fetch(`${apiBase()}/dirac/activity/sessions?limit=200`, {
-        headers: { Accept: "application/json", ...headers },
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `${apiBase()}/dirac/activity/sessions?limit=200&company_id=${companyId}`,
+        {
+          headers: { Accept: "application/json", ...getAuthHeader() },
+          cache: "no-store",
+        }
+      );
 
-      if (res.status === 403) throw new Error("Tu usuario no tiene permisos para ver la actividad.");
+      if (res.status === 403) throw new Error("Tu usuario no tiene permisos para ver la actividad de esta empresa.");
       if (!res.ok) throw new Error(`Error ${res.status} al cargar actividad`);
 
       const data = await res.json();
@@ -91,7 +83,7 @@ export default function Activity() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [companyId, getAuthHeader]);
 
   React.useEffect(() => {
     load();
@@ -109,7 +101,9 @@ export default function Activity() {
         <div>
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Auditoría</div>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">Actividad de usuarios</h1>
-          <p className="mt-1 text-sm text-slate-500">Ingresos, tiempo de uso, dispositivo, IP y última sección consultada.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Solo usuarios de <span className="font-semibold text-slate-700">{companyName ?? "esta empresa"}</span>.
+          </p>
         </div>
         <button onClick={load} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">Actualizar</button>
       </div>
@@ -143,7 +137,7 @@ export default function Activity() {
               {loading ? (
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-500">Cargando actividad…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-500">Todavía no hay sesiones registradas.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-500">Todavía no hay sesiones registradas para esta empresa.</td></tr>
               ) : rows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50/70">
                   <td className="px-4 py-3"><div className="font-semibold text-slate-900">{row.full_name || row.email}</div><div className="text-xs text-slate-500">{row.email}</div></td>
