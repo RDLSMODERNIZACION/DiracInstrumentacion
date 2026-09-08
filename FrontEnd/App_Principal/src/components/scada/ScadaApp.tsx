@@ -12,7 +12,6 @@ import LogoutButton from "../auth/LogoutButton";
 
 const DEFAULT_THRESHOLDS = { lowCritical: 10, lowWarning: 25, highWarning: 80, highCritical: 90 };
 
-// === umbrales de conectividad (coincidir con backend) ===
 const ONLINE_DEAD_SEC = 60;
 const ONLINE_WARN_SEC = 120;
 
@@ -35,6 +34,17 @@ type Props = {
   allowedLocationIds?: Set<number>;
   selectedCompanyId?: number | null;
 };
+
+function encodeHandoff(payload: any) {
+  const json = JSON.stringify(payload);
+  const utf8 = encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (_, p1) =>
+    String.fromCharCode(parseInt(p1, 16))
+  );
+  return btoa(utf8)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
 
 export default function ScadaApp({ initialUser, allowedLocationIds, selectedCompanyId }: Props) {
   const [drawer, setDrawer] = React.useState<{ type: "tank" | "pump" | null; id?: string | number | null }>({
@@ -63,16 +73,37 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
   const [view, setView] = React.useState<View>("operaciones");
 
   const openAdministration = React.useCallback(() => {
-    // Administración reutiliza la sesión real y la empresa ya seleccionada.
-    if (selectedCompanyId != null) {
-      try {
+    try {
+      if (selectedCompanyId != null) {
         sessionStorage.setItem("dirac.company_id", String(selectedCompanyId));
-      } catch {}
-    }
-    window.location.assign(app3Src);
-  }, [selectedCompanyId]);
+      }
 
-  // Pausar polling cuando hay faceplate abierto o no estamos en Operaciones.
+      const raw = sessionStorage.getItem("dirac.basic");
+      if (!raw) {
+        throw new Error("No se encontró la sesión principal");
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed?.basicToken) {
+        throw new Error("La sesión principal no contiene credenciales");
+      }
+
+      const target = new URL(app3Src, window.location.href);
+      target.hash = new URLSearchParams({
+        dirac_handoff: encodeHandoff({
+          v: 1,
+          email: parsed?.email ?? user?.name ?? null,
+          basicToken: parsed.basicToken,
+          companyId: selectedCompanyId ?? null,
+        }),
+      }).toString();
+
+      window.location.assign(target.toString());
+    } catch (err) {
+      console.error("No se pudo abrir Administración con la sesión actual", err);
+    }
+  }, [selectedCompanyId, user?.name]);
+
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
   const { plant, loading, err } = usePlant(pollMs, allowedLocationIds);
 
