@@ -5,8 +5,8 @@ import {
 } from "./OverviewGrid";
 
 // Criterio único de visibilidad para Operaciones:
-// tanques y bombas permanecen visibles durante 3 minutos sin datos.
-const CONNECTED_WINDOW_SEC = 180;
+// tanques y bombas permanecen visibles durante 5 minutos sin datos.
+const CONNECTED_WINDOW_SEC = 300;
 const WARN_AFTER_SEC = 120;
 
 type Props = React.ComponentProps<typeof BaseOverviewGrid>;
