@@ -1,154 +1,210 @@
 # app/routes/dirac_admin/users.py
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
+
 from app.db import get_conn
+from app.security import require_user
 
 router = APIRouter(prefix="/dirac/admin", tags=["admin-users"])
 
-# ========= Modelos =========
 
 class UserCreateIn(BaseModel):
     email: str = Field(..., description="Email (se guarda en minúsculas)")
     full_name: str | None = None
     phone: str | None = None
     password: str | None = Field(default="1234", min_length=4, max_length=128)
-    status: str | None = Field(default="active")          # user_status_enum: active|disabled
+    status: str | None = Field(default="active")
     company_id: int | None = None
-    role: str | None = Field(default="viewer")            # membership_role_enum
+    role: str | None = Field(default="viewer")
     is_primary: bool = False
+
 
 class UserPatch(BaseModel):
     full_name: str | None = None
-    status: str | None = None                             # 'active' | 'disabled'
+    status: str | None = None
+
 
 class PasswordChangeIn(BaseModel):
     new_password: str = Field(..., min_length=4, max_length=128)
 
+
 class GrantAccessIn(BaseModel):
     access: str = Field(default="control", description="access_level_enum: view|control|admin")
 
-# ========= Crear usuario (+ membresía opcional) =========
 
-@router.post("/users", summary="Crear usuario (y opcionalmente asignarlo a una empresa)")
-def create_user(payload: UserCreateIn):
+def _resolve_admin_company(cur, user: dict, requested_company_id: int | None) -> int:
+    """La administración nunca queda sin empresa ni cruza a otra empresa.
+
+    A diferencia de otros módulos, incluso un superadmin debe tener membresía
+    owner/admin en la empresa que administra. Si no llega company_id, se usa
+    la primaria administrable (o la primera).
+    """
+    if requested_company_id is not None:
+        cur.execute(
+            """
+            SELECT cu.company_id
+            FROM company_users cu
+            WHERE cu.user_id=%s
+              AND cu.company_id=%s
+              AND cu.role IN ('owner','admin')
+            LIMIT 1
+            """,
+            (user["user_id"], requested_company_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(403, "No podés administrar esa empresa")
+        return int(requested_company_id)
+
+    cur.execute(
+        """
+        SELECT cu.company_id
+        FROM company_users cu
+        WHERE cu.user_id=%s
+          AND cu.role IN ('owner','admin')
+        ORDER BY cu.is_primary DESC, cu.company_id ASC
+        LIMIT 1
+        """,
+        (user["user_id"],),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(403, "Tu usuario no tiene una empresa administrable")
+    return int(row["company_id"])
+
+
+def _assert_user_in_company(cur, target_user_id: int, company_id: int):
+    cur.execute(
+        "SELECT 1 FROM company_users WHERE user_id=%s AND company_id=%s LIMIT 1",
+        (target_user_id, company_id),
+    )
+    if not cur.fetchone():
+        raise HTTPException(404, "Usuario no encontrado en esta empresa")
+
+
+def _assert_location_in_company(cur, location_id: int, company_id: int):
+    cur.execute(
+        "SELECT 1 FROM locations WHERE id=%s AND company_id=%s LIMIT 1",
+        (location_id, company_id),
+    )
+    if not cur.fetchone():
+        raise HTTPException(404, "Localización no encontrada en esta empresa")
+
+
+@router.post("/users", summary="Crear usuario dentro de la empresa administrada")
+def create_user(
+    payload: UserCreateIn,
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     email = (payload.email or "").strip().lower()
     if not email:
         raise HTTPException(400, "email requerido")
 
     status_in = (payload.status or "active").strip().lower()
-    role_in   = (payload.role   or "viewer").strip().lower()
-    pw        = (payload.password or "1234")
+    role_in = (payload.role or "viewer").strip().lower()
+    pw = payload.password or "1234"
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # unicidad por email
-        cur.execute("SELECT 1 FROM app_users WHERE lower(email)=%s", (email,))
-        if cur.fetchone():
-            raise HTTPException(409, "Ya existe un usuario con ese email")
-
-        # crear usuario (CAST explícito al enum para evitar 22P02/DatatypeMismatch)
-        cur.execute(
-            """
-            INSERT INTO app_users (email, full_name, phone, status, password_plain, is_superadmin)
-            VALUES (%s, %s, %s, %s::user_status_enum, %s, false)
-            RETURNING id, email, full_name, phone, status
-            """,
-            (email, payload.full_name, payload.phone, status_in, pw),
+        target_company_id = _resolve_admin_company(
+            cur, user, company_id if company_id is not None else payload.company_id
         )
-        u = cur.fetchone()
-        new_user_id = u["id"]
 
-        # membresía opcional
-        if payload.company_id is not None:
+        cur.execute("SELECT id, email, full_name, phone, status FROM app_users WHERE lower(email)=%s", (email,))
+        existing = cur.fetchone()
+
+        if existing:
+            new_user_id = int(existing["id"])
+            u = existing
+        else:
             cur.execute(
                 """
-                INSERT INTO company_users (company_id, user_id, role, is_primary)
-                VALUES (%s, %s, %s::membership_role_enum, %s)
-                ON CONFLICT (company_id, user_id)
-                DO UPDATE SET role = EXCLUDED.role,
-                              is_primary = EXCLUDED.is_primary
+                INSERT INTO app_users (email, full_name, phone, status, password_plain, is_superadmin)
+                VALUES (%s, %s, %s, %s::user_status_enum, %s, false)
+                RETURNING id, email, full_name, phone, status
                 """,
-                (payload.company_id, new_user_id, role_in, payload.is_primary),
+                (email, payload.full_name, payload.phone, status_in, pw),
             )
+            u = cur.fetchone()
+            new_user_id = int(u["id"])
 
+        cur.execute(
+            """
+            INSERT INTO company_users (company_id, user_id, role, is_primary)
+            VALUES (%s, %s, %s::membership_role_enum, %s)
+            ON CONFLICT (company_id, user_id)
+            DO UPDATE SET role=EXCLUDED.role, is_primary=EXCLUDED.is_primary
+            """,
+            (target_company_id, new_user_id, role_in, payload.is_primary),
+        )
         conn.commit()
+
         return {
             "id": new_user_id,
             "email": u["email"],
-            "full_name": u["full_name"],
-            "phone": u["phone"],
+            "full_name": u.get("full_name"),
+            "phone": u.get("phone"),
             "status": u["status"],
-            "company_id": payload.company_id,
-            "role": role_in if payload.company_id else None,
-            "is_primary": payload.is_primary if payload.company_id else None,
+            "company_id": target_company_id,
+            "role": role_in,
+            "is_primary": payload.is_primary,
         }
 
-# ========= Listar =========
 
-@router.get("/users", summary="Listar usuarios o filtrar por empresa/localización/email")
+@router.get("/users", summary="Listar usuarios exclusivamente de la empresa administrada")
 def list_users(
     email: str | None = Query(default=None),
     company_id: int | None = Query(default=None),
     location_id: int | None = Query(default=None),
+    user=Depends(require_user),
 ):
     email_q = (email or "").strip().lower() if email else None
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+
+        if location_id is not None:
+            _assert_location_in_company(cur, location_id, target_company_id)
+
+        q = """
+            SELECT DISTINCT u.id, u.email, u.full_name, u.status
+            FROM company_users cu
+            JOIN app_users u ON u.id = cu.user_id
+        """
+        params: list = [target_company_id]
+        conds = ["cu.company_id=%s"]
+
+        if location_id is not None:
+            q += " JOIN v_user_locations vul ON vul.user_id=u.id "
+            conds.append("vul.location_id=%s")
+            conds.append("vul.company_id=%s")
+            params.extend([location_id, target_company_id])
+
         if email_q:
-            cur.execute(
-                "SELECT id, email, full_name, status FROM app_users WHERE lower(email)=%s",
-                (email_q,),
-            )
-            return cur.fetchone() or {}
+            conds.append("lower(u.email)=%s")
+            params.append(email_q)
 
-        if company_id and location_id:
-            cur.execute(
-                """
-                SELECT DISTINCT u.id, u.email, u.full_name, u.status
-                FROM app_users u
-                JOIN company_users cu ON cu.user_id = u.id AND cu.company_id = %s
-                JOIN v_user_locations vul ON vul.user_id = u.id AND vul.location_id = %s
-                ORDER BY u.id DESC
-                """,
-                (company_id, location_id),
-            )
-            return cur.fetchall() or []
+        q += " WHERE " + " AND ".join(conds)
+        q += " ORDER BY u.id DESC"
+        cur.execute(q, params)
+        rows = cur.fetchall() or []
 
-        if company_id:
-            cur.execute(
-                """
-                SELECT u.id, u.email, u.full_name, u.status
-                FROM company_users cu
-                JOIN app_users u ON u.id = cu.user_id
-                WHERE cu.company_id=%s
-                ORDER BY u.id DESC
-                """,
-                (company_id,),
-            )
-            return cur.fetchall() or []
+        if email_q:
+            return rows[0] if rows else {}
+        return rows
 
-        if location_id:
-            cur.execute(
-                """
-                SELECT DISTINCT u.id, u.email, u.full_name, u.status
-                FROM v_user_locations vul
-                JOIN app_users u ON u.id = vul.user_id
-                WHERE vul.location_id = %s
-                ORDER BY u.id DESC
-                """,
-                (location_id,),
-            )
-            return cur.fetchall() or []
 
-        cur.execute("SELECT id, email, full_name, status FROM app_users ORDER BY id DESC LIMIT 500")
-        return cur.fetchall() or []
-
-# ========= Patch =========
-
-@router.patch("/users/{user_id}", summary="Actualizar datos de un usuario")
-def patch_user(user_id: int, payload: UserPatch):
+@router.patch("/users/{user_id}", summary="Actualizar usuario de la empresa administrada")
+def patch_user(
+    user_id: int,
+    payload: UserPatch,
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # Cast explícito al enum para status
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
+
         cur.execute(
             """
             UPDATE app_users
@@ -161,17 +217,16 @@ def patch_user(user_id: int, payload: UserPatch):
         )
         row = cur.fetchone()
         conn.commit()
-        if not row:
-            raise HTTPException(404, "Usuario inexistente")
         return row
 
-# ========= Cambiar password (admin/alias) =========
 
-@router.post("/users/{user_id}/password", summary="Cambiar contraseña (admin/alias)")
+@router.post("/users/{user_id}/password", summary="Cambiar contraseña de usuario de la empresa")
 def change_password_admin(
     user_id: int,
     body: PasswordChangeIn | None = None,
-    new_password: str | None = Query(default=None)
+    new_password: str | None = Query(default=None),
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
 ):
     pw = (body.new_password if body else None) or new_password
     if not pw:
@@ -180,104 +235,97 @@ def change_password_admin(
         raise HTTPException(400, "La contraseña debe tener entre 4 y 128 caracteres")
 
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
         cur.execute(
             """
             UPDATE app_users
-               SET password_plain = %s,
-                   password_updated_at = now()
-             WHERE id = %s
-         RETURNING id
+               SET password_plain=%s, password_updated_at=now()
+             WHERE id=%s
             """,
             (pw, user_id),
         )
-        if not cur.fetchone():
-            raise HTTPException(404, "Usuario inexistente")
         conn.commit()
     return {"ok": True, "user_id": user_id}
 
-# ========= Empresas del usuario =========
 
-@router.get("/users/{user_id}/companies", summary="Empresas del usuario y roles")
-def user_companies(user_id: int):
+@router.get("/users/{user_id}/companies", summary="Empresa administrada del usuario")
+def user_companies(
+    user_id: int,
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
         cur.execute(
             """
             SELECT cu.company_id, c.name, cu.role, cu.is_primary
             FROM company_users cu
-            JOIN companies c ON c.id = cu.company_id
-            WHERE cu.user_id=%s
-            ORDER BY cu.role DESC, c.name
+            JOIN companies c ON c.id=cu.company_id
+            WHERE cu.user_id=%s AND cu.company_id=%s
             """,
-            (user_id,),
+            (user_id, target_company_id),
         )
         return cur.fetchall() or []
 
-# ========= Accesos a localizaciones =========
 
-@router.get("/users/{user_id}/locations", summary="Accesos del usuario a localizaciones (efectivo y explícito)")
-def user_locations(user_id: int, company_id: int | None = Query(default=None)):
+@router.get("/users/{user_id}/locations", summary="Accesos del usuario dentro de la empresa administrada")
+def user_locations(
+    user_id: int,
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # efectivos (heredados + explícitos)
-        if company_id:
-            cur.execute(
-                """
-                SELECT vul.location_id, vul.location_name, vul.access, vul.company_id
-                FROM v_user_locations vul
-                WHERE vul.user_id=%s AND vul.company_id=%s
-                ORDER BY vul.location_name
-                """,
-                (user_id, company_id),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT vul.location_id, vul.location_name, vul.access, vul.company_id
-                FROM v_user_locations vul
-                WHERE vul.user_id=%s
-                ORDER BY vul.location_name
-                """,
-                (user_id,),
-            )
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
+
+        cur.execute(
+            """
+            SELECT vul.location_id, vul.location_name, vul.access, vul.company_id
+            FROM v_user_locations vul
+            WHERE vul.user_id=%s AND vul.company_id=%s
+            ORDER BY vul.location_name
+            """,
+            (user_id, target_company_id),
+        )
         effective = cur.fetchall() or []
 
-        # explícitos
-        if company_id:
-            cur.execute(
-                """
-                SELECT ula.location_id, l.name AS location_name, ula.access
-                FROM user_location_access ula
-                JOIN locations l ON l.id = ula.location_id
-                WHERE ula.user_id=%s AND l.company_id=%s
-                ORDER BY l.name
-                """,
-                (user_id, company_id),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT ula.location_id, l.name AS location_name, ula.access
-                FROM user_location_access ula
-                JOIN locations l ON l.id = ula.location_id
-                WHERE ula.user_id=%s
-                ORDER BY l.name
-                """,
-                (user_id,),
-            )
+        cur.execute(
+            """
+            SELECT ula.location_id, l.name AS location_name, ula.access, l.company_id
+            FROM user_location_access ula
+            JOIN locations l ON l.id=ula.location_id
+            WHERE ula.user_id=%s AND l.company_id=%s
+            ORDER BY l.name
+            """,
+            (user_id, target_company_id),
+        )
         explicit = cur.fetchall() or []
-
         return {"effective": effective, "explicit": explicit}
 
-# 👉 Conceder acceso explícito a una localización
-@router.post("/users/{user_id}/locations/{location_id}", summary="Conceder acceso explícito a una localización")
-def grant_user_location(user_id: int, location_id: int, body: GrantAccessIn | None = None, access: str | None = Query(default=None)):
+
+@router.post("/users/{user_id}/locations/{location_id}", summary="Conceder acceso dentro de la empresa administrada")
+def grant_user_location(
+    user_id: int,
+    location_id: int,
+    body: GrantAccessIn | None = None,
+    access: str | None = Query(default=None),
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     acc = (body.access if body else None) or (access or "control")
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
+        _assert_location_in_company(cur, location_id, target_company_id)
+
         cur.execute(
             """
             INSERT INTO user_location_access (user_id, location_id, access)
             VALUES (%s, %s, %s::access_level_enum)
             ON CONFLICT (user_id, location_id)
-            DO UPDATE SET access = EXCLUDED.access, created_at = now()
+            DO UPDATE SET access=EXCLUDED.access, created_at=now()
             RETURNING user_id, location_id, access
             """,
             (user_id, location_id, acc),
@@ -286,9 +334,18 @@ def grant_user_location(user_id: int, location_id: int, body: GrantAccessIn | No
         conn.commit()
         return row
 
-@router.delete("/users/{user_id}/locations/{location_id}", summary="Quitar acceso explícito a una localización")
-def delete_user_location(user_id: int, location_id: int):
+
+@router.delete("/users/{user_id}/locations/{location_id}", summary="Quitar acceso dentro de la empresa administrada")
+def delete_user_location(
+    user_id: int,
+    location_id: int,
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
+        _assert_location_in_company(cur, location_id, target_company_id)
         cur.execute(
             "DELETE FROM user_location_access WHERE user_id=%s AND location_id=%s",
             (user_id, location_id),
@@ -296,48 +353,49 @@ def delete_user_location(user_id: int, location_id: int):
         conn.commit()
         return {"ok": True}
 
-# ========= Eliminar usuario =========
 
-@router.delete("/users/{user_id}", summary="Eliminar usuario (?force=1 borra referencias)")
-def delete_user(user_id: int, force: bool = Query(default=False)):
+@router.delete("/users/{user_id}", summary="Quitar usuario de la empresa administrada")
+def delete_user(
+    user_id: int,
+    force: bool = Query(default=False),
+    company_id: int | None = Query(default=None),
+    user=Depends(require_user),
+):
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT id FROM app_users WHERE id=%s", (user_id,))
-        if not cur.fetchone():
-            raise HTTPException(404, "Usuario inexistente")
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+        _assert_user_in_company(cur, user_id, target_company_id)
 
-        if not force:
-            # bloqueos suaves
-            cur.execute("SELECT COUNT(*) AS n FROM company_users WHERE user_id=%s", (user_id,))
-            members = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM user_location_access WHERE user_id=%s", (user_id,))
-            locs = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM pump_events WHERE created_by_user_id=%s", (user_id,))
-            evs = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM pump_commands WHERE requested_by_user_id=%s", (user_id,))
-            cmds = cur.fetchone()["n"]
+        # Se eliminan únicamente accesos pertenecientes a esta empresa.
+        cur.execute(
+            """
+            DELETE FROM user_location_access ula
+            USING locations l
+            WHERE ula.location_id=l.id
+              AND ula.user_id=%s
+              AND l.company_id=%s
+            """,
+            (user_id, target_company_id),
+        )
+        cur.execute(
+            "DELETE FROM company_users WHERE user_id=%s AND company_id=%s",
+            (user_id, target_company_id),
+        )
 
-            total = (members or 0) + (locs or 0) + (evs or 0) + (cmds or 0)
-            if total > 0:
-                raise HTTPException(
-                    409,
-                    {
-                        "message": "El usuario tiene referencias",
-                        "members": members,
-                        "locations": locs,
-                        "events": evs,
-                        "commands": cmds,
-                    },
-                )
-
+        # Si ya no pertenece a ninguna empresa, recién ahí se elimina el usuario global.
+        cur.execute("SELECT COUNT(*) AS n FROM company_users WHERE user_id=%s", (user_id,))
+        remaining = int(cur.fetchone()["n"] or 0)
+        deleted_global = False
+        if remaining == 0 and force:
+            cur.execute("UPDATE pump_events SET created_by_user_id=NULL WHERE created_by_user_id=%s", (user_id,))
+            cur.execute("UPDATE pump_commands SET requested_by_user_id=NULL WHERE requested_by_user_id=%s", (user_id,))
             cur.execute("DELETE FROM app_users WHERE id=%s", (user_id,))
-            conn.commit()
-            return {"ok": True, "deleted": user_id, "forced": False}
+            deleted_global = True
 
-        # forzado: limpiar refs y borrar
-        cur.execute("DELETE FROM user_location_access WHERE user_id=%s", (user_id,))
-        cur.execute("DELETE FROM company_users WHERE user_id=%s", (user_id,))
-        cur.execute("UPDATE pump_events   SET created_by_user_id=NULL WHERE created_by_user_id=%s", (user_id,))
-        cur.execute("UPDATE pump_commands SET requested_by_user_id=NULL WHERE requested_by_user_id=%s", (user_id,))
-        cur.execute("DELETE FROM app_users WHERE id=%s", (user_id,))
         conn.commit()
-        return {"ok": True, "deleted": user_id, "forced": True}
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "company_id": target_company_id,
+            "removed_from_company": True,
+            "deleted_global": deleted_global,
+        }
