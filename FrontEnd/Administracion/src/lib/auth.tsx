@@ -27,6 +27,7 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 const STORAGE_KEY = "dirac.basic";
 const COMPANY_KEY = "dirac.company_id";
+const HANDOFF_KEY = "dirac_handoff";
 
 function buildBasicToken(email: string, password: string) {
   return `Basic ${btoa(`${email}:${password}`)}`;
@@ -40,8 +41,55 @@ function getApiBase() {
   return "https://diracinstrumentacion.onrender.com";
 }
 
+function decodeHandoff(raw: string) {
+  const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const json = decodeURIComponent(
+    Array.prototype.map
+      .call(atob(padded), (c: string) => `%${c.charCodeAt(0).toString(16).padStart(2, "0")}`)
+      .join("")
+  );
+  return JSON.parse(json);
+}
+
+function consumeUrlHandoff(): AuthState | null {
+  try {
+    const hash = window.location.hash.startsWith("#")
+      ? window.location.hash.slice(1)
+      : window.location.hash;
+    const params = new URLSearchParams(hash);
+    const encoded = params.get(HANDOFF_KEY);
+    if (!encoded) return null;
+
+    const payload = decodeHandoff(encoded);
+    if (!payload?.basicToken) return null;
+
+    const companyId = Number(payload?.companyId);
+    if (Number.isFinite(companyId)) {
+      sessionStorage.setItem(COMPANY_KEY, String(companyId));
+    }
+
+    const state: AuthState = {
+      email: payload?.email ?? null,
+      basicToken: payload.basicToken,
+    };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+    // Quitamos el secreto de la barra de direcciones e historial inmediatamente.
+    window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
+    return state;
+  } catch {
+    return null;
+  }
+}
+
 function loadSharedSession(): AuthState {
   try {
+    // Primero consumimos el handoff porque funciona incluso si Administracion
+    // esta servida en otro origen/puerto que la App Principal.
+    const handoff = consumeUrlHandoff();
+    if (handoff?.basicToken) return handoff;
+
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -53,7 +101,6 @@ function loadSharedSession(): AuthState {
       }
     }
 
-    // Compatibilidad con sesiones antiguas del panel principal.
     const legacy =
       sessionStorage.getItem("dirac_basic") ||
       localStorage.getItem("dirac_basic");
@@ -91,7 +138,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const user = data?.user ?? {};
     const companies: CompanyAccess[] = Array.isArray(data?.companies) ? data.companies : [];
 
-    // Administración queda limitada a empresas donde el usuario es owner/admin.
     const administrable = companies.filter((c) =>
       ["owner", "admin"].includes(String(c?.role ?? "").toLowerCase())
     );
@@ -128,7 +174,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           basicToken,
         })
       );
-      sessionStorage.removeItem("dirac.admin.handoff");
     } catch {}
   }, [apiBase]);
 
@@ -157,7 +202,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       alive = false;
     };
-    // Solo validamos la sesión inicial; login() vuelve a hidratar explícitamente.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -187,7 +231,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       sessionStorage.removeItem(STORAGE_KEY);
       sessionStorage.removeItem(COMPANY_KEY);
-      sessionStorage.removeItem("dirac.admin.handoff");
     } catch {}
   }, []);
 
