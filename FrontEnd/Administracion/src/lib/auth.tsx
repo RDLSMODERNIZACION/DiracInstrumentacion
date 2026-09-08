@@ -28,6 +28,8 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const STORAGE_KEY = "dirac.basic";
 const COMPANY_KEY = "dirac.company_id";
 const HANDOFF_KEY = "dirac_handoff";
+const LOCAL_HANDOFF_KEY = "dirac.admin.handoff";
+const WINDOW_HANDOFF_PREFIX = "DIRAC_ADMIN_HANDOFF:";
 
 function buildBasicToken(email: string, password: string) {
   return `Basic ${btoa(`${email}:${password}`)}`;
@@ -52,6 +54,36 @@ function decodeHandoff(raw: string) {
   return JSON.parse(json);
 }
 
+function persistHandoffPayload(payload: any): AuthState | null {
+  if (!payload?.basicToken) return null;
+
+  const companyId = Number(payload?.companyId);
+  if (Number.isFinite(companyId)) {
+    sessionStorage.setItem(COMPANY_KEY, String(companyId));
+  }
+
+  const state: AuthState = {
+    email: payload?.email ?? null,
+    basicToken: payload.basicToken,
+  };
+
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return state;
+}
+
+function consumeWindowNameHandoff(): AuthState | null {
+  try {
+    const raw = String(window.name || "");
+    if (!raw.startsWith(WINDOW_HANDOFF_PREFIX)) return null;
+    const payload = decodeHandoff(raw.slice(WINDOW_HANDOFF_PREFIX.length));
+    window.name = "";
+    return persistHandoffPayload(payload);
+  } catch {
+    try { window.name = ""; } catch {}
+    return null;
+  }
+}
+
 function consumeUrlHandoff(): AuthState | null {
   try {
     const hash = window.location.hash.startsWith("#")
@@ -61,21 +93,7 @@ function consumeUrlHandoff(): AuthState | null {
     const encoded = params.get(HANDOFF_KEY);
     if (!encoded) return null;
 
-    const payload = decodeHandoff(encoded);
-    if (!payload?.basicToken) return null;
-
-    const companyId = Number(payload?.companyId);
-    if (Number.isFinite(companyId)) {
-      sessionStorage.setItem(COMPANY_KEY, String(companyId));
-    }
-
-    const state: AuthState = {
-      email: payload?.email ?? null,
-      basicToken: payload.basicToken,
-    };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-
-    // Quitamos el secreto de la barra de direcciones e historial inmediatamente.
+    const state = persistHandoffPayload(decodeHandoff(encoded));
     window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
     return state;
   } catch {
@@ -83,12 +101,29 @@ function consumeUrlHandoff(): AuthState | null {
   }
 }
 
+function consumeLocalStorageHandoff(): AuthState | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_HANDOFF_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(LOCAL_HANDOFF_KEY);
+    return persistHandoffPayload(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
 function loadSharedSession(): AuthState {
   try {
-    // Primero consumimos el handoff porque funciona incluso si Administracion
-    // esta servida en otro origen/puerto que la App Principal.
-    const handoff = consumeUrlHandoff();
-    if (handoff?.basicToken) return handoff;
+    // Orden de handoff: window.name funciona incluso entre puertos/orígenes;
+    // luego hash; luego localStorage para mismo origen.
+    const fromWindow = consumeWindowNameHandoff();
+    if (fromWindow?.basicToken) return fromWindow;
+
+    const fromUrl = consumeUrlHandoff();
+    if (fromUrl?.basicToken) return fromUrl;
+
+    const fromLocal = consumeLocalStorageHandoff();
+    if (fromLocal?.basicToken) return fromLocal;
 
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -231,6 +266,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       sessionStorage.removeItem(STORAGE_KEY);
       sessionStorage.removeItem(COMPANY_KEY);
+      localStorage.removeItem(LOCAL_HANDOFF_KEY);
+      window.name = "";
     } catch {}
   }, []);
 
