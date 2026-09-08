@@ -98,21 +98,31 @@ function KpiCard({ label, value, sub, accent = false }: { label: string; value: 
 
 function TrendChart({ data, metric }: { data: Summary["daily"]; metric: Metric }) {
   const width = 900;
-  const height = 250;
-  const padX = 42;
-  const padTop = 18;
-  const padBottom = 38;
+  const height = 270;
+  const padLeft = 66;
+  const padRight = 24;
+  const padTop = 20;
+  const padBottom = 42;
   const values = data.map((d) => Number(d[metric] ?? 0));
-  const max = Math.max(1, ...values);
-  const innerW = width - padX * 2;
+  const maxRaw = Math.max(1, ...values);
+  const tickCount = 4;
+  const roughStep = maxRaw / tickCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(1, roughStep))));
+  const normalized = roughStep / magnitude;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const step = Math.max(metric === "minutes" ? 1 : 1, nice * magnitude);
+  const max = Math.ceil(maxRaw / step) * step;
+  const innerW = width - padLeft - padRight;
   const innerH = height - padTop - padBottom;
   const pts = data.map((d, i) => {
-    const x = data.length <= 1 ? width / 2 : padX + (i * innerW) / (data.length - 1);
+    const x = data.length <= 1 ? padLeft + innerW / 2 : padLeft + (i * innerW) / (data.length - 1);
     const y = padTop + innerH - (Number(d[metric] ?? 0) / max) * innerH;
     return { x, y, d };
   });
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const label = metric === "sessions" ? "Sesiones" : metric === "users" ? "Usuarios únicos" : "Minutos de uso";
+  const axisLabel = metric === "sessions" ? "Sesiones" : metric === "users" ? "Usuarios" : "Minutos";
+  const ticks = Array.from({ length: tickCount + 1 }, (_, i) => i * step);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -127,10 +137,33 @@ function TrendChart({ data, metric }: { data: Summary["daily"]; metric: Metric }
       ) : (
         <div className="overflow-x-auto">
           <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[720px] w-full">
-            {[0, 0.25, 0.5, 0.75, 1].map((r) => {
-              const y = padTop + innerH - r * innerH;
-              return <line key={r} x1={padX} y1={y} x2={width - padX} y2={y} stroke="currentColor" className="text-slate-100" />;
+            <text
+              x="18"
+              y={padTop + innerH / 2}
+              transform={`rotate(-90 18 ${padTop + innerH / 2})`}
+              textAnchor="middle"
+              fontSize="11"
+              fill="currentColor"
+              className="text-slate-500"
+            >
+              {axisLabel}
+            </text>
+
+            {ticks.map((tick) => {
+              const y = padTop + innerH - (tick / max) * innerH;
+              return (
+                <g key={tick}>
+                  <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="currentColor" className="text-slate-100" />
+                  <text x={padLeft - 10} y={y + 4} textAnchor="end" fontSize="11" fill="currentColor" className="text-slate-500">
+                    {Math.round(tick)}
+                  </text>
+                </g>
+              );
             })}
+
+            <line x1={padLeft} y1={padTop} x2={padLeft} y2={padTop + innerH} stroke="currentColor" className="text-slate-300" />
+            <line x1={padLeft} y1={padTop + innerH} x2={width - padRight} y2={padTop + innerH} stroke="currentColor" className="text-slate-300" />
+
             <path d={path} fill="none" stroke="currentColor" strokeWidth="3" className="text-slate-800" />
             {pts.map((p, i) => (
               <g key={`${p.d.day}-${i}`}>
@@ -159,6 +192,7 @@ export default function Activity() {
   const [userFilter, setUserFilter] = React.useState("");
   const [deviceFilter, setDeviceFilter] = React.useState("");
   const [sectionFilter, setSectionFilter] = React.useState("");
+  const detailRef = React.useRef<HTMLDivElement | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -222,6 +256,13 @@ export default function Activity() {
     });
   }, [rows, userFilter, deviceFilter, sectionFilter]);
 
+  const selectRankingUser = React.useCallback((email: string) => {
+    setUserFilter((current) => current.trim().toLowerCase() === email.trim().toLowerCase() ? "" : email);
+    window.setTimeout(() => {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, []);
+
   const k = summary?.kpis;
   const unresolved = rows.filter((r) => !r.city && !r.region && !r.country).length;
   const periods: Array<{ id: Period; label: string }> = [
@@ -284,26 +325,34 @@ export default function Activity() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="font-bold text-slate-900">Usuarios con mayor uso</div>
-          <div className="mt-1 text-xs text-slate-500">Ranking del período seleccionado</div>
+          <div className="mt-1 text-xs text-slate-500">Ranking del período seleccionado · tocá un usuario para filtrar el detalle</div>
           <div className="mt-4 space-y-2">
-            {(summary?.ranking ?? []).length === 0 ? <div className="text-sm text-slate-400">Sin datos.</div> : (summary?.ranking ?? []).map((r, idx) => (
-              <div key={r.user_id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3">
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-black text-slate-600">{idx + 1}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-slate-900">{r.full_name || r.email}</div>
-                  <div className="truncate text-xs text-slate-400">{r.email}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-black text-slate-900">{fmtDuration(r.minutes)}</div>
-                  <div className="text-xs text-slate-400">{r.sessions} sesiones</div>
-                </div>
-              </div>
-            ))}
+            {(summary?.ranking ?? []).length === 0 ? <div className="text-sm text-slate-400">Sin datos.</div> : (summary?.ranking ?? []).map((r, idx) => {
+              const selected = userFilter.trim().toLowerCase() === r.email.trim().toLowerCase();
+              return (
+                <button
+                  type="button"
+                  key={r.user_id}
+                  onClick={() => selectRankingUser(r.email)}
+                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900" : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"}`}
+                >
+                  <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-black ${selected ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>{idx + 1}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-slate-900">{r.full_name || r.email}</div>
+                    <div className="truncate text-xs text-slate-400">{r.email}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-black text-slate-900">{fmtDuration(r.minutes)}</div>
+                    <div className="text-xs text-slate-400">{r.sessions} sesiones</div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div ref={detailRef} className="scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[220px] flex-1">
             <div className="mb-1 text-xs font-medium text-slate-500">Usuario</div>
