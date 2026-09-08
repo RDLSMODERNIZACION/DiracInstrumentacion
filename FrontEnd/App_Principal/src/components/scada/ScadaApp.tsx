@@ -79,23 +79,32 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       }
 
       const raw = sessionStorage.getItem("dirac.basic");
-      if (!raw) {
-        throw new Error("No se encontró la sesión principal");
-      }
+      if (!raw) throw new Error("No se encontró la sesión principal");
 
       const parsed = JSON.parse(raw);
-      if (!parsed?.basicToken) {
-        throw new Error("La sesión principal no contiene credenciales");
-      }
+      if (!parsed?.basicToken) throw new Error("La sesión principal no contiene credenciales");
 
+      const handoffPayload = {
+        v: 2,
+        email: parsed?.email ?? user?.name ?? null,
+        basicToken: parsed.basicToken,
+        companyId: selectedCompanyId ?? null,
+      };
+
+      // 1) Mismo origen: respaldo persistente de una sola vez.
+      try {
+        localStorage.setItem("dirac.admin.handoff", JSON.stringify(handoffPayload));
+      } catch {}
+
+      // 2) Navegación entre orígenes/puertos: window.name sobrevive al cambio de origen.
+      try {
+        window.name = `DIRAC_ADMIN_HANDOFF:${encodeHandoff(handoffPayload)}`;
+      } catch {}
+
+      // 3) Compatibilidad adicional: fragmento URL (no se envía al servidor).
       const target = new URL(app3Src, window.location.href);
       target.hash = new URLSearchParams({
-        dirac_handoff: encodeHandoff({
-          v: 1,
-          email: parsed?.email ?? user?.name ?? null,
-          basicToken: parsed.basicToken,
-          companyId: selectedCompanyId ?? null,
-        }),
+        dirac_handoff: encodeHandoff(handoffPayload),
       }).toString();
 
       window.location.assign(target.toString());
@@ -113,26 +122,14 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     for (const t of plant.tanks || []) {
       const id = (t as any).id ?? (t as any).tank_id;
       if (id == null) continue;
-
       const rawAge = Number.isFinite((t as any).ageSec)
         ? (t as any).ageSec
         : Number.isFinite((t as any).age_sec)
         ? (t as any).age_sec
         : null;
-
       const age = rawAge !== null ? Number(rawAge) : null;
-      const online =
-        typeof (t as any).online === "boolean"
-          ? (t as any).online
-          : age !== null
-          ? age <= ONLINE_DEAD_SEC
-          : false;
-      const tone: "ok" | "warn" | "bad" = online
-        ? "ok"
-        : age !== null && age <= ONLINE_WARN_SEC
-        ? "warn"
-        : "bad";
-
+      const online = typeof (t as any).online === "boolean" ? (t as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
+      const tone: "ok" | "warn" | "bad" = online ? "ok" : age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad";
       s[`tank:${id}`] = { online, ageSec: age ?? 999999, tone };
       s[`TK-${id}`] = s[`tank:${id}`];
     }
@@ -140,26 +137,14 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     for (const p of plant.pumps || []) {
       const id = (p as any).id ?? (p as any).pump_id;
       if (id == null) continue;
-
       const rawAge = Number.isFinite((p as any).ageSec)
         ? (p as any).ageSec
         : Number.isFinite((p as any).age_sec)
         ? (p as any).age_sec
         : null;
-
       const age = rawAge !== null ? Number(rawAge) : null;
-      const online =
-        typeof (p as any).online === "boolean"
-          ? (p as any).online
-          : age !== null
-          ? age <= ONLINE_DEAD_SEC
-          : false;
-      const tone: "ok" | "warn" | "bad" = online
-        ? "ok"
-        : age !== null && age <= ONLINE_WARN_SEC
-        ? "warn"
-        : "bad";
-
+      const online = typeof (p as any).online === "boolean" ? (p as any).online : age !== null ? age <= ONLINE_DEAD_SEC : false;
+      const tone: "ok" | "warn" | "bad" = online ? "ok" : age !== null && age <= ONLINE_WARN_SEC ? "warn" : "bad";
       s[`pump:${id}`] = { online, ageSec: age ?? 999999, tone };
       s[`PU-${id}`] = s[`pump:${id}`];
     }
@@ -182,12 +167,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       if (!Number.isFinite(id)) continue;
       const locId = (t as any).location_id ?? (t as any).location?.id ?? null;
       const locName = (t as any).location_name ?? (t as any).location?.name ?? null;
-      rows.push({
-        asset_type: "tank",
-        asset_id: id,
-        location_id: locId,
-        location: { id: locId, name: locName },
-      });
+      rows.push({ asset_type: "tank", asset_id: id, location_id: locId, location: { id: locId, name: locName } });
     }
 
     for (const p of plant.pumps ?? []) {
@@ -195,12 +175,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       if (!Number.isFinite(id)) continue;
       const locId = (p as any).location_id ?? (p as any).location?.id ?? null;
       const locName = (p as any).location_name ?? (p as any).location?.name ?? null;
-      rows.push({
-        asset_type: "pump",
-        asset_id: id,
-        location_id: locId,
-        location: { id: locId, name: locName },
-      });
+      rows.push({ asset_type: "pump", asset_id: id, location_id: locId, location: { id: locId, name: locName } });
     }
 
     return rows;
@@ -239,9 +214,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
 
   React.useEffect(() => {
     if (selectedCompanyId != null) {
-      try {
-        sessionStorage.setItem("dirac.company_id", String(selectedCompanyId));
-      } catch {}
+      try { sessionStorage.setItem("dirac.company_id", String(selectedCompanyId)); } catch {}
     }
   }, [selectedCompanyId]);
 
@@ -249,33 +222,22 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     if (view === "operaciones") {
       return (
         <div className="w-full max-w-md mx-auto px-2.5 py-3 sm:max-w-7xl sm:p-4 md:p-6">
-          {loading && !plant.tanks.length ? (
-            <div className="p-4">Cargando…</div>
-          ) : err ? (
-            <div className="p-4 text-red-600">Error: {String(err)}</div>
-          ) : (
-            operacionesBody
-          )}
+          {loading && !plant.tanks.length ? <div className="p-4">Cargando…</div> : err ? <div className="p-4 text-red-600">Error: {String(err)}</div> : operacionesBody}
         </div>
       );
     }
-
     if (view === "kpi") {
       if (!canSeeAdvanced) return noPermsBanner;
       return <EmbeddedAppFrame key={app1Src} src={app1Src} title="KPIs" />;
     }
-
     if (view === "infra") {
       if (!canSeeAdvanced) return noPermsBanner;
       return <EmbeddedAppFrame key={app2Src} src={app2Src} title="Infraestructura" />;
     }
-
     return null;
   })();
 
-  const companyBadge =
-    user.company?.name ??
-    (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");
+  const companyBadge = user.company?.name ?? (selectedCompanyId != null ? `Empresa #${selectedCompanyId}` : "—");
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -284,12 +246,8 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
           <div>
             <div className="flex items-center gap-2 mb-6">
               <img src="/img/logodirac.jpeg" alt="Logo DIRAC" className="h-8 w-8 rounded-lg object-cover" />
-              <div>
-                <div className="text-sm text-slate-500">INSTRUMENTACION</div>
-                <div className="font-semibold">DIRAC</div>
-              </div>
+              <div><div className="text-sm text-slate-500">INSTRUMENTACION</div><div className="font-semibold">DIRAC</div></div>
             </div>
-
             <nav className="space-y-1 mb-6">
               <NavItem label="Operaciones" active={view === "operaciones"} onClick={() => setView("operaciones")} />
               <NavItem label="KPIs" active={view === "kpi"} onClick={() => setView("kpi")} />
@@ -297,64 +255,32 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <NavItem label="Administración" active={false} onClick={openAdministration} />
             </nav>
           </div>
-
           <div className="text-xs text-slate-500 mt-auto border-t pt-3">
-            <div>Usuario: {user.name}</div>
-            <div>Rol: {user.role}</div>
-            <div>Empresa: {companyBadge}</div>
+            <div>Usuario: {user.name}</div><div>Rol: {user.role}</div><div>Empresa: {companyBadge}</div>
           </div>
         </aside>
 
         <main className="flex-1 min-h-screen">
           <header className="sticky top-0 z-10 bg-white border-b border-slate-200">
             <div className="w-full max-w-md mx-auto px-3 py-2.5 flex items-center justify-between sm:max-w-7xl sm:px-4 sm:py-3">
-              <div className="flex items-center gap-3">
-                <div className="text-base sm:text-lg font-semibold tracking-tight">
-                  {view === "operaciones"
-                    ? "Operaciones"
-                    : view === "kpi"
-                    ? "KPIs"
-                    : "Infraestructura"}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{companyBadge}</span>
-                <LogoutButton />
-              </div>
+              <div className="flex items-center gap-3"><div className="text-base sm:text-lg font-semibold tracking-tight">{view === "operaciones" ? "Operaciones" : view === "kpi" ? "KPIs" : "Infraestructura"}</div></div>
+              <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{companyBadge}</span><LogoutButton /></div>
             </div>
           </header>
-
           {mainBody}
         </main>
       </div>
 
       {(() => {
         const isTank = drawer.type === "tank";
-        const t = isTank
-          ? plant.tanks.find((x: any) => String((x as any).id ?? (x as any).tank_id) === String(drawer.id))
-          : null;
-        const p =
-          drawer.type === "pump"
-            ? plant.pumps.find((x: any) => String((x as any).id ?? (x as any).pump_id) === String(drawer.id))
-            : null;
-
-        const sev = t
-          ? severityOf((t as any).levelPct, (t as any).thresholds ?? DEFAULT_THRESHOLDS)
-          : null;
+        const t = isTank ? plant.tanks.find((x: any) => String((x as any).id ?? (x as any).tank_id) === String(drawer.id)) : null;
+        const p = drawer.type === "pump" ? plant.pumps.find((x: any) => String((x as any).id ?? (x as any).pump_id) === String(drawer.id)) : null;
+        const sev = t ? severityOf((t as any).levelPct, (t as any).thresholds ?? DEFAULT_THRESHOLDS) : null;
         const meta = sev ? sevMeta(sev) : null;
-
         return (
-          <Drawer
-            open={!!drawer.type}
-            onClose={() => setDrawer({ type: null })}
-            title={isTank ? (t as any)?.name : drawer.type === "pump" ? (p as any)?.name : "Faceplate"}
-            right={isTank && meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
-          >
+          <Drawer open={!!drawer.type} onClose={() => setDrawer({ type: null })} title={isTank ? (t as any)?.name : drawer.type === "pump" ? (p as any)?.name : "Faceplate"} right={isTank && meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}>
             {isTank && t && <TankFaceplate tank={t} headerless />}
-            {drawer.type === "pump" && p && (
-              <PumpFaceplate pump={p} canControl={canControlPumps} />
-            )}
+            {drawer.type === "pump" && p && <PumpFaceplate pump={p} canControl={canControlPumps} />}
           </Drawer>
         );
       })()}
