@@ -33,15 +33,36 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def _can_view_activity(user: dict) -> bool:
-    if bool(user.get("superadmin")):
-        return True
-    with get_conn() as conn, conn.cursor() as cur:
+def _resolve_admin_company(cur, user: dict, requested_company_id: int | None) -> int:
+    if requested_company_id is not None:
         cur.execute(
-            "SELECT 1 FROM company_users WHERE user_id=%s AND role='owner'::membership_role_enum LIMIT 1",
-            (user["user_id"],),
+            """
+            SELECT 1
+            FROM company_users
+            WHERE user_id=%s AND company_id=%s
+              AND role IN ('owner','admin')
+            LIMIT 1
+            """,
+            (user["user_id"], requested_company_id),
         )
-        return cur.fetchone() is not None
+        if not cur.fetchone():
+            raise HTTPException(403, "No autorizado para ver actividad de esa empresa")
+        return int(requested_company_id)
+
+    cur.execute(
+        """
+        SELECT company_id
+        FROM company_users
+        WHERE user_id=%s AND role IN ('owner','admin')
+        ORDER BY is_primary DESC, company_id ASC
+        LIMIT 1
+        """,
+        (user["user_id"],),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(403, "No autorizado para ver actividad de usuarios")
+    return int(row["company_id"])
 
 
 @router.post("/session/start")
@@ -116,12 +137,12 @@ def end_session(payload: SessionPingIn, user=Depends(require_user)):
 @router.get("/sessions")
 def list_sessions(
     limit: int = Query(default=100, ge=1, le=500),
+    company_id: int | None = Query(default=None),
     user=Depends(require_user),
 ):
-    if not _can_view_activity(user):
-        raise HTTPException(403, "No autorizado para ver actividad de usuarios")
-
     with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        target_company_id = _resolve_admin_company(cur, user, company_id)
+
         cur.execute(
             """
             SELECT
@@ -145,9 +166,15 @@ def list_sessions(
                 (s.ended_at IS NULL AND s.last_seen_at >= now() - interval '3 minutes') AS is_online
             FROM app.user_sessions s
             JOIN app_users u ON u.id = s.user_id
+            WHERE EXISTS (
+                SELECT 1
+                FROM company_users cu
+                WHERE cu.user_id=s.user_id
+                  AND cu.company_id=%s
+            )
             ORDER BY s.started_at DESC
             LIMIT %s
             """,
-            (limit,),
+            (target_company_id, limit),
         )
         return cur.fetchall() or []
