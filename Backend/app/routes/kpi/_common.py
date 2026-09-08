@@ -10,7 +10,7 @@ LOCAL_TZ = "America/Argentina/Buenos_Aires"
 
 # Ventana única de conexión para dispositivos mostrados en Operaciones.
 # Bombas y tanques permanecen visibles hasta superar este tiempo sin datos.
-DEVICE_CONNECTED_WINDOW_MIN = int(os.getenv("DEVICE_CONNECTED_WINDOW_MIN", "3"))
+DEVICE_CONNECTED_WINDOW_MIN = int(os.getenv("DEVICE_CONNECTED_WINDOW_MIN", "5"))
 
 # ==== helpers de tiempo ====
 def _ft_defaults(date_from: Optional[datetime], date_to: Optional[datetime]) -> Tuple[datetime, datetime]:
