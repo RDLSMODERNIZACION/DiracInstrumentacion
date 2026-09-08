@@ -127,6 +127,10 @@ export function TankCard({
               <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">
                 Sin comunicacion
               </span>
+            ) : conn.tone === "warn" ? (
+              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                Comunicacion inestable
+              </span>
             ) : null}
 
             {meta.label !== "Normal" ? (
@@ -247,6 +251,8 @@ export function PumpCard({
   const ledClass =
     !conn.online
       ? "bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.75)]"
+      : conn.tone === "warn"
+      ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.65)]"
       : !available
       ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.65)]"
       : isOn
@@ -303,6 +309,14 @@ export function PumpCard({
           <div className={`mt-2 font-mono text-[13px] font-bold tracking-[0.08em] sm:text-[14px] ${stateClass}`}>
             {stateText}
           </div>
+
+          {conn.online && conn.tone === "warn" ? (
+            <div className="mt-1.5">
+              <span className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-black tracking-wide text-amber-700">
+                COMUNICACION INESTABLE
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2">
