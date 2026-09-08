@@ -9,21 +9,23 @@ import Locations from "./Locations";
 import Tanks from "./Tanks";
 import Pumps from "./Pumps";
 import Valves from "./Valves";
-import Manifolds from "./Manifolds"; // 👈 nuevo
+import Manifolds from "./Manifolds";
+import Activity from "./Activity";
 
 export default function App() {
-return (
+  return (
     <Routes>
       <Route element={<AdminLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:id/users" element={<CompanyUsers />} />
         <Route path="users" element={<Users />} />
+        <Route path="activity" element={<Activity />} />
         <Route path="locations" element={<Locations />} />
         <Route path="tanks" element={<Tanks />} />
         <Route path="pumps" element={<Pumps />} />
         <Route path="valves" element={<Valves />} />
-        <Route path="manifolds" element={<Manifolds />} /> {/* 👈 nuevo */}
+        <Route path="manifolds" element={<Manifolds />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
