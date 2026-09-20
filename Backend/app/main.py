@@ -2,12 +2,13 @@
 import os
 import logging
 
-from fastapi import FastAPI, Response
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from app.db import get_conn, close_pool
+from app.security import require_owner
 
 # ===== Telegram reporter (30 min) =====
 from app.services.telegram_reporter import start_telegram_reporter, stop_telegram_reporter
@@ -169,13 +170,13 @@ app.include_router(dirac_locations_router)
 app.include_router(dirac_pumps_router)
 app.include_router(dirac_activity_router)
 
-app.include_router(admin_companies_router)
-app.include_router(admin_users_router)
-app.include_router(admin_locations_router)
-app.include_router(admin_tanks_router)
-app.include_router(admin_pumps_router)
-app.include_router(admin_valves_router)
-app.include_router(admin_manifolds_router)
+app.include_router(admin_companies_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_users_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_locations_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_tanks_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_pumps_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_valves_router, dependencies=[Depends(require_owner)])
+app.include_router(admin_manifolds_router, dependencies=[Depends(require_owner)])
 
 app.include_router(manifold_signals_router)
 app.include_router(network_analyzers_router)
