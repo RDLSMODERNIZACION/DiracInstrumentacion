@@ -21,6 +21,7 @@ export default function EmbeddedAppFrame({
         src={src}
         title={title}
         className="w-full h-full border-0"
+        allow="fullscreen"
         sandbox="
           allow-scripts
           allow-same-origin
