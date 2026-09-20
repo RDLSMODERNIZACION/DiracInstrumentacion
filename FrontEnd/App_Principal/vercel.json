@@ -1,5 +1,13 @@
 {
   "routes": [
+    {
+      "src": "/cargaderosdeagua",
+      "dest": "https://cargaderoagua.vercel.app/cargaderosdeagua/admin/dispatches"
+    },
+    {
+      "src": "/cargaderosdeagua/(.*)",
+      "dest": "https://cargaderoagua.vercel.app/cargaderosdeagua/$1"
+    },
     { "handle": "filesystem" },
     { "src": "/kpi/.*", "dest": "/kpi/index.html" }
   ]
