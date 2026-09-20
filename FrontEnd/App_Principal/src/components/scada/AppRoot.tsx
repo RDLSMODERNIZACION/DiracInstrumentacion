@@ -16,10 +16,17 @@ type MeLocation = {
   company_id?: number | null;
 };
 
-function deriveRoleFromAccess(locs: MeLocation[]): User["role"] {
+function deriveRoleFromAccess(locs: MeLocation[]): any {
   if (locs.some((l) => l.access === "admin")) return "admin";
   if (locs.some((l) => l.access === "control")) return "operator";
   return "viewer";
+}
+
+function normalizeLocations(data: any): MeLocation[] {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.effective)) return data.effective;
+  if (Array.isArray(data?.explicit)) return data.explicit;
+  return [];
 }
 
 const COMPANY_KEY = "dirac.company_id";
@@ -56,13 +63,17 @@ export default function AppRoot() {
       setLoadingUser(true);
 
       try {
-        const res = await api("/dirac/me/locations");
+        const [locationsRes, meRes] = await Promise.all([
+          api("/dirac/me/locations"),
+          api("/dirac/me"),
+        ]);
 
-        if (!res.ok) {
-          throw new Error(`me/locations -> ${res.status}`);
+        if (!locationsRes.ok) {
+          throw new Error(`me/locations -> ${locationsRes.status}`);
         }
 
-        const locs: MeLocation[] = await res.json();
+        const locs = normalizeLocations(await locationsRes.json());
+        const meData = meRes.ok ? await meRes.json() : null;
 
         const availableCompanyIds = Array.from(
           new Set(
@@ -87,7 +98,16 @@ export default function AppRoot() {
             ? locs
             : locs.filter((l) => Number(l.company_id) === chosenCompanyId);
 
-        const role = deriveRoleFromAccess(visibleLocs);
+        const membershipRole = meData?.companies?.find(
+          (c: any) => Number(c.company_id) === Number(chosenCompanyId)
+        )?.role;
+
+        const role =
+          membershipRole === "owner"
+            ? "owner"
+            : membershipRole === "admin"
+            ? "admin"
+            : deriveRoleFromAccess(visibleLocs);
 
         const allowed = new Set<number>(
           visibleLocs.map((l) => Number(l.location_id))
