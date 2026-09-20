@@ -369,7 +369,32 @@ export default function InfraDiagram() {
   const [selectedLocation, setSelectedLocation] = useState<{ id: number | null; name: string } | null>(null);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
   const [tip, setTip] = useState<Tip | null>(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsCanvasFullscreen(document.fullscreenElement === wrapRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleCanvasFullscreen = useCallback(async () => {
+    const canvas = wrapRef.current;
+    if (!canvas) return;
+
+    try {
+      if (document.fullscreenElement === canvas) {
+        await document.exitFullscreen();
+      } else {
+        await canvas.requestFullscreen();
+      }
+    } catch (err) {
+      console.error("No se pudo cambiar el modo de pantalla completa:", err);
+    }
+  }, []);
 
   const showTip = useCallback((e: React.MouseEvent, content: { title: string; lines: string[] }) => {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -1000,6 +1025,24 @@ export default function InfraDiagram() {
           )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button
+            onClick={toggleCanvasFullscreen}
+            title="Ver solamente el lienzo en pantalla completa"
+            style={{
+              padding: "4px 8px",
+              borderRadius: 8,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: 14, lineHeight: 1 }}>⛶</span>
+            Pantalla completa
+          </button>
+
+          <button
             onClick={goToMapa}
             title="Abrir Mapa"
             style={{
@@ -1065,7 +1108,7 @@ export default function InfraDiagram() {
             overflow: "hidden",
             background: "#ffffff",
             width: "100%",
-            height: `calc(100vh - ${TOPBAR_H}px)`,
+            height: isCanvasFullscreen ? "100vh" : `calc(100vh - ${TOPBAR_H}px)`,
             boxSizing: "border-box",
           }}
         >
