@@ -43,3 +43,24 @@ def require_user(credentials: HTTPBasicCredentials = Depends(security)):
             "email": u["email"],
             "superadmin": bool(u.get("is_superadmin")),
         }
+
+
+def require_owner(user = Depends(require_user)):
+    """Permite acceder a Administración solo a usuarios con rol owner en al menos una empresa."""
+    with get_conn() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM company_users
+            WHERE user_id = %s
+              AND role = 'owner'
+            LIMIT 1
+            """,
+            (user["user_id"],),
+        )
+        if not cur.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administración disponible solo para usuarios owner",
+            )
+    return user
