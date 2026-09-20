@@ -70,9 +70,16 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     [user?.role]
   );
 
+  const canOpenAdministration = React.useMemo(
+    () => (user?.role as any) === "owner",
+    [user?.role]
+  );
+
   const [view, setView] = React.useState<View>("operaciones");
 
   const openAdministration = React.useCallback(() => {
+    if (!canOpenAdministration) return;
+
     try {
       if (selectedCompanyId != null) {
         sessionStorage.setItem("dirac.company_id", String(selectedCompanyId));
@@ -111,7 +118,7 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     } catch (err) {
       console.error("No se pudo abrir Administración con la sesión actual", err);
     }
-  }, [selectedCompanyId, user?.name]);
+  }, [canOpenAdministration, selectedCompanyId, user?.name]);
 
   const pollMs = drawer.type || view !== "operaciones" ? 0 : 1000;
   const { plant, loading, err } = usePlant(pollMs, allowedLocationIds);
@@ -252,7 +259,9 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
               <NavItem label="Operaciones" active={view === "operaciones"} onClick={() => setView("operaciones")} />
               <NavItem label="KPIs" active={view === "kpi"} onClick={() => setView("kpi")} />
               <NavItem label="Infraestructura" active={view === "infra"} onClick={() => setView("infra")} />
-              <NavItem label="Administración" active={false} onClick={openAdministration} />
+              {canOpenAdministration && (
+                <NavItem label="Administración" active={false} onClick={openAdministration} />
+              )}
             </nav>
           </div>
           <div className="text-xs text-slate-500 mt-auto border-t pt-3">
