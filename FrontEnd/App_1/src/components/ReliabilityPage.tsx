@@ -488,6 +488,20 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
     if (row?.day_ts) setSelectedChartDay(row as PumpChartRow);
   }
 
+  function openPumpEvent(ev: PumpEventRow) {
+    const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+    const q = new URLSearchParams({
+      month,
+      event_ts: ev.event_ts,
+      event_type: ev.event_type,
+    });
+    window.open(
+      `${base}/pump/${ev.pump_id}?${q.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }
+
   const tankChart = useMemo<TankChartRow[]>(() => {
     const m = new Map<string, TankChartRow>();
     for (const r of tankDaily) {
@@ -595,6 +609,9 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                   <div className="mt-1 text-sm text-slate-500">
                     {fmtInt(selectedChartDay.total_starts)} arranques · {fmtInt(selectedChartDay.total_stops)} paradas · {filteredPumpRows.length} bombas del filtro actual
                   </div>
+                  <div className="mt-1 text-xs font-semibold text-slate-400">
+                    Tocá una fila para abrir el análisis individual de esa bomba directamente en ese evento.
+                  </div>
                   {selectedDayCoincidences.length > 0 && (
                     <div className="mt-3 inline-flex items-center rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-black text-red-700">
                       {selectedDayCoincidences.length} coincidencia{selectedDayCoincidences.length === 1 ? "" : "s"} &lt; 5 min detectada{selectedDayCoincidences.length === 1 ? "" : "s"}
@@ -654,10 +671,12 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                             return (
                               <tr
                                 key={`${ev.event_ts}-${ev.pump_id}-${idx}`}
-                                className={`border-t transition ${
+                                onClick={() => openPumpEvent(ev)}
+                                title="Abrir análisis individual en este evento"
+                                className={`cursor-pointer border-t transition ${
                                   hasCoincidence
-                                    ? "border-red-100 bg-red-50/70 hover:bg-red-50"
-                                    : "border-slate-200 bg-white hover:bg-slate-50"
+                                    ? "border-red-100 bg-red-50/70 hover:bg-red-100/80"
+                                    : "border-slate-200 bg-white hover:bg-blue-50/60"
                                 }`}
                               >
                                 <td className="px-4 py-3">
