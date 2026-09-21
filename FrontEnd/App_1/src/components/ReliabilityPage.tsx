@@ -351,6 +351,14 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
     return m;
   }, [pumpRows]);
 
+  const pumpLocationById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of pumpRows) {
+      m.set(Number(r.pump_id), r.location_name || "-");
+    }
+    return m;
+  }, [pumpRows]);
+
   useEffect(() => {
     if (!filteredPumpIdsCsv) {
       setPumpCoincidences([]);
@@ -616,6 +624,7 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                       <thead className="bg-slate-50 text-slate-500">
                         <tr>
                           <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Bomba</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Localidad</th>
                           <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Fecha</th>
                           <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Hora</th>
                           <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Evento</th>
@@ -654,6 +663,9 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                                 <td className="px-4 py-3">
                                   <div className="font-black text-slate-950">{pumpNameById.get(Number(ev.pump_id)) || `Bomba ${ev.pump_id}`}</div>
                                   <div className="text-xs text-slate-400">ID {ev.pump_id}</div>
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-700">
+                                  {pumpLocationById.get(Number(ev.pump_id)) || "-"}
                                 </td>
                                 <td className="px-4 py-3 font-semibold text-slate-800">
                                   {new Date(`${selectedChartDay.day_ts}T12:00:00`).toLocaleDateString("es-AR")}
