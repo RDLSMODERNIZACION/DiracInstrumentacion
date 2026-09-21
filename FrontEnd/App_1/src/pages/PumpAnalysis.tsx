@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -696,6 +697,13 @@ export default function PumpAnalysis() {
               <div className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">Histórico mensual</div>
               <h2 className="mt-1 text-xl font-black text-slate-950">Comportamiento diario</h2>
               <p className="mt-1 text-sm text-slate-500">Tocá una barra de arranques o paradas para abrir el detalle operativo de ese día.</p>
+              {selectedDay && (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-black text-orange-700">
+                  <span className="h-2 w-2 rounded-full bg-orange-500" />
+                  Seleccionado: {dayLabel(selectedDay.day_ts)}
+                  {selectedEvent ? ` · ${selectedEvent.event_type === "start" ? "Arranque" : "Parada"} ${selectedEvent.event_time || fmtEventTime(selectedEvent.event_ts)}` : ""}
+                </div>
+              )}
             </div>
             {selectedDay && (
               <button onClick={() => setSelectedDay(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
@@ -713,8 +721,36 @@ export default function PumpAnalysis() {
                 <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Legend />
-                <Bar yAxisId="left" name="Arranques" dataKey="starts_count" fill="#2563eb" radius={[7, 7, 0, 0]} cursor="pointer" onClick={chooseDay} />
-                <Bar yAxisId="left" name="Paradas" dataKey="stops_count" fill="#94a3b8" radius={[7, 7, 0, 0]} cursor="pointer" onClick={chooseDay} />
+                <Bar yAxisId="left" name="Arranques" dataKey="starts_count" radius={[7, 7, 0, 0]} cursor="pointer" onClick={chooseDay}>
+                  {chartData.map((row) => {
+                    const sameDay = selectedDay?.day_ts === row.day_ts;
+                    const exactSelected = sameDay && (!selectedEvent || selectedEvent.event_type === "start");
+                    return (
+                      <Cell
+                        key={`start-${row.day_ts}`}
+                        fill={exactSelected ? "#f97316" : "#2563eb"}
+                        stroke={exactSelected ? "#9a3412" : "transparent"}
+                        strokeWidth={exactSelected ? 3 : 0}
+                        opacity={selectedDay && !sameDay ? 0.38 : 1}
+                      />
+                    );
+                  })}
+                </Bar>
+                <Bar yAxisId="left" name="Paradas" dataKey="stops_count" radius={[7, 7, 0, 0]} cursor="pointer" onClick={chooseDay}>
+                  {chartData.map((row) => {
+                    const sameDay = selectedDay?.day_ts === row.day_ts;
+                    const exactSelected = sameDay && (!selectedEvent || selectedEvent.event_type === "stop");
+                    return (
+                      <Cell
+                        key={`stop-${row.day_ts}`}
+                        fill={exactSelected ? "#f97316" : "#94a3b8"}
+                        stroke={exactSelected ? "#9a3412" : "transparent"}
+                        strokeWidth={exactSelected ? 3 : 0}
+                        opacity={selectedDay && !sameDay ? 0.38 : 1}
+                      />
+                    );
+                  })}
+                </Bar>
                 <Line yAxisId="right" name="Disponibilidad %" dataKey="availability_pct" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
