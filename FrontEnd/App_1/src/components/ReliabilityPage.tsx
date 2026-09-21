@@ -390,25 +390,6 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
     };
   }, [selectedChartDay?.day_ts, filteredPumpIdsCsv, locParam]);
 
-  const groupedDayEvents = useMemo(() => {
-    const groups = new Map<number, PumpEventRow[]>();
-    for (const ev of dayEvents) {
-      const id = Number(ev.pump_id);
-      const rows = groups.get(id) || [];
-      rows.push(ev);
-      groups.set(id, rows);
-    }
-    return [...groups.entries()]
-      .map(([pump_id, events]) => ({
-        pump_id,
-        pump_name: pumpNameById.get(pump_id) || `Bomba ${pump_id}`,
-        starts: events.filter((e) => e.event_type === "start").length,
-        stops: events.filter((e) => e.event_type === "stop").length,
-        events,
-      }))
-      .sort((a, b) => a.pump_name.localeCompare(b.pump_name, "es", { numeric: true }));
-  }, [dayEvents, pumpNameById]);
-
   function handleChartBarClick(data: any) {
     const row = data?.payload ?? data;
     if (row?.day_ts) setSelectedChartDay(row as PumpChartRow);
@@ -504,9 +485,94 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4">
-              <h3 className="text-lg font-black text-slate-950">Tabla mensual ordenable de bombas</h3>
+          {selectedChartDay && (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-600">Eventos del día</div>
+                  <h3 className="mt-1 text-2xl font-black text-slate-950">{dayLabel(selectedChartDay.day_ts)}</h3>
+                  <div className="mt-1 text-sm text-slate-500">
+                    {fmtInt(selectedChartDay.total_starts)} arranques · {fmtInt(selectedChartDay.total_stops)} paradas · {filteredPumpRows.length} bombas del filtro actual
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedChartDay(null)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Cerrar detalle
+                </button>
+              </div>
+
+              {dayEventsLoading ? (
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-slate-500">Cargando eventos...</div>
+              ) : dayEventsError ? (
+                <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{dayEventsError}</div>
+              ) : dayEvents.length ? (
+                <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Bomba</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Fecha</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Hora</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Evento</th>
+                          <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...dayEvents]
+                          .sort((a, b) => String(a.event_ts).localeCompare(String(b.event_ts)))
+                          .map((ev, idx) => {
+                            const isStart = ev.event_type === "start";
+                            return (
+                              <tr
+                                key={`${ev.event_ts}-${ev.pump_id}-${idx}`}
+                                className="border-t border-slate-200 bg-white hover:bg-slate-50"
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="font-black text-slate-950">{pumpNameById.get(Number(ev.pump_id)) || `Bomba ${ev.pump_id}`}</div>
+                                  <div className="text-xs text-slate-400">ID {ev.pump_id}</div>
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-800">
+                                  {new Date(`${selectedChartDay.day_ts}T12:00:00`).toLocaleDateString("es-AR")}
+                                </td>
+                                <td className="px-4 py-3 font-mono font-black tabular-nums text-slate-950">
+                                  {ev.event_time || "--:--:--"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`font-bold ${isStart ? "text-blue-700" : "text-slate-700"}`}>
+                                    {isStart ? "Arranque" : "Parada"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`inline-flex min-w-[52px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-black ${
+                                      isStart ? "bg-blue-600 text-white" : "bg-slate-800 text-white"
+                                    }`}
+                                  >
+                                    {isStart ? "ON" : "OFF"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  No hay eventos horarios registrados para las bombas visibles en este día.
+                </div>
+              )}
+            </section>
+          )}
+
+          {!selectedChartDay && (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4">
+                <h3 className="text-lg font-black text-slate-950">Tabla mensual ordenable de bombas</h3>
               <p className="text-sm text-slate-500">Tocá Ubicación para agrupar por localidad. Tocá una bomba para abrir su análisis individual.</p>
             </div>
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -543,6 +609,7 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
               </table>
             </div>
           </section>
+          )}
         </>
       ) : (
         <>
@@ -574,64 +641,6 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
             </div>
           </section>
         </>
-      )}
-
-      {selectedChartDay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={() => setSelectedChartDay(null)}>
-          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Detalle horario del día</div>
-                <h3 className="text-2xl font-black text-slate-950">{dayLabel(selectedChartDay.day_ts)}</h3>
-                <div className="mt-1 text-sm text-slate-500">
-                  {fmtInt(selectedChartDay.total_starts)} arranques · {fmtInt(selectedChartDay.total_stops)} paradas · {filteredPumpRows.length} bombas del filtro actual
-                </div>
-              </div>
-              <button onClick={() => setSelectedChartDay(null)} className="rounded-xl bg-slate-100 px-4 py-2 font-bold text-slate-700">Cerrar</button>
-            </div>
-
-            {dayEventsLoading ? (
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-slate-500">Cargando eventos...</div>
-            ) : dayEventsError ? (
-              <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{dayEventsError}</div>
-            ) : groupedDayEvents.length ? (
-              <div className="mt-6 space-y-4">
-                {groupedDayEvents.map((group) => (
-                  <div key={group.pump_id} className="overflow-hidden rounded-2xl border border-slate-200">
-                    <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3">
-                      <div>
-                        <div className="font-black text-slate-950">{group.pump_name}</div>
-                        <div className="text-xs text-slate-500">ID {group.pump_id}</div>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs font-bold">
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">{group.starts} arranques</span>
-                        <span className="rounded-full border border-slate-300 bg-white px-3 py-1 text-slate-700">{group.stops} paradas</span>
-                      </div>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {group.events.map((ev, idx) => (
-                        <div key={`${ev.event_ts}-${ev.pump_id}-${idx}`} className="flex items-center justify-between gap-4 px-4 py-3">
-                          <span className={`rounded-full border px-3 py-1 text-xs font-black ${
-                            ev.event_type === "start"
-                              ? "border-blue-200 bg-blue-50 text-blue-700"
-                              : "border-slate-300 bg-slate-50 text-slate-700"
-                          }`}>
-                            {ev.event_type === "start" ? "ARRANQUE" : "PARADA"}
-                          </span>
-                          <span className="font-mono text-base font-black tabular-nums text-slate-900">{ev.event_time || "--:--:--"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
-                No hay eventos horarios registrados para las bombas visibles en este día.
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {selectedPump && (
