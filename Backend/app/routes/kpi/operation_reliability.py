@@ -330,6 +330,94 @@ def get_pump_daily_chart(
     }
 
 
+@router.get("/pump-coincidences")
+def get_pump_coincidences(
+    month: str | None = Query(default=None),
+    location_id: int | None = Query(default=None),
+    pump_ids: str | None = Query(
+        default=None,
+        description="IDs de bombas separados por coma. Si se omite analiza todas las del alcance.",
+    ),
+    threshold_seconds: int = Query(default=300, ge=60, le=1800),
+):
+    """
+    Detecta arranques o paradas de bombas distintas de una misma localidad
+    ocurridos con menos de threshold_seconds de diferencia.
+    """
+    start, end = _month_bounds(month)
+
+    parsed_pump_ids: list[int] | None = None
+    if pump_ids:
+        try:
+            parsed_pump_ids = [int(x.strip()) for x in pump_ids.split(",") if x.strip()]
+        except ValueError:
+            parsed_pump_ids = None
+
+    sql = """
+        with events as (
+            select
+                v.entity_id::bigint as pump_id,
+                v.location_id::bigint as location_id,
+                v.event as event_type,
+                v.ts as event_ts,
+                (v.ts at time zone 'America/Argentina/Buenos_Aires')::date as local_day
+            from kpi.v_kpi_stream v
+            where v.kind = 'pump'
+              and v.metric = 'state'
+              and v.event in ('start', 'stop')
+              and (v.ts at time zone 'America/Argentina/Buenos_Aires')::date
+                    between %s::date and %s::date
+              and (%s::bigint is null or v.location_id = %s::bigint)
+              and (%s::bigint[] is null or v.entity_id = any(%s::bigint[]))
+        )
+        select
+            a.local_day as day_ts,
+            a.location_id,
+            l.name as location_name,
+            a.event_type,
+            a.pump_id as pump_a_id,
+            pa.name as pump_a_name,
+            a.event_ts as pump_a_ts,
+            to_char(a.event_ts at time zone 'America/Argentina/Buenos_Aires', 'HH24:MI:SS') as pump_a_time,
+            b.pump_id as pump_b_id,
+            pb.name as pump_b_name,
+            b.event_ts as pump_b_ts,
+            to_char(b.event_ts at time zone 'America/Argentina/Buenos_Aires', 'HH24:MI:SS') as pump_b_time,
+            round(abs(extract(epoch from (b.event_ts - a.event_ts)))::numeric, 1) as delta_seconds
+        from events a
+        join events b
+          on b.location_id = a.location_id
+         and b.event_type = a.event_type
+         and b.local_day = a.local_day
+         and b.pump_id > a.pump_id
+         and abs(extract(epoch from (b.event_ts - a.event_ts))) < %s
+        left join public.pumps pa on pa.id = a.pump_id
+        left join public.pumps pb on pb.id = b.pump_id
+        left join public.locations l on l.id = a.location_id
+        order by a.local_day, a.location_id, least(a.event_ts, b.event_ts)
+    """
+
+    items = _fetch_all(
+        sql,
+        (
+            start,
+            end,
+            location_id,
+            location_id,
+            parsed_pump_ids,
+            parsed_pump_ids,
+            threshold_seconds,
+        ),
+    )
+
+    return {
+        "ok": True,
+        "month": start.strftime("%Y-%m"),
+        "threshold_seconds": threshold_seconds,
+        "items": items,
+    }
+
+
 @router.get("/pump-events")
 def get_pump_events(
     day: date = Query(..., description="Día local en formato YYYY-MM-DD."),
