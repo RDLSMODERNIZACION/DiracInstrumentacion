@@ -680,6 +680,45 @@ def get_pump_event_context(
             pressure = load_hydraulic("pressure")
             flow = load_hydraulic("flow")
 
+            cur.execute(
+                """
+                select
+                    v.entity_id::bigint as pump_id,
+                    p.name as pump_name,
+                    v.location_id::bigint as location_id,
+                    l.name as location_name,
+                    v.event as event_type,
+                    v.ts as event_ts,
+                    to_char(
+                        v.ts at time zone 'America/Argentina/Buenos_Aires',
+                        'DD/MM/YYYY'
+                    ) as event_date,
+                    to_char(
+                        v.ts at time zone 'America/Argentina/Buenos_Aires',
+                        'HH24:MI:SS'
+                    ) as event_time,
+                    round(abs(extract(epoch from (v.ts - %s)))::numeric, 1) as delta_seconds
+                from kpi.v_kpi_stream v
+                left join public.pumps p on p.id = v.entity_id
+                left join public.locations l on l.id = v.location_id
+                where v.kind = 'pump'
+                  and v.metric = 'state'
+                  and v.event in ('start', 'stop')
+                  and v.location_id = %s
+                  and v.entity_id <> %s
+                  and v.ts between %s and %s
+                order by v.ts asc, v.entity_id asc
+                """,
+                (
+                    event_ts,
+                    pump.get("location_id"),
+                    pump_id,
+                    start_ts,
+                    end_ts,
+                ),
+            )
+            nearby_events = [_clean_row(dict(r)) for r in (cur.fetchall() or [])]
+
     return {
         "ok": True,
         "pump": _clean_row(dict(pump)),
@@ -693,6 +732,7 @@ def get_pump_event_context(
         "energy": energy,
         "pressure": pressure,
         "flow": flow,
+        "nearby_events": nearby_events,
     }
 
 
