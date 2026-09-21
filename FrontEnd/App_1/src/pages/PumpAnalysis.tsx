@@ -647,7 +647,7 @@ export default function PumpAnalysis() {
           <section id="event-detail" className="scroll-mt-5 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.15em] text-blue-600">Timeline del día</div>
+                <div className="text-[11px] font-black uppercase tracking-[0.15em] text-blue-600">Eventos del día</div>
                 <h2 className="mt-1 text-2xl font-black capitalize text-slate-950">{fullDayLabel(selectedDay.day_ts)}</h2>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
                   <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">{selectedDay.starts_count} arranques</span>
@@ -665,35 +665,65 @@ export default function PumpAnalysis() {
             ) : eventsError ? (
               <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{eventsError}</div>
             ) : dayEvents.length ? (
-              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {dayEvents.map((ev, idx) => {
-                  const selected = selectedEvent?.event_ts === ev.event_ts && selectedEvent?.event_type === ev.event_type;
-                  const isStart = ev.event_type === "start";
-                  return (
-                    <button
-                      key={`${ev.event_ts}-${idx}`}
-                      onClick={() => setSelectedEvent(ev)}
-                      className={`group flex items-center justify-between rounded-2xl border p-4 text-left transition ${
-                        selected
-                          ? "border-blue-500 bg-blue-50 shadow-sm ring-2 ring-blue-100"
-                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black ${
-                          isStart ? "bg-blue-600 text-white" : "bg-slate-800 text-white"
-                        }`}>
-                          {isStart ? "ON" : "OFF"}
-                        </div>
-                        <div>
-                          <div className="text-xs font-black uppercase tracking-wide text-slate-400">{isStart ? "Arranque" : "Parada"}</div>
-                          <div className="mt-0.5 font-mono text-lg font-black text-slate-950">{ev.event_time || fmtEventTime(ev.event_ts)}</div>
-                        </div>
-                      </div>
-                      <div className="text-xl text-slate-300 transition group-hover:text-slate-500">›</div>
-                    </button>
-                  );
-                })}
+              <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Fecha</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Hora</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Evento</th>
+                        <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Estado</th>
+                        <th className="w-12 px-4 py-3 text-right text-[11px] font-black uppercase tracking-[0.12em]">Ver</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayEvents.map((ev, idx) => {
+                        const selected =
+                          selectedEvent?.event_ts === ev.event_ts &&
+                          selectedEvent?.event_type === ev.event_type;
+                        const isStart = ev.event_type === "start";
+                        return (
+                          <tr
+                            key={`${ev.event_ts}-${idx}`}
+                            onClick={() => setSelectedEvent(ev)}
+                            className={`cursor-pointer border-t border-slate-200 transition ${
+                              selected
+                                ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
+                                : "bg-white hover:bg-slate-50"
+                            }`}
+                          >
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {new Date(`${selectedDay.day_ts}T12:00:00`).toLocaleDateString("es-AR")}
+                            </td>
+                            <td className="px-4 py-3 font-mono font-black tabular-nums text-slate-950">
+                              {ev.event_time || fmtEventTime(ev.event_ts)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`font-bold ${isStart ? "text-blue-700" : "text-slate-700"}`}>
+                                {isStart ? "Arranque" : "Parada"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex min-w-[52px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-black ${
+                                  isStart
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-slate-800 text-white"
+                                }`}
+                              >
+                                {isStart ? "ON" : "OFF"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`text-lg font-black ${selected ? "text-blue-600" : "text-slate-300"}`}>›</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
