@@ -382,6 +382,232 @@ def get_pump_events(
     }
 
 
+@router.get("/pump-event-context")
+def get_pump_event_context(
+    pump_id: int = Query(..., ge=1),
+    event_ts: datetime = Query(..., description="Timestamp ISO del arranque/parada."),
+    event_type: str | None = Query(default=None),
+    window_minutes: int = Query(default=15, ge=5, le=60),
+):
+    """
+    Contexto sincronizado alrededor de un evento de bomba.
+
+    - Energía: analizador asociado explícitamente en pump_power_analyzers.
+    - Presión/caudal: señal del manifold de la misma ubicación de la bomba.
+      Este criterio es intencionalmente conservador y se informa en mapping_source.
+    - Devuelve series de 15 segundos y promedios antes/después del evento.
+    """
+    if event_ts.tzinfo is None:
+        event_ts = event_ts.replace(tzinfo=datetime.now().astimezone().tzinfo)
+
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                select p.id as pump_id, p.name as pump_name, p.location_id, l.name as location_name
+                from public.pumps p
+                left join public.locations l on l.id = p.location_id
+                where p.id = %s
+                """,
+                (pump_id,),
+            )
+            pump = cur.fetchone()
+            if not pump:
+                return {"ok": False, "detail": "Bomba no encontrada"}
+
+            start_ts = event_ts - __import__("datetime").timedelta(minutes=window_minutes)
+            end_ts = event_ts + __import__("datetime").timedelta(minutes=window_minutes)
+
+            def avg_pair(table_sql: str, value_expr: str, extra_where: str, params: tuple):
+                sql = f"""
+                    select
+                        avg({value_expr}) filter (
+                            where ts >= %s and ts < %s
+                        ) as before_value,
+                        avg({value_expr}) filter (
+                            where ts > %s and ts <= %s
+                        ) as after_value
+                    from {table_sql}
+                    where ts between %s and %s
+                      {extra_where}
+                """
+                cur.execute(
+                    sql,
+                    (
+                        start_ts,
+                        event_ts,
+                        event_ts,
+                        end_ts,
+                        start_ts,
+                        end_ts,
+                        *params,
+                    ),
+                )
+                return cur.fetchone() or {}
+
+            # ----- Energía -----
+            cur.execute(
+                """
+                select ppa.analyzer_id, na.name as analyzer_name
+                from public.pump_power_analyzers ppa
+                join public.network_analyzers na on na.id = ppa.analyzer_id
+                where ppa.pump_id = %s and ppa.enabled = true
+                order by ppa.updated_at desc nulls last, ppa.created_at desc nulls last
+                limit 1
+                """,
+                (pump_id,),
+            )
+            analyzer = cur.fetchone()
+
+            energy = {"available": False, "mapping_source": "pump_power_analyzers", "series": []}
+            if analyzer:
+                analyzer_id = int(analyzer["analyzer_id"])
+                cur.execute(
+                    """
+                    select
+                        date_bin(interval '15 seconds', ts, timestamptz '2001-01-01') as ts,
+                        round(avg(p_kw)::numeric, 3) as p_kw,
+                        round(avg((coalesce(i_l1,0)+coalesce(i_l2,0)+coalesce(i_l3,0))/3.0)::numeric, 3) as current_a,
+                        round(avg(pf)::numeric, 4) as pf
+                    from public.network_analyzer_readings
+                    where analyzer_id = %s
+                      and ts between %s and %s
+                    group by 1
+                    order by 1
+                    """,
+                    (analyzer_id, start_ts, end_ts),
+                )
+                series = [_clean_row(dict(r)) for r in (cur.fetchall() or [])]
+
+                cur.execute(
+                    """
+                    select
+                        avg(p_kw) filter (where ts >= %s and ts < %s) as before_kw,
+                        avg(p_kw) filter (where ts > %s and ts <= %s) as after_kw,
+                        avg((coalesce(i_l1,0)+coalesce(i_l2,0)+coalesce(i_l3,0))/3.0)
+                            filter (where ts >= %s and ts < %s) as before_a,
+                        avg((coalesce(i_l1,0)+coalesce(i_l2,0)+coalesce(i_l3,0))/3.0)
+                            filter (where ts > %s and ts <= %s) as after_a
+                    from public.network_analyzer_readings
+                    where analyzer_id = %s
+                      and ts between %s and %s
+                    """,
+                    (
+                        start_ts, event_ts, event_ts, end_ts,
+                        start_ts, event_ts, event_ts, end_ts,
+                        analyzer_id, start_ts, end_ts,
+                    ),
+                )
+                agg = cur.fetchone() or {}
+                before_kw = float(agg["before_kw"]) if agg.get("before_kw") is not None else None
+                after_kw = float(agg["after_kw"]) if agg.get("after_kw") is not None else None
+                before_a = float(agg["before_a"]) if agg.get("before_a") is not None else None
+                after_a = float(agg["after_a"]) if agg.get("after_a") is not None else None
+
+                energy = {
+                    "available": bool(series),
+                    "mapping_source": "pump_power_analyzers",
+                    "analyzer_id": analyzer_id,
+                    "analyzer_name": analyzer.get("analyzer_name"),
+                    "before": {"p_kw": before_kw, "current_a": before_a},
+                    "after": {"p_kw": after_kw, "current_a": after_a},
+                    "delta": {
+                        "p_kw": (after_kw - before_kw) if before_kw is not None and after_kw is not None else None,
+                        "current_a": (after_a - before_a) if before_a is not None and after_a is not None else None,
+                    },
+                    "series": series,
+                }
+
+            def load_hydraulic(signal_type: str):
+                cur.execute(
+                    """
+                    select
+                        ms.id as signal_id,
+                        ms.unit,
+                        ms.tag,
+                        m.id as manifold_id,
+                        m.name as manifold_name
+                    from public.manifold_signals ms
+                    join public.manifolds m on m.id = ms.manifold_id
+                    where m.location_id = %s
+                      and ms.signal_type::text = %s
+                    order by ms.id
+                    limit 1
+                    """,
+                    (pump.get("location_id"), signal_type),
+                )
+                sig = cur.fetchone()
+                if not sig:
+                    return {
+                        "available": False,
+                        "mapping_source": "same_location_manifold",
+                        "series": [],
+                    }
+
+                signal_id = int(sig["signal_id"])
+                cur.execute(
+                    """
+                    select
+                        date_bin(interval '15 seconds', created_at, timestamptz '2001-01-01') as ts,
+                        round(avg(value)::numeric, 4) as value
+                    from public.manifold_signal_readings
+                    where manifold_signal_id = %s
+                      and created_at between %s and %s
+                    group by 1
+                    order by 1
+                    """,
+                    (signal_id, start_ts, end_ts),
+                )
+                series = [_clean_row(dict(r)) for r in (cur.fetchall() or [])]
+
+                cur.execute(
+                    """
+                    select
+                        avg(value) filter (where created_at >= %s and created_at < %s) as before_value,
+                        avg(value) filter (where created_at > %s and created_at <= %s) as after_value
+                    from public.manifold_signal_readings
+                    where manifold_signal_id = %s
+                      and created_at between %s and %s
+                    """,
+                    (start_ts, event_ts, event_ts, end_ts, signal_id, start_ts, end_ts),
+                )
+                agg = cur.fetchone() or {}
+                before_v = float(agg["before_value"]) if agg.get("before_value") is not None else None
+                after_v = float(agg["after_value"]) if agg.get("after_value") is not None else None
+
+                return {
+                    "available": bool(series),
+                    "mapping_source": "same_location_manifold",
+                    "signal_id": signal_id,
+                    "manifold_id": sig.get("manifold_id"),
+                    "manifold_name": sig.get("manifold_name"),
+                    "tag": sig.get("tag"),
+                    "unit": sig.get("unit"),
+                    "before": before_v,
+                    "after": after_v,
+                    "delta": (after_v - before_v) if before_v is not None and after_v is not None else None,
+                    "series": series,
+                }
+
+            pressure = load_hydraulic("pressure")
+            flow = load_hydraulic("flow")
+
+    return {
+        "ok": True,
+        "pump": _clean_row(dict(pump)),
+        "event": {
+            "type": event_type,
+            "ts": event_ts.isoformat(),
+            "window_minutes": window_minutes,
+            "from": start_ts.isoformat(),
+            "to": end_ts.isoformat(),
+        },
+        "energy": energy,
+        "pressure": pressure,
+        "flow": flow,
+    }
+
+
 @router.get("/pump-ranking")
 def get_pump_ranking(
     month: str | None = Query(default=None),
