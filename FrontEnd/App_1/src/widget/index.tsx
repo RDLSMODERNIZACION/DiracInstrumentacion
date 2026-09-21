@@ -25,7 +25,9 @@ import BaseSelectors from "./components/BaseSelectors";
 import type { LocOpt, PumpInfo, TankInfo } from "./types";
 
 const PRINCIPAL_PUMP_IDS = [12, 13, 14, 15, 16, 17, 18, 24, 25, 26, 29, 30];
-const PRINCIPAL_TANK_IDS = [7, 8, 9, 10, 11, 12, 21];
+// TK 160 (tank_id 21 / Planta Nueva) pertenece a impulsión y queda fuera
+// del KPI y de los promedios de tanques de distribución.
+const PRINCIPAL_TANK_IDS = [7, 8, 9, 10, 11, 12];
 type CombinedOperationEvent = {
   id: string;
   kind: "pump" | "tank";
