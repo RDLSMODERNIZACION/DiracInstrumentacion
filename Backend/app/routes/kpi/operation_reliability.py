@@ -330,6 +330,58 @@ def get_pump_daily_chart(
     }
 
 
+@router.get("/pump-events")
+def get_pump_events(
+    day: date = Query(..., description="Día local en formato YYYY-MM-DD."),
+    location_id: int | None = Query(default=None),
+    pump_ids: str | None = Query(
+        default=None,
+        description="IDs de bombas separados por coma. Si se omite devuelve todas las del alcance.",
+    ),
+):
+    parsed_pump_ids: list[int] | None = None
+    if pump_ids:
+        try:
+            parsed_pump_ids = [int(x.strip()) for x in pump_ids.split(",") if x.strip()]
+        except ValueError:
+            parsed_pump_ids = None
+
+    sql = """
+        select
+            v.entity_id::bigint as pump_id,
+            v.location_id::bigint as location_id,
+            v.event as event_type,
+            v.ts as event_ts,
+            to_char(
+                v.ts at time zone 'America/Argentina/Buenos_Aires',
+                'HH24:MI:SS'
+            ) as event_time
+        from kpi.v_kpi_stream v
+        where v.kind = 'pump'
+          and v.metric = 'state'
+          and v.event in ('start', 'stop')
+          and (v.ts at time zone 'America/Argentina/Buenos_Aires')::date = %s::date
+          and (%s::bigint is null or v.location_id = %s::bigint)
+          and (%s::bigint[] is null or v.entity_id = any(%s::bigint[]))
+        order by v.ts asc, v.entity_id asc
+    """
+
+    return {
+        "ok": True,
+        "day": day.isoformat(),
+        "items": _fetch_all(
+            sql,
+            (
+                day,
+                location_id,
+                location_id,
+                parsed_pump_ids,
+                parsed_pump_ids,
+            ),
+        ),
+    }
+
+
 @router.get("/pump-ranking")
 def get_pump_ranking(
     month: str | None = Query(default=None),
