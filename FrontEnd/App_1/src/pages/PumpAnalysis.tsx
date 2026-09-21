@@ -816,48 +816,6 @@ export default function PumpAnalysis() {
           </section>
         )}
 
-        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div>
-            <div className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-400">Resumen por día</div>
-            <h2 className="mt-1 text-xl font-black text-slate-950">Detalle diario</h2>
-          </div>
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 text-left">Día</th>
-                  <th className="px-4 py-3 text-right">Arranques</th>
-                  <th className="px-4 py-3 text-right">Paradas</th>
-                  <th className="px-4 py-3 text-right">Disponibilidad</th>
-                  <th className="px-4 py-3 text-right">T. encendida</th>
-                  <th className="px-4 py-3 text-right">T. apagada</th>
-                  <th className="px-4 py-3 text-right">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daily.map((r) => (
-                  <tr
-                    key={r.day_ts}
-                    onClick={() => {
-                      setSelectedDay(r);
-                      setTimeout(() => document.getElementById("event-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
-                    }}
-                    className="cursor-pointer border-t border-slate-200 transition hover:bg-slate-50"
-                  >
-                    <td className="px-4 py-3 font-semibold">{dayLabel(r.day_ts)}</td>
-                    <td className="px-4 py-3 text-right">{r.starts_count}</td>
-                    <td className="px-4 py-3 text-right">{r.stops_count}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{fmtPct(r.availability_pct)}</td>
-                    <td className="px-4 py-3 text-right">{fmtDuration(r.running_seconds)}</td>
-                    <td className="px-4 py-3 text-right">{fmtDuration(r.stopped_seconds)}</td>
-                    <td className="px-4 py-3 text-right">{r.estado_operativo}</td>
-                  </tr>
-                ))}
-                {!daily.length && <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">Sin datos para este mes.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </div>
   );
