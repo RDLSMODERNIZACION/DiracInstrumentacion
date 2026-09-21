@@ -185,6 +185,22 @@ function fullDayLabel(day: string) {
   });
 }
 
+function localDayFromEventTs(ts?: string | null) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return y && m && day ? `${y}-${m}-${day}` : null;
+}
+
 function fmtEventTime(ts?: string | null) {
   if (!ts) return "--:--:--";
   const d = new Date(ts);
@@ -380,6 +396,8 @@ export default function PumpAnalysis() {
   const [searchParams, setSearchParams] = useSearchParams();
   const pumpIdNum = Number(pumpId);
   const month = searchParams.get("month") || currentMonth();
+  const deepLinkEventTs = searchParams.get("event_ts");
+  const deepLinkEventType = searchParams.get("event_type");
 
   const [daily, setDaily] = useState<PumpDailyRow[]>([]);
   const [diagnostic, setDiagnostic] = useState<PumpDiagnostic | null>(null);
@@ -432,6 +450,16 @@ export default function PumpAnalysis() {
   }, [pumpIdNum, month]);
 
   useEffect(() => {
+    if (!deepLinkEventTs || !daily.length) return;
+    const targetDay = localDayFromEventTs(deepLinkEventTs);
+    if (!targetDay) return;
+    const row = daily.find((r) => String(r.day_ts) === targetDay);
+    if (row && selectedDay?.day_ts !== row.day_ts) {
+      setSelectedDay(row);
+    }
+  }, [deepLinkEventTs, daily, selectedDay?.day_ts]);
+
+  useEffect(() => {
     if (!selectedDay?.day_ts) {
       setDayEvents([]);
       setEventsError("");
@@ -458,6 +486,36 @@ export default function PumpAnalysis() {
       alive = false;
     };
   }, [selectedDay?.day_ts, pumpIdNum]);
+
+  useEffect(() => {
+    if (!deepLinkEventTs || !dayEvents.length) return;
+    const targetMs = new Date(deepLinkEventTs).getTime();
+    if (!Number.isFinite(targetMs)) return;
+
+    const match = dayEvents.find((ev) => {
+      const sameTs = Math.abs(new Date(ev.event_ts).getTime() - targetMs) < 1000;
+      const sameType = !deepLinkEventType || ev.event_type === deepLinkEventType;
+      return sameTs && sameType;
+    });
+
+    if (
+      match &&
+      (selectedEvent?.event_ts !== match.event_ts ||
+        selectedEvent?.event_type !== match.event_type)
+    ) {
+      setSelectedEvent(match);
+      setTimeout(
+        () => document.getElementById("event-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        120
+      );
+    }
+  }, [
+    deepLinkEventTs,
+    deepLinkEventType,
+    dayEvents,
+    selectedEvent?.event_ts,
+    selectedEvent?.event_type,
+  ]);
 
   useEffect(() => {
     if (!selectedEvent) {
