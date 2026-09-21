@@ -104,6 +104,18 @@ type EnergyContext = {
   series: SignalPoint[];
 };
 
+type NearbyPumpEvent = {
+  pump_id: number;
+  pump_name?: string | null;
+  location_id: number | null;
+  location_name?: string | null;
+  event_type: "start" | "stop" | string;
+  event_ts: string;
+  event_date?: string | null;
+  event_time?: string | null;
+  delta_seconds?: number | null;
+};
+
 type EventContext = {
   ok: boolean;
   pump?: {
@@ -122,6 +134,7 @@ type EventContext = {
   energy: EnergyContext;
   pressure: HydraulicContext;
   flow: HydraulicContext;
+  nearby_events?: NearbyPumpEvent[];
 };
 
 function currentMonth() {
@@ -183,6 +196,13 @@ function fmtEventTime(ts?: string | null) {
     second: "2-digit",
     hour12: false,
   }).format(d);
+}
+
+function fmtRelativeDelta(seconds?: number | null) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s)) return "--";
+  if (s < 60) return `${Math.round(s)} s`;
+  return `${(s / 60).toLocaleString("es-AR", { maximumFractionDigits: 1 })} min`;
 }
 
 function buildUrl(path: string, params: Record<string, string | number | undefined | null> = {}) {
@@ -768,6 +788,70 @@ export default function PumpAnalysis() {
                   <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{contextError}</div>
                 ) : context ? (
                   <>
+                    <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Actividad simultánea en la localidad</div>
+                          <div className="mt-1 text-base font-black text-slate-950">
+                            Otras bombas dentro de la ventana ± {windowMinutes} min
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${
+                          (context.nearby_events?.length || 0) > 0
+                            ? "bg-red-100 text-red-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}>
+                          {(context.nearby_events?.length || 0) > 0
+                            ? `${context.nearby_events?.length} evento${context.nearby_events?.length === 1 ? "" : "s"}`
+                            : "Sin coincidencias"}
+                        </span>
+                      </div>
+
+                      {(context.nearby_events?.length || 0) > 0 ? (
+                        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-slate-50 text-slate-500">
+                                <tr>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Bomba</th>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Localidad</th>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Fecha</th>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Hora</th>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Evento</th>
+                                  <th className="px-4 py-3 text-left text-[11px] font-black uppercase tracking-[0.12em]">Diferencia</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(context.nearby_events || []).map((ev, idx) => {
+                                  const isStart = ev.event_type === "start";
+                                  return (
+                                    <tr key={`${ev.event_ts}-${ev.pump_id}-${idx}`} className="border-t border-slate-200">
+                                      <td className="px-4 py-3 font-black text-slate-950">{ev.pump_name || `Bomba ${ev.pump_id}`}</td>
+                                      <td className="px-4 py-3 text-slate-700">{ev.location_name || context.pump?.location_name || "-"}</td>
+                                      <td className="px-4 py-3 font-semibold text-slate-700">{ev.event_date || "--"}</td>
+                                      <td className="px-4 py-3 font-mono font-black tabular-nums text-slate-950">{ev.event_time || fmtEventTime(ev.event_ts)}</td>
+                                      <td className="px-4 py-3">
+                                        <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black ${
+                                          isStart ? "bg-blue-600 text-white" : "bg-slate-800 text-white"
+                                        }`}>
+                                          {isStart ? "ARRANQUE" : "PARADA"}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 font-bold text-red-700">{fmtRelativeDelta(ev.delta_seconds)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 text-sm text-slate-500">
+                          No se detectaron arranques ni paradas de otras bombas de {context.pump?.location_name || "esta localidad"} dentro de esta ventana.
+                        </div>
+                      )}
+                    </div>
+
                     <div className="mt-6 grid gap-3 lg:grid-cols-3">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="mb-3 flex items-center justify-between">
