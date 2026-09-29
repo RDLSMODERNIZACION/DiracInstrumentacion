@@ -1,6 +1,14 @@
 {
   "routes": [
     {
+      "src": "/ahorroenergetico",
+      "dest": "https://ahorro-energetico.vercel.app/ahorroenergetico"
+    },
+    {
+      "src": "/ahorroenergetico/(.*)",
+      "dest": "https://ahorro-energetico.vercel.app/ahorroenergetico/$1"
+    },
+    {
       "src": "/cargaderosdeagua",
       "dest": "https://cargaderoagua.vercel.app/cargaderosdeagua/admin/dispatches"
     },
@@ -8,7 +16,12 @@
       "src": "/cargaderosdeagua/(.*)",
       "dest": "https://cargaderoagua.vercel.app/cargaderosdeagua/$1"
     },
-    { "handle": "filesystem" },
-    { "src": "/kpi/.*", "dest": "/kpi/index.html" }
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/kpi/.*",
+      "dest": "/kpi/index.html"
+    }
   ]
 }
