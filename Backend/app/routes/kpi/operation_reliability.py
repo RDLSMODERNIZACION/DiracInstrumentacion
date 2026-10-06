@@ -1058,6 +1058,7 @@ def get_tank_day_events(
     day: date = Query(...),
     location_id: int | None = Query(default=None),
     tank_id: int | None = Query(default=None),
+    company_id: int | None = Query(default=None),
 ):
     sql = """
         select
@@ -1069,22 +1070,27 @@ def get_tank_day_events(
             tce.event_type,
             case
                 when tce.event_type = 'low' then 'Nivel bajo'
-                when tce.event_type = 'low_low' then 'Nivel bajo crÃ­tico'
+                when tce.event_type = 'low_low' then 'Nivel bajo crítico'
                 when tce.event_type = 'high' then 'Nivel alto'
-                when tce.event_type = 'high_high' then 'Nivel alto crÃ­tico'
+                when tce.event_type = 'high_high' then 'Nivel alto crítico'
                 else tce.event_type
             end as event_label,
             tce.configured_limit,
             tce.detected_value,
             tce.started_at,
             tce.ended_at,
-            tce.duration_seconds,
+            duration.seconds::int as duration_seconds,
             case
-                when tce.duration_seconds is null then null
-                when tce.duration_seconds < 60 then tce.duration_seconds || ' seg'
-                when tce.duration_seconds < 3600 then round(tce.duration_seconds / 60.0, 1) || ' min'
-                else round(tce.duration_seconds / 3600.0, 1) || ' h'
+                when duration.seconds < 60 then round(duration.seconds) || ' seg'
+                when duration.seconds < 3600 then round(duration.seconds / 60.0, 1) || ' min'
+                else round(duration.seconds / 3600.0, 1) || ' h'
             end as duration_label,
+            levels.min_level_pct,
+            levels.max_level_pct,
+            case when tce.event_type in ('low', 'low_low')
+                then levels.min_level_pct else levels.max_level_pct end as reached_level_pct,
+            levels.samples_count,
+            (tce.ended_at is null) as is_open,
             tce.status,
             case
                 when tce.status = 'active' then 'Activo'
@@ -1094,9 +1100,22 @@ def get_tank_day_events(
         from kpi.tank_critical_events tce
         left join public.tanks t on t.id = tce.tank_id
         left join public.locations l on l.id = tce.location_id
+        cross join lateral (
+            select greatest(0, extract(epoch from (coalesce(tce.ended_at, now()) - tce.started_at))) as seconds
+        ) duration
+        left join lateral (
+            select min(ti.level_pct) as min_level_pct,
+                   max(ti.level_pct) as max_level_pct,
+                   count(ti.level_pct)::int as samples_count
+            from public.tank_ingest ti
+            where ti.tank_id = tce.tank_id
+              and ti.created_at >= tce.started_at
+              and ti.created_at <= coalesce(tce.ended_at, now())
+        ) levels on true
         where (tce.started_at at time zone 'America/Argentina/Buenos_Aires')::date = %s::date
           and (%s::bigint is null or tce.location_id = %s::bigint)
           and (%s::bigint is null or tce.tank_id = %s::bigint)
+          and (%s::bigint is null or l.company_id = %s::bigint)
         order by tce.started_at asc
     """
 
@@ -1111,6 +1130,8 @@ def get_tank_day_events(
                 location_id,
                 tank_id,
                 tank_id,
+                company_id,
+                company_id,
             ),
         ),
     }
