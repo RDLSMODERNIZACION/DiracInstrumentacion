@@ -154,6 +154,54 @@ type TankEventRow = {
   status_label: string;
 };
 
+type TankDisconnection = {
+  tank_id: number;
+  tank_name: string;
+  location_name: string | null;
+  last_reading_at: string;
+  started_at: string;
+  ended_at: string | null;
+  observed_until: string;
+  is_open: boolean;
+  duration_seconds: number;
+  duration_in_month_seconds: number;
+};
+
+type TankDisconnectionResponse = {
+  items: TankDisconnection[];
+  daily: { day_ts: string; disconnection_events: number; offline_seconds: number }[];
+  threshold_seconds: number;
+  total_offline_seconds: number;
+};
+
+function disconnectionDaySeconds(item: TankDisconnection, day: string) {
+  const from = new Date(`${day}T00:00:00-03:00`).getTime();
+  const start = Math.max(new Date(item.started_at).getTime(), from);
+  const end = Math.min(new Date(item.observed_until).getTime(), from + 86400000);
+  return Math.max(0, (end - start) / 1000);
+}
+
+function DisconnectionTable({ items, day }: { items: TankDisconnection[]; day?: string }) {
+  return <div className="overflow-x-auto rounded-2xl border border-slate-200">
+    <table className="min-w-full text-sm">
+      <thead className="bg-slate-50 text-slate-600"><tr>
+        {["Tanque / ubicación", "Última lectura", "Inicio sin comunicación", "Reconexión", day ? "Tiempo en el día" : "Tiempo en el mes", "Duración total del corte", "Estado"].map((label) => <th key={label} className="px-4 py-3 text-left">{label}</th>)}
+      </tr></thead>
+      <tbody>{items.map((item) => <tr key={`${item.tank_id}-${item.started_at}`} className="border-t border-slate-200">
+        <td className="px-4 py-3"><b>{item.tank_name}</b><div className="text-xs text-slate-500">{item.location_name || "Sin ubicación"}</div></td>
+        <td className="px-4 py-3 whitespace-nowrap">{tankEventTime(item.last_reading_at)}</td>
+        <td className="px-4 py-3 whitespace-nowrap">{tankEventTime(item.started_at)}</td>
+        <td className="px-4 py-3 whitespace-nowrap">{tankEventTime(item.ended_at)}</td>
+        <td className="px-4 py-3 font-bold">{fmtDuration(day ? disconnectionDaySeconds(item, day) : item.duration_in_month_seconds)}</td>
+        <td className="px-4 py-3">{fmtDuration(item.duration_seconds)}</td>
+        <td className="px-4 py-3 font-bold text-slate-700">{item.is_open ? "Sin comunicación · en curso" : "Reconectado"}</td>
+      </tr>)}
+      {!items.length && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No se detectaron períodos sin comunicación con las lecturas disponibles.</td></tr>}
+      </tbody>
+    </table>
+  </div>;
+}
+
 function tankEventTime(value: string | null) {
   if (!value) return "En curso";
   const parts = new Intl.DateTimeFormat("es-AR", {
@@ -175,6 +223,7 @@ type TankChartRow = {
   low_critical_events: number;
   high_events: number;
   high_critical_events: number;
+  disconnection_events: number;
 };
 
 // Conjunto de bombas de impulsión que ya usa la app principal.
@@ -315,7 +364,28 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
   const [tankEventsLoading, setTankEventsLoading] = useState(false);
   const [tankEventsError, setTankEventsError] = useState("");
 
+  const [disconnections, setDisconnections] = useState<TankDisconnectionResponse | null>(null);
+  const [disconnectionsLoading, setDisconnectionsLoading] = useState(false);
+  const [disconnectionsError, setDisconnectionsError] = useState("");
+
   const locParam = safeLocationId(locationId);
+
+  useEffect(() => {
+    if (view !== "tanks") return;
+    let alive = true;
+    setDisconnections(null);
+    setDisconnectionsLoading(true);
+    setDisconnectionsError("");
+    fetchJson<TankDisconnectionResponse>("/kpi/operation-reliability/tank-disconnections", { month, location_id: locParam })
+      .then((r) => alive && setDisconnections(r))
+      .catch((e) => alive && setDisconnectionsError(e?.message || "No se pudo calcular el tiempo sin comunicación."))
+      .finally(() => alive && setDisconnectionsLoading(false));
+    return () => { alive = false; };
+  }, [month, locParam, view]);
+
+  const selectedDayDisconnections = useMemo(() => selectedTankDay
+    ? (disconnections?.items || []).filter((item) => disconnectionDaySeconds(item, selectedTankDay) > 0)
+    : [], [disconnections, selectedTankDay]);
 
   useEffect(() => {
     setSelectedTankDay(null);
@@ -574,6 +644,7 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
         low_critical_events: 0,
         high_events: 0,
         high_critical_events: 0,
+        disconnection_events: 0,
       };
       cur.low_events += toNum(r.low_events);
       cur.low_critical_events += toNum(r.low_critical_events);
@@ -581,8 +652,16 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
       cur.high_critical_events += toNum(r.high_critical_events);
       m.set(r.day_ts, cur);
     }
+    for (const r of disconnections?.daily || []) {
+      const cur = m.get(r.day_ts) || {
+        day_ts: r.day_ts, day_label: dayLabel(r.day_ts),
+        low_events: 0, low_critical_events: 0, high_events: 0, high_critical_events: 0, disconnection_events: 0,
+      };
+      cur.disconnection_events = r.disconnection_events;
+      m.set(r.day_ts, cur);
+    }
     return [...m.values()].sort((a, b) => a.day_ts.localeCompare(b.day_ts));
-  }, [tankDaily]);
+  }, [tankDaily, disconnections]);
 
   const selectedPumpDays = useMemo(() => {
     if (!selectedPump) return [];
@@ -841,7 +920,7 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
         <>
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="text-lg font-black">Eventos de tanques por día</h3>
-            <p className="mt-1 text-sm text-slate-500">Tocá una barra o elegí un día para ver qué ocurrió, el nivel alcanzado y la duración.</p>
+            <p className="mt-1 text-sm text-slate-500">Tocá una barra o elegí un día para ver qué ocurrió, el nivel alcanzado y la duración. Los cortes sin comunicación se muestran en cada día afectado.</p>
             <div className="mt-3 flex flex-wrap gap-2" aria-label="Días con eventos de tanques">
               {tankChart.map((r) => <button key={r.day_ts} onClick={() => setSelectedTankDay(r.day_ts)} aria-pressed={selectedTankDay === r.day_ts} className={`rounded-xl border px-3 py-2 text-sm font-bold ${selectedTankDay === r.day_ts ? "bg-slate-950 text-white" : "bg-white text-slate-700"}`}>{r.day_label}</button>)}
             </div>
@@ -865,9 +944,20 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                   <Bar name="Alto crítico" dataKey="high_critical_events" stackId="e" fill="#dc2626" onClick={selectTankDay} cursor="pointer">
                     {tankChart.map((r) => <Cell key={r.day_ts} fill="#dc2626" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
                   </Bar>
+                  <Bar name="Sin comunicación" dataKey="disconnection_events" stackId="e" fill="#64748b" onClick={selectTankDay} cursor="pointer">
+                    {tankChart.map((r) => <Cell key={r.day_ts} fill="#64748b" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
+                  </Bar>
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
+          </section>
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 className="text-lg font-black">Tiempo sin comunicación de tanques</h3>
+            <p className="mt-1 mb-4 text-sm text-slate-500">Se considera sin comunicación después de {disconnections ? fmtDuration(disconnections.threshold_seconds) : "la ventana configurada"} sin recibir lecturas. El tiempo se estima desde los datos registrados; antes de la primera lectura no se puede determinar.</p>
+            {disconnectionsLoading ? <p role="status">Calculando desconexiones...</p> : disconnectionsError ? <p role="alert" className="text-red-700">{disconnectionsError}</p> : disconnections && <>
+              <p className="mb-4 font-bold">Tiempo acumulado en el mes: {disconnections.total_offline_seconds === 0 ? "0 seg" : fmtDuration(disconnections.total_offline_seconds)}<span className="font-normal text-slate-500"> (suma de los tanques visibles)</span></p>
+              <DisconnectionTable items={disconnections.items} />
+            </>}
           </section>
           {selectedTankDay && (
             <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -878,6 +968,12 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                 </div>
                 <button onClick={() => setSelectedTankDay(null)} className="rounded-xl bg-slate-100 px-4 py-2 font-bold">Cerrar</button>
               </div>
+              <h4 className="mb-3 font-bold">Sin comunicación en el día</h4>
+              {disconnectionsLoading ? <p>Calculando desconexiones...</p> : disconnectionsError ? <p className="text-red-700">{disconnectionsError}</p> : disconnections && <>
+                <p className="mb-3 text-sm font-bold">Tiempo acumulado: {selectedDayDisconnections.length ? fmtDuration(selectedDayDisconnections.reduce((sum, item) => sum + disconnectionDaySeconds(item, selectedTankDay), 0)) : "0 seg"}</p>
+                <DisconnectionTable items={selectedDayDisconnections} day={selectedTankDay} />
+              </>}
+              <h4 className="mb-3 mt-6 font-bold">Eventos de nivel</h4>
               {tankEventsLoading ? <p role="status">Cargando eventos...</p> : tankEventsError ? <p role="alert" className="text-red-700">{tankEventsError}</p> : (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200">
                   <table className="min-w-full text-sm">

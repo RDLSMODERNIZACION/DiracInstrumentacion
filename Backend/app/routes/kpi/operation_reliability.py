@@ -1,12 +1,14 @@
-﻿from datetime import date, datetime
+﻿from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 from calendar import monthrange
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
 from psycopg.rows import dict_row
 
 from app.db import get_conn
+from ._common import DEVICE_CONNECTED_WINDOW_MIN, LOCAL_TZ
 
 router = APIRouter(
     prefix="/kpi/operation-reliability",
@@ -1138,3 +1140,104 @@ def get_tank_day_events(
 
 
 
+
+
+def _disconnection_daily(items: list[dict], start: datetime, end: datetime) -> list[dict]:
+    """Split measured outage intervals at local midnight, clipped to the month."""
+    zone = ZoneInfo(LOCAL_TZ)
+    days: dict[str, dict] = {}
+    for item in items:
+        cursor = max(datetime.fromisoformat(item["started_at"]), start).astimezone(zone)
+        stop = min(datetime.fromisoformat(item["observed_until"]), end).astimezone(zone)
+        while cursor < stop:
+            tomorrow = datetime.combine(cursor.date() + timedelta(days=1), datetime.min.time(), zone)
+            segment_end = min(tomorrow, stop)
+            key = cursor.date().isoformat()
+            row = days.setdefault(key, {"day_ts": key, "disconnection_events": 0, "offline_seconds": 0})
+            row["disconnection_events"] += 1
+            row["offline_seconds"] += (segment_end - cursor).total_seconds()
+            cursor = segment_end
+    return [days[key] for key in sorted(days)]
+
+
+@router.get("/tank-disconnections")
+def get_tank_disconnections(
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    location_id: int | None = Query(default=None),
+    tank_id: int | None = Query(default=None),
+    company_id: int | None = Query(default=None),
+):
+    first, last = _month_bounds(month)
+    zone = ZoneInfo(LOCAL_TZ)
+    start = datetime.combine(first, datetime.min.time(), zone)
+    end = datetime.combine(last + timedelta(days=1), datetime.min.time(), zone)
+    observed_at = datetime.now(timezone.utc)
+    end = min(end, observed_at)
+    threshold_seconds = max(0, DEVICE_CONNECTED_WINDOW_MIN * 60)
+    if start >= end:
+        return {"ok": True, "items": [], "daily": [], "threshold_seconds": threshold_seconds}
+
+    sql = """
+        with bounds as (
+            select %s::timestamptz as from_ts, %s::timestamptz as to_ts,
+                   %s::timestamptz as observed_at, %s::int * interval '1 second' as grace
+        ), scope as (
+            select t.id as tank_id, t.name as tank_name,
+                   t.location_id, l.name as location_name
+            from public.tanks t
+            left join public.locations l on l.id = t.location_id
+            where (%s::bigint is null or t.location_id = %s::bigint)
+              and (%s::bigint is null or t.id = %s::bigint)
+              and (%s::bigint is null or l.company_id = %s::bigint)
+        ), readings as (
+            -- One reading before the month preserves cuts that cross its boundary.
+            select s.tank_id, prior.created_at
+            from scope s cross join bounds b
+            cross join lateral (
+                select ti.created_at from public.tank_ingest ti
+                where ti.tank_id = s.tank_id and ti.created_at < b.from_ts
+                order by ti.created_at desc limit 1
+            ) prior
+            union
+            select ti.tank_id, ti.created_at
+            from public.tank_ingest ti
+            join scope s on s.tank_id = ti.tank_id cross join bounds b
+            where ti.created_at >= b.from_ts and ti.created_at < b.to_ts
+            union
+            -- The first subsequent reading identifies a later reconnection.
+            select s.tank_id, following.created_at
+            from scope s cross join bounds b
+            cross join lateral (
+                select ti.created_at from public.tank_ingest ti
+                where ti.tank_id = s.tank_id and ti.created_at >= b.to_ts
+                  and ti.created_at <= b.observed_at
+                order by ti.created_at asc limit 1
+            ) following
+        ), sequenced as (
+            select tank_id, created_at as last_reading_at,
+                   lead(created_at) over (partition by tank_id order by created_at) as ended_at
+            from readings
+        ), gaps as (
+            select seq.*, seq.last_reading_at + b.grace as started_at,
+                   coalesce(seq.ended_at, b.observed_at) as observed_until
+            from sequenced seq cross join bounds b
+            where coalesce(seq.ended_at, b.observed_at) > seq.last_reading_at + b.grace
+              and seq.last_reading_at + b.grace < b.to_ts
+              and coalesce(seq.ended_at, b.observed_at) > b.from_ts
+        )
+        select s.*, g.last_reading_at, g.started_at, g.ended_at, g.observed_until,
+               (g.ended_at is null) as is_open,
+               extract(epoch from (g.observed_until - g.started_at)) as duration_seconds,
+               extract(epoch from (least(g.observed_until, b.to_ts) - greatest(g.started_at, b.from_ts))) as duration_in_month_seconds
+        from gaps g join scope s on s.tank_id = g.tank_id cross join bounds b
+        order by g.started_at asc, s.tank_id asc
+    """
+    items = _fetch_all(sql, (start, end, observed_at, threshold_seconds,
+                             location_id, location_id, tank_id, tank_id, company_id, company_id))
+    return {
+        "ok": True, "items": items,
+        "daily": _disconnection_daily(items, start, end),
+        "threshold_seconds": threshold_seconds,
+        "observed_at": observed_at.isoformat(),
+        "total_offline_seconds": sum(float(r["duration_in_month_seconds"]) for r in items),
+    }
