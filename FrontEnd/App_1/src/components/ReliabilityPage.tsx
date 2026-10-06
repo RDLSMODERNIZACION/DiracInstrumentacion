@@ -136,6 +136,38 @@ type PumpEventRow = {
   event_time: string;
 };
 
+type TankEventRow = {
+  id: number;
+  tank_id: number;
+  tank_name: string;
+  location_name: string | null;
+  event_type: string;
+  event_label: string;
+  configured_limit: number | null;
+  detected_value: number | null;
+  reached_level_pct: number | null;
+  samples_count: number;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number;
+  is_open: boolean;
+  status_label: string;
+};
+
+function tankEventTime(value: string | null) {
+  if (!value) return "En curso";
+  const parts = new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires", hourCycle: "h23",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: string) => (parts.find((p) => p.type === type)?.value || "").padStart(2, "0");
+  return `${part("day")}/${part("month")} ${part("hour")}:${part("minute")}:${part("second")}`;
+}
+
+function tankLevel(value: number | null) {
+  return value == null ? "Sin datos" : fmtPct(value);
+}
+
 type TankChartRow = {
   day_ts: string;
   day_label: string;
@@ -278,7 +310,37 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
   const [pumpCoincidences, setPumpCoincidences] = useState<PumpCoincidence[]>([]);
   const [coincidencesLoading, setCoincidencesLoading] = useState(false);
 
+  const [selectedTankDay, setSelectedTankDay] = useState<string | null>(null);
+  const [tankEvents, setTankEvents] = useState<TankEventRow[]>([]);
+  const [tankEventsLoading, setTankEventsLoading] = useState(false);
+  const [tankEventsError, setTankEventsError] = useState("");
+
   const locParam = safeLocationId(locationId);
+
+  useEffect(() => {
+    setSelectedTankDay(null);
+    setTankEvents([]);
+  }, [month, locParam]);
+
+  useEffect(() => {
+    if (!selectedTankDay || view !== "tanks") return;
+    let alive = true;
+    setTankEvents([]);
+    setTankEventsLoading(true);
+    setTankEventsError("");
+    fetchJson<{ items: TankEventRow[] }>("/kpi/operation-reliability/tank-day-events", {
+      day: selectedTankDay, location_id: locParam,
+    })
+      .then((r) => alive && setTankEvents(Array.isArray(r.items) ? r.items : []))
+      .catch((e) => alive && setTankEventsError(e?.message || "No se pudo cargar el detalle de los tanques."))
+      .finally(() => alive && setTankEventsLoading(false));
+    return () => { alive = false; };
+  }, [selectedTankDay, locParam, view]);
+
+  function selectTankDay(data: any) {
+    const row = data?.payload ?? data;
+    if (row?.day_ts) setSelectedTankDay(row.day_ts);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -779,6 +841,10 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
         <>
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="text-lg font-black">Eventos de tanques por día</h3>
+            <p className="mt-1 text-sm text-slate-500">Tocá una barra o elegí un día para ver qué ocurrió, el nivel alcanzado y la duración.</p>
+            <div className="mt-3 flex flex-wrap gap-2" aria-label="Días con eventos de tanques">
+              {tankChart.map((r) => <button key={r.day_ts} onClick={() => setSelectedTankDay(r.day_ts)} aria-pressed={selectedTankDay === r.day_ts} className={`rounded-xl border px-3 py-2 text-sm font-bold ${selectedTankDay === r.day_ts ? "bg-slate-950 text-white" : "bg-white text-slate-700"}`}>{r.day_label}</button>)}
+            </div>
             <div className="mt-4 h-[360px]">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={tankChart}>
@@ -787,14 +853,56 @@ export default function ReliabilityPage({ locationId = "all" }: Props) {
                   <YAxis />
                   <Tooltip content={<ChartTooltip />} />
                   <Legend />
-                  <Bar name="Bajo" dataKey="low_events" stackId="e" fill="#60a5fa" />
-                  <Bar name="Bajo crítico" dataKey="low_critical_events" stackId="e" fill="#1d4ed8" />
-                  <Bar name="Alto" dataKey="high_events" stackId="e" fill="#fb923c" />
-                  <Bar name="Alto crítico" dataKey="high_critical_events" stackId="e" fill="#dc2626" />
+                  <Bar name="Bajo" dataKey="low_events" stackId="e" fill="#60a5fa" onClick={selectTankDay} cursor="pointer">
+                    {tankChart.map((r) => <Cell key={r.day_ts} fill="#60a5fa" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
+                  </Bar>
+                  <Bar name="Bajo crítico" dataKey="low_critical_events" stackId="e" fill="#1d4ed8" onClick={selectTankDay} cursor="pointer">
+                    {tankChart.map((r) => <Cell key={r.day_ts} fill="#1d4ed8" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
+                  </Bar>
+                  <Bar name="Alto" dataKey="high_events" stackId="e" fill="#fb923c" onClick={selectTankDay} cursor="pointer">
+                    {tankChart.map((r) => <Cell key={r.day_ts} fill="#fb923c" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
+                  </Bar>
+                  <Bar name="Alto crítico" dataKey="high_critical_events" stackId="e" fill="#dc2626" onClick={selectTankDay} cursor="pointer">
+                    {tankChart.map((r) => <Cell key={r.day_ts} fill="#dc2626" stroke={selectedTankDay === r.day_ts ? "#0f172a" : "transparent"} strokeWidth={2} />)}
+                  </Bar>
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           </section>
+          {selectedTankDay && (
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black">Detalle de eventos · {dayLabel(selectedTankDay)}</h3>
+                  <p className="text-sm text-slate-500">Eventos iniciados en este día. Horarios de Argentina. La duración abarca todo el evento, aunque termine otro día.</p>
+                </div>
+                <button onClick={() => setSelectedTankDay(null)} className="rounded-xl bg-slate-100 px-4 py-2 font-bold">Cerrar</button>
+              </div>
+              {tankEventsLoading ? <p role="status">Cargando eventos...</p> : tankEventsError ? <p role="alert" className="text-red-700">{tankEventsError}</p> : (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-600"><tr>
+                      {["Tanque / ubicación", "Qué ocurrió", "Inicio", "Fin", "Límite", "Nivel al detectar", "Nivel alcanzado", "Duración", "Estado"].map((label) => <th key={label} className="px-4 py-3 text-left">{label}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {tankEvents.map((ev) => <tr key={ev.id} className="border-t border-slate-200">
+                        <td className="px-4 py-3"><b>{ev.tank_name}</b><div className="text-xs text-slate-500">{ev.location_name || "Sin ubicación"}</div></td>
+                        <td className={`px-4 py-3 font-bold ${ev.event_type === "low_low" || ev.event_type === "high_high" ? "text-red-700" : "text-orange-700"}`}>{ev.event_label}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{tankEventTime(ev.started_at)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{tankEventTime(ev.ended_at)}</td>
+                        <td className="px-4 py-3">{tankLevel(ev.configured_limit)}</td>
+                        <td className="px-4 py-3">{tankLevel(ev.detected_value)}</td>
+                        <td className="px-4 py-3 font-bold">{tankLevel(ev.reached_level_pct)}<div className="text-xs font-normal text-slate-500">{ev.reached_level_pct == null ? "Sin lecturas durante el evento" : ev.event_type.startsWith("low") ? "Mínimo medido" : "Máximo medido"}</div></td>
+                        <td className="px-4 py-3 whitespace-nowrap">{ev.duration_seconds === 0 ? "0 seg" : fmtDuration(ev.duration_seconds)}{ev.is_open && <div className="text-xs text-slate-500">Transcurrido al consultar</div>}</td>
+                        <td className="px-4 py-3">{ev.is_open ? "En curso" : ev.status_label}</td>
+                      </tr>)}
+                      {!tankEvents.length && <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">No hay eventos registrados para este día.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 className="mb-4 text-lg font-black">Tabla mensual de tanques</h3>
             <div className="overflow-x-auto rounded-2xl border">
