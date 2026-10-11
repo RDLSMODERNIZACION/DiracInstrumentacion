@@ -3,6 +3,7 @@ import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ManifoldNode } from "../../types";
 
 function toNum(v: any) {
+  if (v == null || (typeof v === "string" && !v.trim())) return null;
   const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -72,6 +73,46 @@ export default function ManifoldNodeView({
     if (hasQ) out.push(`Caudal: ${qText}`);
     return out;
   }, [n.id, hasP, hasQ, pText, qText]);
+
+  // Dedicated pressure instrument in Cloacas: visible even before its first reading.
+  const isPressureMeter = (n as any).servicio === "cloacas" && pSig != null && qSig == null;
+  if (isPressureMeter) {
+    const online = hasP && n.online === true;
+    const status = !hasP ? "Sin datos" : online ? "Online" : "Sin comunicación";
+    const color = pAlarm ? "#dc2626" : online ? "#0284c7" : "#94a3b8";
+    const lines = [
+      `Presión: ${hasP ? pText : "Sin datos"}`,
+      `Estado: ${status}`,
+      ...(pSig?.tag ? [`Tag: ${pSig.tag}`] : []),
+      ...(pSig?.ts ? [`Última lectura: ${pSig.ts}`] : []),
+    ];
+    return (
+      <g
+        transform={`translate(${n.x - W / 2}, ${n.y - H / 2})`}
+        onPointerDown={drag.onPointerDown}
+        onPointerMove={drag.onPointerMove}
+        onPointerUp={drag.onPointerUp}
+        onMouseEnter={(e) => showTip(e, { title: n.name, lines })}
+        onMouseMove={(e) => showTip(e, { title: n.name, lines })}
+        onMouseLeave={hideTip}
+        onClick={onClick}
+        style={{ cursor: enabled ? "move" : "default" }}
+        data-role="pressure-meter"
+      >
+        <title>{`${n.name} · ${hasP ? pText : "Sin datos"}`}</title>
+        <text x={W / 2} y={-12} textAnchor="middle" fill="#0f172a" style={{ fontSize: 14, fontWeight: 800 }}>{n.name}</text>
+        <rect width={W} height={H} rx={12} fill="#f8fafc" stroke={color} strokeWidth={2} />
+        <circle cx={42} cy={43} r={28} fill="#fff" stroke={color} strokeWidth={2} />
+        <path d="M 22 40 A 21 21 0 0 1 62 40" fill="none" stroke="#cbd5e1" strokeWidth={3} />
+        <path d="M 25 30 L 29 34 M 42 22 L 42 28 M 59 30 L 55 34" stroke="#64748b" strokeWidth={2} />
+        <text x={42} y={58} textAnchor="middle" fill="#0284c7" style={{ fontSize: 20, fontWeight: 900 }}>P</text>
+        <text x={145} y={26} textAnchor="middle" fill="#64748b" style={{ fontSize: 10, fontWeight: 800 }}>PRESIÓN</text>
+        <text x={145} y={51} textAnchor="middle" fill={pAlarm ? "#dc2626" : "#0f172a"} style={{ fontSize: 23, fontWeight: 850 }}>{hasP ? pText : `— ${pUnit}`}</text>
+        <circle cx={99} cy={69} r={3.5} fill={online ? "#22c55e" : "#94a3b8"} />
+        <text x={110} y={73} fill="#64748b" style={{ fontSize: 10, fontWeight: 700 }}>{status}</text>
+      </g>
+    );
+  }
 
   // Si no hay ninguna medición real, el nodo queda invisible.
   // Se conserva hit-area en edición para poder moverlo.
