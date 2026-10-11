@@ -495,7 +495,7 @@ export default function TankNodeView({
         onMouseLeave={hideTip} onClick={onClick}
         style={{ cursor: enabled ? "move" : "default" }} data-role={mountedPump ? "tank-with-pump" : "compact-tank"}>
         <title>{name}</title>
-        <rect x={-72} y={-151} width={144} height={236} rx={12} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={1.5} />
+        <rect x={-72} y={-151} width={144} height={236} rx={12} fill="transparent" stroke="none" />
         <g style={{ pointerEvents: "none" }}>
         <text x={0} y={mountedPump ? -132 : -68} textAnchor="middle" fill="#1e293b" style={{ fontSize: 12, fontWeight: 800 }}>{name}</text>
         <path d="M -50 -42 L -50 42 A 50 10 0 0 0 50 42 L 50 -42 Z" fill="#f1f5f9" stroke={stroke} strokeWidth={2} />

@@ -32,7 +32,7 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
       onMouseEnter={(e) => showTip(e, tip)} onMouseMove={(e) => showTip(e, tip)}
       onMouseLeave={hideTip} onClick={onClick} style={{ cursor: enabled ? "move" : "default" }}>
       <title>{`${n.name} · ${pump.name}`}</title>
-      <rect x={-224} y={blockTop} width={448} height={184 - blockTop} rx={14} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={1.5} />
+      <rect x={-224} y={blockTop} width={448} height={184 - blockTop} rx={14} fill="transparent" stroke="none" />
       <text x={0} y={-224} textAnchor="middle" fill="#0f172a" style={{ fontSize: 20, fontWeight: 900 }}>{n.name}</text>
       <g transform={`translate(${-n.x}, ${-n.y})`} style={{ pointerEvents: "none" }}>
         <TankNodeView n={n} hideHeading getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
