@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+﻿import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { useLiveQuery } from "@/lib/useLiveQuery";
 
@@ -27,7 +27,7 @@ import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
 import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint, INTAKE_PUMPS, containedPumpIds, isLoadingStation, loadingStationPort } from "./equipmentAppearance";
-import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
+import { isSchematicEquipment, schematicPort } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
@@ -297,6 +297,8 @@ export default function InfraDiagram() {
   const [connectFrom, setConnectFrom] = useState<PortHit | null>(null);
   const [mouseSvg, setMouseSvg] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const equipmentRef = useRef<SVGGElement | null>(null);
+  const fittedService = useRef<ServicioSCADA | null>(null);
 
   const [opsOpen, setOpsOpen] = useState(false);
   const [opsNode, setOpsNode] = useState<UINode | null>(null);
@@ -467,31 +469,6 @@ export default function InfraDiagram() {
       if (Number.isFinite(n.x) && Number.isFinite(n.y)) m[n.id] = n;
     }
     return resolveMountedPumps(m);
-  }, [nodes]);
-
-  useEffect(() => {
-    if (!nodes.length) return;
-
-    const pad = 240;
-    const extentPoints = nodes.flatMap((n) =>
-      n.type === "manifold" && n.meta?.symbol === "lagoon"
-        ? [
-            { x: n.x - LAGOON_PORT_OFFSET, y: n.y - 110 * LAGOON_SCALE },
-            { x: n.x + LAGOON_PORT_OFFSET, y: n.y + 90 * LAGOON_SCALE },
-          ]
-        : [n]
-    );
-    const bb = computeBBox(extentPoints, pad);
-
-    const safe = {
-      minx: bb.minx,
-      miny: bb.miny,
-      w: bb.w,
-      h: bb.h,
-    };
-
-    setVb(safe);
-    setViewBoxStr(`${safe.minx} ${safe.miny} ${safe.w} ${safe.h}`);
   }, [nodes]);
 
   const locationGroups: LocationGroup[] = useMemo(() => {
@@ -743,7 +720,6 @@ export default function InfraDiagram() {
     () =>
       nodes.filter((n) => {
         if (n.type === "valve") return false;
-        if (activeServicio === "todos") return true;
         return ((n as any).servicio ?? "agua") === activeServicio;
       }),
     [nodes, activeServicio]
@@ -753,6 +729,28 @@ export default function InfraDiagram() {
     () => new Set(visibleNodes.map((n) => n.id)),
     [visibleNodes]
   );
+
+  useLayoutEffect(() => {
+    // Fit on tab entry or first data arrival, keeping manual pan/zoom during live refreshes.
+    if (fittedService.current === activeServicio || !equipmentRef.current) return;
+    if (!visibleNodes.length) {
+      setVb(VIEWBOX_DEFAULT);
+      setViewBoxStr(`${VIEWBOX_DEFAULT.minx} ${VIEWBOX_DEFAULT.miny} ${VIEWBOX_DEFAULT.w} ${VIEWBOX_DEFAULT.h}`);
+      fittedService.current = null;
+      return;
+    }
+    const bounds = equipmentRef.current.getBBox();
+    const valid = [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) && bounds.width > 0 && bounds.height > 0;
+    const fallback = computeBBox(visibleNodes, 240);
+    const width = valid ? Math.max(480, bounds.width + 120) : fallback.w;
+    const height = valid ? Math.max(320, bounds.height + 120) : fallback.h;
+    const next = valid
+      ? { minx: bounds.x + bounds.width / 2 - width / 2, miny: bounds.y + bounds.height / 2 - height / 2, w: width, h: height }
+      : fallback;
+    setVb(next);
+    setViewBoxStr(`${next.minx} ${next.miny} ${next.w} ${next.h}`);
+    fittedService.current = activeServicio;
+  }, [activeServicio, visibleNodes, error]);
 
   const selectedNode = selectedNodeId ? nodesById[selectedNodeId] : null;
   // V18.7 PUMP AVAILABILITY
@@ -1069,7 +1067,7 @@ export default function InfraDiagram() {
             boxSizing: "border-box",
           }}
         >
-          <TransformWrapper initialScale={1} minScale={0.35} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
+          <TransformWrapper key={activeServicio} initialScale={1} minScale={0.35} maxScale={ZOOM_MAX} centerOnInit wheel={{ step: 0.1 }}>
             <TransformComponent wrapperStyle={{ width: "100%", height: "100%", background: "#ffffff" }} contentStyle={{ width: "100%", height: "100%" }}>
               <svg
                 ref={svgRef}
@@ -1127,7 +1125,7 @@ export default function InfraDiagram() {
                 <rect x={vb.minx} y={vb.miny} width={vb.w} height={vb.h} fill="url(#grid)" opacity={0.012} />
 
                 {/* Localidades visuales eliminadas: sin fondos ni títulos. */}
-
+                <g ref={equipmentRef} data-role="visible-equipment">
                 {edgesForRender.filter((e) => visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b)).map((e) => (
                   <EditableEdge
                     key={`edge-${e.id}`}
@@ -1147,7 +1145,7 @@ export default function InfraDiagram() {
                   />
                 ))}
 
-                {pumpPipeTaps.map((tap) => (
+                {pumpPipeTaps.filter((tap) => visibleNodeIds.has(tap.pump_node_id) && edgesForRender.some((e) => e.id === tap.edge_id && visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b))).map((tap) => (
                   <PumpPipeTapView
                     key={`pump-tap-${tap.id}`}
                     tap={tap}
@@ -1250,6 +1248,7 @@ export default function InfraDiagram() {
                     />
                   ) : null
                 )}
+                </g>
 
                 {editMode &&
                   connectMode &&
