@@ -1,4 +1,6 @@
 import type { UINode } from "./types";
+export const LAGOON_SCALE = 3;
+export const LAGOON_PORT_OFFSET = 160 * LAGOON_SCALE + 16;
 export const SAND_FILTER_RADIUS = 70;
 export const SAND_FILTER_PORT_X = 86;
 export function isSandFilter(n: UINode) {
@@ -13,6 +15,6 @@ export function isSchematicEquipment(n: UINode) {
 }
 export function schematicPort(n: UINode, side: "in" | "out") {
   const symbol = n.type === "manifold" ? n.meta?.symbol : null;
-  const offset = symbol === "lagoon" ? 176 : symbol === "sedimenter" ? 156 : symbol === "mixer" ? 90 : symbol === "dosing_tank" ? 74 : symbol === "dosing_pump" ? 65 : SAND_FILTER_PORT_X;
+  const offset = symbol === "lagoon" ? LAGOON_PORT_OFFSET : symbol === "sedimenter" ? 156 : symbol === "mixer" ? 90 : symbol === "dosing_tank" ? 74 : symbol === "dosing_pump" ? 65 : SAND_FILTER_PORT_X;
   return { x: n.x + (side === "in" ? -offset : offset), y: n.y };
 }

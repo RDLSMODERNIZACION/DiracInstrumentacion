@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { isSchematicEquipment, schematicPort } from "./schematic";
+import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
@@ -459,7 +459,15 @@ export default function InfraDiagram() {
     if (!nodes.length) return;
 
     const pad = 240;
-    const bb = computeBBox(nodes, pad);
+    const extentPoints = nodes.flatMap((n) =>
+      n.type === "manifold" && n.meta?.symbol === "lagoon"
+        ? [
+            { x: n.x - LAGOON_PORT_OFFSET, y: n.y - 110 * LAGOON_SCALE },
+            { x: n.x + LAGOON_PORT_OFFSET, y: n.y + 90 * LAGOON_SCALE },
+          ]
+        : [n]
+    );
+    const bb = computeBBox(extentPoints, pad);
 
     const safe = {
       minx: bb.minx,

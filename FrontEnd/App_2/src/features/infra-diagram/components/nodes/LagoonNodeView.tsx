@@ -1,7 +1,7 @@
 import React from "react";
 import type { ManifoldNode } from "../../types";
 import type useNodeDragCommon from "../../useNodeDragCommon";
-import { schematicPort } from "../../schematic";
+import { schematicPort, LAGOON_SCALE } from "../../schematic";
 
 export default function LagoonNodeView({ n, drag, showTip, hideTip, enabled, onClick }: {
   n: ManifoldNode;
@@ -23,8 +23,9 @@ export default function LagoonNodeView({ n, drag, showTip, hideTip, enabled, onC
       onMouseLeave={hideTip} onClick={onClick}
       style={{ cursor: enabled ? "move" : "default" }} data-role="lagoon">
       <title>{n.name}</title>
-      <text x={0} y={-108} textAnchor="middle" fill="#0f172a" style={{ fontSize: 16, fontWeight: 800 }}>{n.name}</text>
-      <text x={0} y={-91} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 800 }}>LAGUNA · AGUA</text>
+      <text x={0} y={-90 * LAGOON_SCALE - 16} textAnchor="middle" fill="#0f172a" style={{ fontSize: 16, fontWeight: 800 }}>{n.name}</text>
+      <text x={0} y={-90 * LAGOON_SCALE + 1} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 800 }}>LAGUNA · AGUA</text>
+      <g transform={`scale(${LAGOON_SCALE})`}>
       <path d={outline} fill="#e7e5d2" stroke="#9a9e81" strokeWidth={3} />
       <path d={outline} transform="scale(0.94, 0.88)" fill="#e0f2fe" stroke="#7dd3fc" strokeWidth={2} />
       <g fill="none" stroke="#7bbbd5" strokeWidth={2} strokeLinecap="round" style={{ pointerEvents: "none" }}>
@@ -32,8 +33,9 @@ export default function LagoonNodeView({ n, drag, showTip, hideTip, enabled, onC
         <path d="M -119 6 Q -100 -2 -81 6 T -43 6 M 14 3 Q 33 -5 52 3 T 90 3" />
         <path d="M -60 39 Q -41 31 -22 39 T 16 39 M 59 33 Q 77 25 95 33" />
       </g>
+      </g>
       {/* Both connections cross the bank and reach the water area. */}
-      {[{ a: inlet, b: -137 }, { a: outlet, b: 137 }].map(({ a, b }) => (
+      {[{ a: inlet, b: -137 * LAGOON_SCALE }, { a: outlet, b: 137 * LAGOON_SCALE }].map(({ a, b }) => (
         <g key={a} style={{ pointerEvents: "none" }}>
           <path d={`M ${a} 0 L ${b} 0`} stroke="#64748b" strokeWidth={9} strokeLinecap="round" />
           <path d={`M ${a} 0 L ${b} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
