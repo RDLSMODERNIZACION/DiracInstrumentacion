@@ -70,8 +70,6 @@ const ZOOM_MAX = 20;
 const MAPA_URL = "https://www.diracserviciosenergia.com/mapa";
 
 const VIEWBOX_DEFAULT = { minx: 0, miny: 0, w: 1000, h: 520 };
-const MAX_VIEWBOX_W = 6000;
-const MAX_VIEWBOX_H = 3500;
 
 /** =========================
  *  Helpers (fuera del componente)
@@ -472,8 +470,8 @@ export default function InfraDiagram() {
     const safe = {
       minx: bb.minx,
       miny: bb.miny,
-      w: Math.min(bb.w, MAX_VIEWBOX_W),
-      h: Math.min(bb.h, MAX_VIEWBOX_H),
+      w: bb.w,
+      h: bb.h,
     };
 
     setVb(safe);
