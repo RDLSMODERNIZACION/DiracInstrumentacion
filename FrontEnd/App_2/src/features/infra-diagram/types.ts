@@ -2,6 +2,8 @@
 // Tipos backend (DTO)
 // =======================
 
+export type SchematicSymbol = "sand_filter" | "mixer" | "sedimenter";
+
 export type ValveMeta = {
   // 2way = 1 entrada + 1 salida
   // 3way = 1 entrada + 2 salidas (R1 y R2)
@@ -112,7 +114,7 @@ export type CombinedNodeDTO = {
   orientacion?: "vertical" | "horizontal" | null;
 
   // ✅ meta viene solo en valves (pero lo declaramos opcional)
-  meta?: (ValveMeta & { symbol?: "sand_filter" | null }) | null;
+  meta?: (ValveMeta & { symbol?: SchematicSymbol | null }) | null;
 
   // ✅ signals: manifold o ABB (en ABB suele ser Record<string, number>)
   // Para no pelearte con TS ahora, lo dejamos genérico.
@@ -252,7 +254,7 @@ export type PumpNode = UINodeBase & {
 
 export type ManifoldNode = UINodeBase & {
   type: "manifold";
-  meta?: { symbol?: "sand_filter" | null } | null;
+  meta?: { symbol?: SchematicSymbol | null } | null;
   ports?: NodePorts;
 
   // ✅ señales (pressure/flow)
@@ -264,7 +266,7 @@ export type ValveNode = UINodeBase & {
   type: "valve";
 
   // ✅ meta viene del backend y define 2way/3way + rot/flip + open/closed
-  meta?: (ValveMeta & { symbol?: "sand_filter" | null }) | null;
+  meta?: (ValveMeta & { symbol?: SchematicSymbol | null }) | null;
 
   // puertos calculados (si querés guardarlos en el node al armar UI)
   ports?: NodePorts;

@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { isSandFilter, sandFilterPort } from "./schematic";
+import { isSchematicEquipment, schematicPort } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
@@ -127,7 +127,7 @@ function heightByType(t?: string) {
 }
 
 function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
-  if (isSandFilter(n)) return { ins: ["L1"], outs: ["R1"] };
+  if (isSchematicEquipment(n)) return { ins: ["L1"], outs: ["R1"] };
   const p = getPortsByType(n.type);
   return {
     ins: (p.in ?? []) as string[],
@@ -137,9 +137,9 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 
 function buildPorts(n: UINode) {
   const { ins, outs } = getNodePorts(n);
-  if (isSandFilter(n)) return {
-    inPorts: [{ portId: "L1", side: "in" as const, ...sandFilterPort(n, "in") }],
-    outPorts: [{ portId: "R1", side: "out" as const, ...sandFilterPort(n, "out") }],
+  if (isSchematicEquipment(n)) return {
+    inPorts: [{ portId: "L1", side: "in" as const, ...schematicPort(n, "in") }],
+    outPorts: [{ portId: "R1", side: "out" as const, ...schematicPort(n, "out") }],
   };
 
   if (n.type === "tank") {
@@ -1192,7 +1192,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
-                      onClick={() => (!editMode && !connectMode && !isSandFilter(n) ? maybeOpenOps(n) : undefined)}
+                      onClick={() => (!editMode && !connectMode && !isSchematicEquipment(n) ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "network_analyzer" ? (
                     <NetworkAnalyzerNodeView
