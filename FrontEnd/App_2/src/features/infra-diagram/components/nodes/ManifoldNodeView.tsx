@@ -3,6 +3,7 @@ import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ManifoldNode } from "../../types";
 import { isSandFilter, SAND_FILTER_RADIUS, SAND_FILTER_PORT_X } from "../../schematic";
 import ProcessNodeView from "./ProcessNodeView";
+import DosingNodeView from "./DosingNodeView";
 
 function toNum(v: any) {
   if (v == null || (typeof v === "string" && !v.trim())) return null;
@@ -75,6 +76,10 @@ export default function ManifoldNodeView({
     if (hasQ) out.push(`Caudal: ${qText}`);
     return out;
   }, [n.id, hasP, hasQ, pText, qText]);
+
+  if (n.meta?.symbol === "dosing_tank" || n.meta?.symbol === "dosing_pump") {
+    return <DosingNodeView n={n} drag={drag} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
+  }
 
   if (n.meta?.symbol === "mixer" || n.meta?.symbol === "sedimenter") {
     return <ProcessNodeView n={n} drag={drag} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
