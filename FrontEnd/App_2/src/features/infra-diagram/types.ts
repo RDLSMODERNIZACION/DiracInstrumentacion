@@ -2,7 +2,7 @@
 // Tipos backend (DTO)
 // =======================
 
-export type SchematicSymbol = "sand_filter" | "mixer" | "sedimenter" | "dosing_tank" | "dosing_pump" | "lagoon";
+export type SchematicSymbol = "sand_filter" | "mixer" | "sedimenter" | "dosing_tank" | "dosing_pump" | "lagoon" | "water_intake";
 
 export type ValveMeta = {
   // 2way = 1 entrada + 1 salida

@@ -11,10 +11,10 @@ export function sandFilterPort(n: { x: number; y: number }, side: "in" | "out") 
 }
 
 export function isSchematicEquipment(n: UINode) {
-  return n.type === "manifold" && ["sand_filter", "mixer", "sedimenter", "dosing_tank", "dosing_pump", "lagoon"].includes(n.meta?.symbol ?? "");
+  return n.type === "manifold" && ["sand_filter", "mixer", "sedimenter", "dosing_tank", "dosing_pump", "lagoon", "water_intake"].includes(n.meta?.symbol ?? "");
 }
 export function schematicPort(n: UINode, side: "in" | "out") {
   const symbol = n.type === "manifold" ? n.meta?.symbol : null;
-  const offset = symbol === "lagoon" ? LAGOON_PORT_OFFSET : symbol === "sedimenter" ? 156 : symbol === "mixer" ? 90 : symbol === "dosing_tank" ? 74 : symbol === "dosing_pump" ? 65 : SAND_FILTER_PORT_X;
+  const offset = symbol === "water_intake" ? 166 : symbol === "lagoon" ? LAGOON_PORT_OFFSET : symbol === "sedimenter" ? 156 : symbol === "mixer" ? 90 : symbol === "dosing_tank" ? 74 : symbol === "dosing_pump" ? 65 : SAND_FILTER_PORT_X;
   return { x: n.x + (side === "in" ? -offset : offset), y: n.y };
 }
