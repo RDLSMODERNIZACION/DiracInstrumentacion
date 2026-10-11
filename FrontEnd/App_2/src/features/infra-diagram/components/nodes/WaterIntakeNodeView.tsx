@@ -25,10 +25,10 @@ export default function WaterIntakeNodeView({ n, pumps = [], drag, showTip, hide
       onMouseLeave={hideTip} onClick={onClick}
       style={{ cursor: enabled ? "move" : "default" }} data-role="water-intake">
       <title>{n.name}</title>
-      <rect x={-246} y={-144} width={456} height={262} fill="none" pointerEvents="all" />
+      <rect x={-246} y={-220} width={456} height={338} fill="none" pointerEvents="all" />
       <g style={{ pointerEvents: "none" }}>
-        <text x={0} y={-126} textAnchor="middle" fill="#0f172a" style={{ fontSize: 16, fontWeight: 800 }}>{n.name}</text>
-        <text x={0} y={-108} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 800 }}>CAPTACIÓN · 2 BOMBAS + 2 RESERVAS</text>
+        <text x={0} y={-204} textAnchor="middle" fill="#0f172a" style={{ fontSize: 16, fontWeight: 800 }}>{n.name}</text>
+        <text x={0} y={-185} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 800 }}>CAPTACIÓN · 2 BOMBAS + 2 RESERVAS</text>
         {/* River inlet, screen and concrete wet chamber. */}
         <path d="M -225 -88 Q -207 -45 -225 0 Q -241 45 -225 88 L -130 88 L -130 -88 Z" fill="#e0f2fe" stroke="#7dd3fc" strokeWidth={2} />
         <path d="M -134 -88 L 196 -88 L 196 88 L -134 88" fill="#e2e8f0" stroke="#64748b" strokeWidth={3} />
@@ -41,13 +41,13 @@ export default function WaterIntakeNodeView({ n, pumps = [], drag, showTip, hide
         {[-63,-49,-35,-21,-7,7,21,35,49,63].map((y) => <path key={y} d={`M -140 ${y} L -122 ${y}`} stroke="#64748b" strokeWidth={3} />)}
         <text x={-180} y={106} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 700 }}>ENTRADA · REJA</text>
         {/* Only the two installed pumps feed the common discharge header. */}
-        <path d="M -65 4 L -65 30 L 170 30 L 170 0 M 5 4 L 5 30" fill="none" stroke="#64748b" strokeWidth={7} strokeLinejoin="round" />
-        <path d="M -65 4 L -65 30 L 170 30 L 170 0 M 5 4 L 5 30" fill="none" stroke="#cbd5e1" strokeWidth={4} strokeLinejoin="round" />
+        <path d="M -65 -94 L -65 30 L 170 30 L 170 0 M 5 -94 L 5 30" fill="none" stroke="#64748b" strokeWidth={7} strokeLinejoin="round" />
+        <path d="M -65 -94 L -65 30 L 170 30 L 170 0 M 5 -94 L 5 30" fill="none" stroke="#cbd5e1" strokeWidth={4} strokeLinejoin="round" />
         {[0,1,2,3].map((i) => {
           const x = -65 + i * 70;
           const reserve = i >= 2;
           const p = pumps[i];
-          return <g key={i} transform={`translate(${x}, -30)`} data-role={reserve ? "pump-reserve" : "installed-pump"}>
+          return <g key={i} transform={`translate(${x}, -135)`} data-role={reserve ? "pump-reserve" : "installed-pump"}>
             {reserve ? <>
               <rect x={-22} y={-33} width={44} height={69} rx={7} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 4" />
               <path d="M -7 0 L 7 0 M 0 -7 L 0 7" stroke="#94a3b8" strokeWidth={1.5} />

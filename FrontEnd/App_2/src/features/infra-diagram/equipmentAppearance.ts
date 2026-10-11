@@ -55,7 +55,7 @@ export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number
     const intakePair = Object.entries(INTAKE_PUMPS).find(([, ids]) => ids.includes(n.id));
     if (!intakePair) return null;
     const index = intakePair[1].indexOf(n.id);
-    return { x: n.x + 65 - index * 70 + 170, y: n.y + 30 };
+    return { x: n.x + 65 - index * 70 + 170, y: n.y + 135 };
   }
   const offset = mountedPumpOffset(pair[0]);
   return tankBlockConnectionPoint({ id: pair[0], x: n.x - offset.x, y: n.y - offset.y });
@@ -66,5 +66,5 @@ export function containedPumpIds(parentId: string) {
   return INTAKE_PUMPS[parentId] ?? (TANK_PUMP_PAIRS[parentId] ? [TANK_PUMP_PAIRS[parentId]] : []);
 }
 export function intakePumpPosition(intake: { x: number; y: number }, index: number) {
-  return { x: intake.x - 65 + index * 70, y: intake.y - 30 };
+  return { x: intake.x - 65 + index * 70, y: intake.y - 135 };
 }
