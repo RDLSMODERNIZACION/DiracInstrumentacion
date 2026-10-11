@@ -49,7 +49,8 @@ export default function TankNodeView({
   const category: TankCategory = n.categoria ?? "tanque";
   const isAeration = category === "pileta_aireacion";
   const isSedimentation = category === "pileta_sedimentacion";
-  const isTreatmentPool = isAeration || isSedimentation;
+  const isChlorination = category === "pileta_cloracion";
+  const isTreatmentPool = isAeration || isSedimentation || isChlorination;
 
   const servicio =
     (n as any).servicio === "cargaderos"
@@ -124,8 +125,9 @@ export default function TankNodeView({
     const validLevel = levelRaw !== null && Number.isFinite(levelRaw);
     const levelText = validLevel ? `${level.toFixed(0)}%` : "—";
     const poolStroke = critical ? "#ef4444" : warning ? "#f59e0b" : "#64748b";
+    const poolType = isAeration ? "aireación" : isChlorination ? "cloración" : "sedimentación";
     const poolTip = [
-      `Tipo: Pileta de ${isAeration ? "aireación" : "sedimentación"}`,
+      `Tipo: Pileta de ${poolType}`,
       `Nivel: ${validLevel ? levelText : "Sin datos"}`,
       `Estado: ${isOnline ? "Online" : "Sin comunicación"}`,
       ...(hasAlarm ? [`Alarma: ${n.alarma}`] : []),
@@ -145,13 +147,13 @@ export default function TankNodeView({
       >
         <title>{`${name} · ${validLevel ? levelText : "Sin datos"}`}</title>
         <text x={W / 2} y={22} textAnchor="middle" fill="#0f172a" style={{ fontSize: 18, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
-        <text x={W / 2} y={40} textAnchor="middle" fill="#15803d" style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, pointerEvents: "none" }}>
-          {isAeration ? "AIREACIÓN · CLOACAS" : "SEDIMENTACIÓN · CLOACAS"}
+        <text x={W / 2} y={40} textAnchor="middle" fill={isChlorination ? "#7c3aed" : "#15803d"} style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, pointerEvents: "none" }}>
+          {`${poolType.toUpperCase()} · CLOACAS`}
         </text>
         <rect x={px} y={py} width={poolW} height={poolH} rx={3} fill="#e2e8f0" stroke={poolStroke} strokeWidth={3} />
-        <rect x={px + 10} y={py + 10} width={poolW - 20} height={poolH - 20} rx={1} fill="#f0fdf4" stroke="#94a3b8" strokeWidth={1.5} />
+        <rect x={px + 10} y={py + 10} width={poolW - 20} height={poolH - 20} rx={1} fill={isChlorination ? "#f5f3ff" : "#f0fdf4"} stroke="#94a3b8" strokeWidth={1.5} />
         {validLevel && (
-          <rect x={px + 11} y={py + 10 + (poolH - 20) * (1 - level / 100)} width={poolW - 22} height={(poolH - 20) * level / 100} fill="#bbf7d0" />
+          <rect x={px + 11} y={py + 10 + (poolH - 20) * (1 - level / 100)} width={poolW - 22} height={(poolH - 20) * level / 100} fill={isChlorination ? "#ddd6fe" : "#bbf7d0"} />
         )}
         {isAeration ? (
           <g stroke="#86b59a" fill="none" strokeWidth={1.5} style={{ pointerEvents: "none" }}>
@@ -160,6 +162,14 @@ export default function TankNodeView({
                 <circle r={7} /><circle cx={10} cy={-11} r={3} /><circle cx={-9} cy={-16} r={2} />
               </g>
             )))}
+          </g>
+        ) : isChlorination ? (
+          <g stroke="#a78bfa" strokeWidth={4} fill="none" style={{ pointerEvents: "none" }}>
+            {/* Símbolo de cámara de contacto; no representa dimensiones de obra. */}
+            {[0, 1, 2, 3].map((i) => (
+              <line key={i} x1={px + 70 + i * 70} x2={px + 70 + i * 70} y1={py + (i % 2 === 0 ? 11 : 40)} y2={py + poolH - (i % 2 === 0 ? 40 : 11)} />
+            ))}
+            <text x={px + 24} y={py + 32} stroke="none" fill="#7c3aed" style={{ fontSize: 16, fontWeight: 800 }}>Cl₂</text>
           </g>
         ) : (
           <g stroke="#86b59a" strokeWidth={2} style={{ pointerEvents: "none" }}>

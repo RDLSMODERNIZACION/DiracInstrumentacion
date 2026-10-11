@@ -92,7 +92,7 @@ export type NetworkAnalyzerLatestDTO = {
   value?: number | null;
 };
 
-export type TankCategory = "tanque" | "pozo" | "pileta_aireacion" | "pileta_sedimentacion";
+export type TankCategory = "tanque" | "pozo" | "pileta_aireacion" | "pileta_sedimentacion" | "pileta_cloracion";
 
 export type CombinedNodeDTO = {
   node_id: string;
