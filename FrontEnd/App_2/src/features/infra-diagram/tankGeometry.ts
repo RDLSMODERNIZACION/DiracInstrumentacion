@@ -1,5 +1,6 @@
 import type { TankCategory } from "./types";
-type TankPosition = { x: number; y: number; categoria?: TankCategory | null };
+import { isCompactTank } from "./equipmentAppearance";
+type TankPosition = { id?: string; x: number; y: number; categoria?: TankCategory | null };
 type Point = { x: number; y: number };
 export function treatmentPoolGeometry(category?: TankCategory | null) {
   if (!["pileta_aireacion", "pileta_sedimentacion", "pileta_cloracion"].includes(category ?? "")) return null;
@@ -11,11 +12,12 @@ export function treatmentPoolGeometry(category?: TankCategory | null) {
 export function tankPortPosition(n: TankPosition, portId: string): Point {
   const pool = treatmentPoolGeometry(n.categoria);
   const isWell = n.categoria === "pozo";
-  const insideX = pool ? pool.poolW / 2 - 28 : isWell ? 140 : 118;
-  const insideY = pool ? pool.poolH / 2 - 28 : isWell ? 105 : 82;
+  const compact = isCompactTank(n) && (!n.categoria || n.categoria === "tanque");
+  const insideX = compact ? 44 : pool ? pool.poolW / 2 - 28 : isWell ? 140 : 118;
+  const insideY = compact ? 34 : pool ? pool.poolH / 2 - 28 : isWell ? 105 : 82;
   const cy = n.y + (pool ? 2 : 0);
-  const horizontal = pool ? pool.poolW / 4 : isWell ? 75 : 65;
-  const vertical = pool ? pool.poolH / 4 : isWell ? 52 : 42;
+  const horizontal = compact ? 22 : pool ? pool.poolW / 4 : isWell ? 75 : 65;
+  const vertical = compact ? 14 : pool ? pool.poolH / 4 : isWell ? 52 : 42;
   const index = Number(portId.slice(1)) || 1;
   const sideOffset = isWell ? (index === 1 ? -52 : index === 2 ? 52 : 0) : (index - 2) * vertical;
   switch (portId[0]) {

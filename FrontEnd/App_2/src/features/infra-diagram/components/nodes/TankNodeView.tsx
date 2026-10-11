@@ -1,4 +1,5 @@
-﻿import React from "react";
+import { isCompactTank } from "../../equipmentAppearance";
+import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
 import type { TankNode, TankCategory } from "../../types";
@@ -464,6 +465,38 @@ export default function TankNodeView({
   // ============================================================
   // TANQUE INDUSTRIAL (igual que V10)
   // ============================================================
+  if (isCompactTank(n) && category === "tanque") {
+    const hasLevel = levelRaw != null && Number.isFinite(levelRaw);
+    const compactLines = [
+      `Nivel: ${hasLevel ? `${level.toFixed(0)}%` : "Sin datos"}`,
+      `Estado: ${hasLevel ? (isOnline ? "Online" : "Sin comunicación") : "Sin datos"}`,
+      ...(hasAlarm ? [`Alarma: ${n.alarma}`] : []),
+    ];
+    const waterHeight = 78 * level / 100;
+    const clip = `compact-${n.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    return (
+      <g transform={`translate(${n.x}, ${n.y})`}
+        onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp}
+        onMouseEnter={(e) => showTip(e, { title: name, lines: compactLines })}
+        onMouseMove={(e) => showTip(e, { title: name, lines: compactLines })}
+        onMouseLeave={hideTip} onClick={onClick}
+        style={{ cursor: enabled ? "move" : "default" }} data-role="compact-tank">
+        <title>{name}</title>
+        <text x={0} y={-68} textAnchor="middle" fill="#1e293b" style={{ fontSize: 12, fontWeight: 800 }}>{name}</text>
+        <path d="M -50 -42 L -50 42 A 50 10 0 0 0 50 42 L 50 -42 Z" fill="#f1f5f9" stroke={stroke} strokeWidth={2} />
+        <defs><clipPath id={clip}><rect x={-47} y={-38} width={94} height={78} /></clipPath></defs>
+        {hasLevel && <g clipPath={`url(#${clip})`}>
+          <rect x={-47} y={40 - waterHeight} width={94} height={waterHeight} fill="#bae6fd" />
+          <path d={`M -47 ${40 - waterHeight} L 47 ${40 - waterHeight}`} stroke="#38bdf8" strokeWidth={2} />
+        </g>}
+        <ellipse cx={0} cy={-42} rx={50} ry={10} fill="#e2e8f0" stroke={stroke} strokeWidth={2} />
+        <path d="M -50 42 A 50 10 0 0 0 50 42" fill="none" stroke={stroke} strokeWidth={2} />
+        <text x={0} y={6} textAnchor="middle" fill="#334155" style={{ fontSize: 17, fontWeight: 800 }}>{hasLevel ? `${level.toFixed(0)}%` : "—"}</text>
+        <text x={0} y={72} textAnchor="middle" fill="#64748b" style={{ fontSize: 10 }}>{hasLevel ? (isOnline ? "Online" : "Sin comunicación") : "Sin datos"}</text>
+      </g>
+    );
+  }
+
   const W = 300;
   const H = 220;
   const bodyX = 22;

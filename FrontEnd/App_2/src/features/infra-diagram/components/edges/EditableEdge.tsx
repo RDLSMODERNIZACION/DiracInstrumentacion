@@ -1,4 +1,5 @@
-﻿// src/features/infra-diagram/components/edges/EditableEdge.tsx
+import { pumpVisualScale, smallPumpPort } from "../../equipmentAppearance";
+// src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 import { tankPortPosition, poolPortOutside } from "../../tankGeometry";
@@ -115,6 +116,8 @@ function getDefaultPort(n: UINode, side: Side) {
   let x = (n as any).x;
   let y = (n as any).y;
 
+  if (t === "pump" && pumpVisualScale(n) < 1) return smallPumpPort(n, side === "in" ? "L1" : "R1");
+
   if (t === "pump") {
     const rOuter = 30;
     const portOffset = 16;
@@ -162,6 +165,7 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   if ((n as any).type === "tank") {
     return tankPortPosition(n, pid);
   }
+  if (n.type === "pump" && pumpVisualScale(n) < 1) return smallPumpPort(n, pid);
   if ((n as any).type === "pump") {
     const rOuter = 30;
     const portOffset = 16;

@@ -1,4 +1,5 @@
 import React from "react";
+import { pumpVisualScale } from "../equipmentAppearance";
 import type { PumpPipeTap } from "../services/pumpTaps";
 import type { UINode } from "../types";
 
@@ -35,6 +36,7 @@ export default function PumpPipeTapView({
     ((pump as any).orientation as PumpOrientation) ||
     "vertical";
 
+  const scale = pumpVisualScale(pump);
   const dx = ex - px;
   const dy = ey - py;
 
@@ -55,11 +57,11 @@ export default function PumpPipeTapView({
      * El punto de arranque se coloca sobre el lateral de la bomba
      * a la misma altura exacta del tap. Así desaparece el escalón.
      */
-    const sideX = px + (dx >= 0 ? 18 : -18);
+    const sideX = px + (dx >= 0 ? 18 : -18) * scale;
 
     // Limita el punto de entrada al cuerpo visual de la bomba.
-    const minY = py - 30;
-    const maxY = py + 32;
+    const minY = py - 30 * scale;
+    const maxY = py + 32 * scale;
     const startY = Math.max(minY, Math.min(maxY, ey));
 
     // Si el tap cae dentro de la altura de la bomba: línea 100% recta.

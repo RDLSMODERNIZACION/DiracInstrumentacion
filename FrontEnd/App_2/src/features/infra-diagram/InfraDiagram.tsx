@@ -26,6 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
+import { pumpVisualScale, smallPumpPort } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -146,6 +147,11 @@ function buildPorts(n: UINode) {
       outPorts: outs.map((portId) => ({ portId, side: "out" as const, ...tankPortPosition(n, portId) })),
     };
   }
+
+  if (n.type === "pump" && pumpVisualScale(n) < 1) return {
+    inPorts: ins.map((portId) => ({ portId, side: "in" as const, ...smallPumpPort(n, portId) })),
+    outPorts: outs.map((portId) => ({ portId, side: "out" as const, ...smallPumpPort(n, portId) })),
+  };
 
   const off = 6;
   const half = halfByType(n.type);

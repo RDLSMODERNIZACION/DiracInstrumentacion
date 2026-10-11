@@ -1,3 +1,4 @@
+import { pumpVisualScale } from "../../equipmentAppearance";
 import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { PumpNode } from "../../types";
@@ -258,12 +259,12 @@ export default function PumpNodeView({
   if (orientation === "horizontal") {
     return (
       <g
-        transform={`translate(${n.x}, ${n.y})`}
+        transform={`translate(${n.x}, ${n.y}) scale(${pumpVisualScale(n)})`}
         {...interactionProps}
         style={{ cursor: tapConnectMode ? "crosshair" : enabled ? "move" : "default", touchAction: "none" }}
         opacity={online ? 1 : 0.58}
       >
-        <text x={72} y={4} textAnchor="start" fill="#1e293b" style={{ fontSize: 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
+        <text x={72} y={4} textAnchor="start" fill="#1e293b" style={{ fontSize: pumpVisualScale(n) < 1 ? 12 / pumpVisualScale(n) : 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
         <rect x={-48} y={-16} width={70} height={34} rx={12} fill={motorFill} stroke={motorStroke} strokeWidth={abnormalPower || tapSelected ? 3.2 : 2.3} />
         {[-30, -14, 2].map((x) => <line key={x} x1={x} y1={-13} x2={x} y2={15} stroke="#fff" strokeWidth={2} opacity={0.25} />)}
         <rect x={22} y={-9} width={12} height={18} rx={4} fill="#dbe3ea" stroke="#64748b" strokeWidth={1.5} />
@@ -281,12 +282,12 @@ export default function PumpNodeView({
 
   return (
     <g
-      transform={`translate(${n.x}, ${n.y})`}
+      transform={`translate(${n.x}, ${n.y}) scale(${pumpVisualScale(n)})`}
       {...interactionProps}
       style={{ cursor: tapConnectMode ? "crosshair" : enabled ? "move" : "default", touchAction: "none" }}
       opacity={online ? 1 : 0.58}
     >
-      <text x={48} y={-18} textAnchor="start" fill="#1e293b" style={{ fontSize: 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
+      <text x={48} y={-18} textAnchor="start" fill="#1e293b" style={{ fontSize: pumpVisualScale(n) < 1 ? 12 / pumpVisualScale(n) : 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
       <rect x={-18} y={-36} width={36} height={48} rx={10} fill={motorFill} stroke={motorStroke} strokeWidth={abnormalPower || tapSelected ? 3.2 : 2.2} />
       <path d="M -18 -28 Q 0 -45 18 -28 L 18 -21 L -18 -21 Z" fill="#dbe3ea" stroke="#64748b" strokeWidth={1.5} />
       <circle cx={0} cy={20} r={17} fill="#f8fafc" stroke={motorStroke} strokeWidth={abnormalPower || tapSelected ? 3.2 : 2.3} />
