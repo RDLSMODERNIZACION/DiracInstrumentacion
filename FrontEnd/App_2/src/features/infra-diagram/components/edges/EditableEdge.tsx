@@ -2,6 +2,7 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
 import { tankPortPosition, poolPortOutside } from "../../tankGeometry";
+import { isSandFilter, sandFilterPort } from "../../schematic";
 
 // ✅ usar API_BASE + withScope + authHeaders (para que NO pegue al dominio del frontend)
 import { API_BASE } from "@/lib/api";
@@ -108,6 +109,7 @@ function applyValveXForm(n: any, local: Pt): Pt {
 }
 
 function getDefaultPort(n: UINode, side: Side) {
+  if (isSandFilter(n)) return sandFilterPort(n, side);
   const t = String((n as any).type || "").toLowerCase();
 
   let x = (n as any).x;
@@ -153,6 +155,7 @@ function getDefaultPort(n: UINode, side: Side) {
 }
 
 function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
+  if (isSandFilter(n)) return sandFilterPort(n, String(portId ?? "").startsWith("L") ? "in" : String(portId ?? "").startsWith("R") ? "out" : side);
   if (!portId) return getDefaultPort(n, side);
   const pid = String(portId);
 

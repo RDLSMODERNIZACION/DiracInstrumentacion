@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { ManifoldNode } from "../../types";
+import { isSandFilter, SAND_FILTER_RADIUS, SAND_FILTER_PORT_X } from "../../schematic";
 
 function toNum(v: any) {
   if (v == null || (typeof v === "string" && !v.trim())) return null;
@@ -73,6 +74,35 @@ export default function ManifoldNodeView({
     if (hasQ) out.push(`Caudal: ${qText}`);
     return out;
   }, [n.id, hasP, hasQ, pText, qText]);
+
+  if (isSandFilter(n)) {
+    const clipId = `sand-filter-${n.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    const lines = ["Filtro de arena", "Entrada y salida de agua"];
+    return (
+      <g transform={`translate(${n.x}, ${n.y})`}
+        onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp}
+        onMouseEnter={(e) => showTip(e, { title: n.name, lines })}
+        onMouseMove={(e) => showTip(e, { title: n.name, lines })}
+        onMouseLeave={hideTip} onClick={onClick}
+        style={{ cursor: enabled ? "move" : "default" }} data-role="sand-filter">
+        <title>{n.name}</title>
+        <defs><clipPath id={clipId}><circle r={SAND_FILTER_RADIUS - 7} /></clipPath></defs>
+        <text x={0} y={-94} textAnchor="middle" fill="#0f172a" style={{ fontSize: 16, fontWeight: 800 }}>{n.name}</text>
+        <text x={0} y={-78} textAnchor="middle" fill="#a16207" style={{ fontSize: 10, fontWeight: 800 }}>FILTRO DE ARENA · AGUA</text>
+        <path d={`M ${-SAND_FILTER_PORT_X} 0 L ${SAND_FILTER_PORT_X} 0`} stroke="#64748b" strokeWidth={10} strokeLinecap="round" />
+        <path d={`M ${-SAND_FILTER_PORT_X} 0 L ${SAND_FILTER_PORT_X} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
+        <circle r={SAND_FILTER_RADIUS} fill="#e2e8f0" stroke="#64748b" strokeWidth={3} />
+        <circle r={SAND_FILTER_RADIUS - 7} fill="#eff6ff" stroke="#94a3b8" />
+        <g clipPath={`url(#${clipId})`} style={{ pointerEvents: "none" }}>
+          <rect x={-70} y={9} width={140} height={70} fill="#f5deb3" />
+          <path d="M -70 9 L 70 9" stroke="#c49a53" strokeWidth={2} />
+          {[0,1,2,3].map((row) => [0,1,2,3,4,5,6].map((col) => <circle key={`${row}-${col}`} cx={-57 + col * 19 + (row % 2) * 5} cy={22 + row * 13} r={2} fill="#bd934e" />))}
+          <path d="M -48 -21 L 48 -21 M -36 -21 L -36 -11 M -12 -21 L -12 -11 M 12 -21 L 12 -11 M 36 -21 L 36 -11" stroke="#60a5fa" strokeWidth={3} strokeLinecap="round" />
+        </g>
+        <path d="M -76 -7 L -76 7 M 76 -7 L 76 7" stroke="#475569" strokeWidth={3} />
+      </g>
+    );
+  }
 
   // Dedicated pressure instrument in Cloacas: visible even before its first reading.
   const isPressureMeter = (n as any).servicio === "cloacas" && pSig != null && qSig == null;

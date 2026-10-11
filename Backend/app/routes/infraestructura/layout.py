@@ -199,7 +199,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                         WHEN c.type = 'manifold' THEN m.servicio
                         ELSE 'agua'
                       END::text AS servicio,
-                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
+                      CASE WHEN c.type = 'valve' THEN lv.meta WHEN c.type = 'manifold' AND m.diagram_symbol IS NOT NULL THEN jsonb_build_object('symbol', m.diagram_symbol) ELSE NULL END AS meta,
                       c.signals,
                       COALESCE(
                         CASE
@@ -445,7 +445,7 @@ async def get_layout_combined(company_id: int | None = Query(default=None)):
                     m.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
-                    NULL::jsonb AS meta,
+                    CASE WHEN m.diagram_symbol IS NOT NULL THEN jsonb_build_object('symbol', m.diagram_symbol) ELSE NULL END AS meta,
                     COALESCE(ms.signals, '{}'::jsonb) AS signals
 
                   FROM public.manifolds m
@@ -660,12 +660,13 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       c.name, c.in_maintenance,
                       CASE WHEN c.type = 'tank' THEN t.categoria ELSE NULL END AS categoria,
                       CASE WHEN c.type = 'pump' THEN p.orientacion ELSE NULL END AS orientacion,
-                      CASE WHEN c.type = 'valve' THEN lv.meta ELSE NULL END AS meta,
+                      CASE WHEN c.type = 'valve' THEN lv.meta WHEN c.type = 'manifold' AND m.diagram_symbol IS NOT NULL THEN jsonb_build_object('symbol', m.diagram_symbol) ELSE NULL END AS meta,
                       c.signals
                     FROM public.v_layout_combined c
                     LEFT JOIN public.layout_valves lv ON lv.node_id = c.node_id
                     LEFT JOIN public.tanks t ON c.type = 'tank' AND t.id = c.id
                     LEFT JOIN public.pumps p ON c.type = 'pump' AND p.id = c.id
+                    LEFT JOIN public.manifolds m ON c.type = 'manifold' AND m.id = c.id
                     ORDER BY c.type, c.id
                     """
                 )
@@ -716,6 +717,7 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     FALSE AS in_maintenance,
                     t.categoria::text AS categoria,
                     NULL::text AS orientacion,
+                    t.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -751,6 +753,9 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                       WHERE pmo.pump_id = p.id
                         AND pmo.status = 'en_proceso'
                     ) AS in_maintenance,
+                    NULL::text AS categoria,
+                    p.orientacion::text AS orientacion,
+                    p.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     NULL::jsonb AS meta,
@@ -781,6 +786,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     v.name::text AS name,
                     FALSE AS in_maintenance,
                     NULL::text AS orientacion,
+                    NULL::text AS categoria,
+                    NULL::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lv.meta AS meta,
@@ -828,9 +835,11 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     m.name::text AS name,
                     FALSE AS in_maintenance,
                     NULL::text AS orientacion,
+                    NULL::text AS categoria,
+                    m.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
-                    NULL::jsonb AS meta,
+                    CASE WHEN m.diagram_symbol IS NOT NULL THEN jsonb_build_object('symbol', m.diagram_symbol) ELSE NULL END AS meta,
                     COALESCE(ms.signals, '{}'::jsonb) AS signals
                   FROM public.manifolds m
                   JOIN public.locations l ON l.id = m.location_id
@@ -852,6 +861,8 @@ async def bootstrap_layout(company_id: int | None = Query(default=None)):
                     na.name::text AS name,
                     FALSE AS in_maintenance,
                     NULL::text AS orientacion,
+                    NULL::text AS categoria,
+                    na.servicio::text AS servicio,
                     l.id::bigint AS location_id,
                     l.name::text AS location_name,
                     lna.meta AS meta,

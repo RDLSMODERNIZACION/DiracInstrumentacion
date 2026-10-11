@@ -112,7 +112,7 @@ export type CombinedNodeDTO = {
   orientacion?: "vertical" | "horizontal" | null;
 
   // ✅ meta viene solo en valves (pero lo declaramos opcional)
-  meta?: ValveMeta | null;
+  meta?: (ValveMeta & { symbol?: "sand_filter" | null }) | null;
 
   // ✅ signals: manifold o ABB (en ABB suele ser Record<string, number>)
   // Para no pelearte con TS ahora, lo dejamos genérico.
@@ -252,6 +252,7 @@ export type PumpNode = UINodeBase & {
 
 export type ManifoldNode = UINodeBase & {
   type: "manifold";
+  meta?: { symbol?: "sand_filter" | null } | null;
   ports?: NodePorts;
 
   // ✅ señales (pressure/flow)
@@ -263,7 +264,7 @@ export type ValveNode = UINodeBase & {
   type: "valve";
 
   // ✅ meta viene del backend y define 2way/3way + rot/flip + open/closed
-  meta?: ValveMeta | null;
+  meta?: (ValveMeta & { symbol?: "sand_filter" | null }) | null;
 
   // puertos calculados (si querés guardarlos en el node al armar UI)
   ports?: NodePorts;

@@ -26,6 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
+import { isSandFilter, sandFilterPort } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
@@ -126,6 +127,7 @@ function heightByType(t?: string) {
 }
 
 function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
+  if (isSandFilter(n)) return { ins: ["L1"], outs: ["R1"] };
   const p = getPortsByType(n.type);
   return {
     ins: (p.in ?? []) as string[],
@@ -135,6 +137,10 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 
 function buildPorts(n: UINode) {
   const { ins, outs } = getNodePorts(n);
+  if (isSandFilter(n)) return {
+    inPorts: [{ portId: "L1", side: "in" as const, ...sandFilterPort(n, "in") }],
+    outPorts: [{ portId: "R1", side: "out" as const, ...sandFilterPort(n, "out") }],
+  };
 
   if (n.type === "tank") {
     return {
@@ -383,7 +389,7 @@ export default function InfraDiagram() {
       location_id: (n as any).location_id ?? null,
       location_name: (n as any).location_name ?? null,
 
-      ...(n.type === "manifold" ? { signals: (n as any).signals ?? null } : {}),
+      ...(n.type === "manifold" ? { signals: (n as any).signals ?? null, meta: n.meta ?? null } : {}),
 
       ...(n.type === "network_analyzer"
         ? (() => {
@@ -1186,7 +1192,7 @@ export default function InfraDiagram() {
                       showTip={showTip}
                       hideTip={hideTip}
                       enabled={editMode && !connectMode}
-                      onClick={() => (!editMode && !connectMode ? maybeOpenOps(n) : undefined)}
+                      onClick={() => (!editMode && !connectMode && !isSandFilter(n) ? maybeOpenOps(n) : undefined)}
                     />
                   ) : n.type === "network_analyzer" ? (
                     <NetworkAnalyzerNodeView
