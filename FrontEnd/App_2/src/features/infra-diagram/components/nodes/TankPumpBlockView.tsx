@@ -19,8 +19,7 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
 }) {
   const drag = useNodeDragCommon(n, getPos, setPos, onDragEnd, hideTip, enabled);
   const offset = mountedPumpOffset(n.id);
-  const blockTop = Math.min(-206, offset.y - 60);
-  const branchX = offset.x - 27;
+  const blockTop = -250;
   const connectionX = tankBlockConnectionPoint(n).x - n.x;
   const running = ["run", "running", "on", "1", "true"].includes(String(pump.state).toLowerCase());
   const tip = { title: n.name, lines: [
@@ -33,18 +32,19 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
       onMouseEnter={(e) => showTip(e, tip)} onMouseMove={(e) => showTip(e, tip)}
       onMouseLeave={hideTip} onClick={onClick} style={{ cursor: enabled ? "move" : "default" }}>
       <title>{`${n.name} · ${pump.name}`}</title>
-      <rect x={-224} y={blockTop} width={630} height={184 - blockTop} rx={14} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={1.5} />
+      <rect x={-224} y={blockTop} width={448} height={184 - blockTop} rx={14} fill="#f8fafc" stroke="#cbd5e1" strokeWidth={1.5} />
+      <text x={0} y={-224} textAnchor="middle" fill="#0f172a" style={{ fontSize: 20, fontWeight: 900 }}>{n.name}</text>
       <g transform={`translate(${-n.x}, ${-n.y})`} style={{ pointerEvents: "none" }}>
-        <TankNodeView n={n} getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
+        <TankNodeView n={n} hideHeading getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
           showTip={showTip} hideTip={hideTip} enabled={false} />
-        <PumpNodeView n={pump} getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
+        <PumpNodeView n={pump} mounted getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
           showTip={showTip} hideTip={hideTip} enabled={false} />
       </g>
       <g style={{ pointerEvents: "none" }}>
-        <path d={`M ${Math.min(140, branchX)} 0 L ${connectionX} 0`} stroke="#64748b" strokeWidth={9} strokeLinecap="round" />
-        <path d={`M ${Math.min(140, branchX)} 0 L ${connectionX} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
-        <path d={`M ${branchX} ${offset.y + 49} L ${branchX} 0`} stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
-        <path d={`M ${branchX} ${offset.y + 49} L ${branchX} 0`} stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
+        <path d={`M 140 0 L ${connectionX} 0`} stroke="#64748b" strokeWidth={9} strokeLinecap="round" />
+        <path d={`M 140 0 L ${connectionX} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
+        <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
+        <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
         <circle cx={connectionX} r={4} fill="white" stroke="#64748b" strokeWidth={1.5} />
       </g>
     </g>

@@ -20,8 +20,7 @@ export const TANK_PUMP_PAIRS: Record<string, string> = {
 };
 export const MOUNTED_PUMP_Y = -90;
 export function mountedPumpOffset(tankId?: string) {
-  if (tankId === "tank:25") return { x: 130, y: -250 };
-  return tankId === "tank:27" ? { x: 210, y: -150 } : { x: 0, y: MOUNTED_PUMP_Y };
+  return ["tank:25", "tank:27"].includes(tankId ?? "") ? { x: 0, y: -160 } : { x: 0, y: MOUNTED_PUMP_Y };
 }
 export function isTankPumpBlock(n: { id?: string }) { return !!TANK_PUMP_PAIRS[n.id ?? ""]; }
 export function mountedPumpPosition(tank: { id?: string; x: number; y: number }) {
@@ -40,7 +39,7 @@ export function resolveMountedPumps<T extends { id: string; type: string; x: num
 }
 
 export function tankBlockConnectionPoint(n: { id?: string; x: number; y: number }) {
-  return { x: n.x + (["tank:25", "tank:27"].includes(n.id ?? "") ? 430 : 92), y: n.y };
+  return { x: n.x + (["tank:25", "tank:27"].includes(n.id ?? "") ? 250 : 92), y: n.y };
 }
 export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number }) {
   const pair = Object.entries(TANK_PUMP_PAIRS).find(([, pumpId]) => pumpId === n.id);

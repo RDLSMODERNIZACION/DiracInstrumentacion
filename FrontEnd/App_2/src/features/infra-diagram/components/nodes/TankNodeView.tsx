@@ -14,6 +14,7 @@ function hasAlarmValue(v: any) {
 
 export default function TankNodeView({
   n,
+  hideHeading = false,
   mountedPump,
   connectedPorts = [],
   getPos,
@@ -31,6 +32,7 @@ export default function TankNodeView({
     chlorine_mg_l?: number | string | null;
     ph?: number | string | null;
   };
+  hideHeading?: boolean;
   mountedPump?: PumpNode;
   connectedPorts?: string[];
   getPos: any;
@@ -270,6 +272,7 @@ export default function TankNodeView({
         </defs>
 
         {/* Nombre */}
+        {!hideHeading && <>
         <text
           x={W / 2}
           y={24}
@@ -294,6 +297,7 @@ export default function TankNodeView({
           {`POZO · ${servicioLabel}`}
         </text>
 
+        </>}
         {/* Cabezal */}
         <ellipse
           cx={W / 2}
