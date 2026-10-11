@@ -202,6 +202,12 @@ export default function NetworkAnalyzerNodeView({
   const online = ageSec !== null && ageSec <= 180;
   const signals = n.signals ?? null;
   const raw = latest?.raw ?? null;
+  const isPowermeter = String(latest?.source ?? "").startsWith("nodered_cloacas") || String(n.name ?? "").toLowerCase().includes("powermeter");
+  const sampledStats = raw?.statistics?.window_seconds === 900;
+  const avgLabel = isPowermeter ? "MEDIA 15 MIN" : "MEDIA ABB";
+  const maxLabel = isPowermeter ? "MÁXIMO 15 MIN" : "MÁXIMO ABB";
+  const sCalculated = !!raw?.calculated?.S_VA;
+  const pfCalculated = !!raw?.calculated?.PF;
 
   const pKW = firstNum(
     latest?.p_kw,
@@ -226,7 +232,7 @@ export default function NetworkAnalyzerNodeView({
   const i3 = firstNum(latest?.i_l3, rawPick(raw, ["i_l3", "i3"]));
 
   const lowPf = pf !== null && pf < 0.96;
-  const clockStatsUnavailable = online && (invalidAbbStats || avgPKW === null || maxPKW === null);
+  const clockStatsUnavailable = !isPowermeter && online && (invalidAbbStats || avgPKW === null || maxPKW === null);
   const name = typeof n.name === "string" && n.name.trim() ? n.name.trim() : "Eléctrico";
 
   const border = !analyzerId
@@ -277,9 +283,12 @@ export default function NetworkAnalyzerNodeView({
 
   const tipLines = [
     `Actual: ${fmt(pKW, 1)} kW`,
-    avgPKW !== null ? `Media ABB: ${fmt(avgPKW, 1)} kW` : "Media ABB: --",
-    maxPKW !== null ? `Máx ABB: ${fmt(maxPKW, 1)} kW` : "Máx ABB: --",
+    avgPKW !== null ? `${avgLabel}: ${fmt(avgPKW, 1)} kW` : `${avgLabel}: --`,
+    maxPKW !== null ? `${maxLabel}: ${fmt(maxPKW, 1)} kW` : `${maxLabel}: --`,
     pf !== null ? `FP: ${fmt(pf, 2)}${lowPf ? " (bajo)" : ""}` : "",
+    sCalculated ? "S calculada: suma de Vfase-neutro RMS × Ifase RMS" : "",
+    pfCalculated ? "PF calculado: P/S, no leído del registro Modbus" : "",
+    sampledStats ? `Media/máximo de ${raw.statistics.sample_count} muestras recibidas en los últimos 15 min; desde ${raw.statistics.first_ts}` : "",
     online ? "Online" : "Sin comunicación",
   ].filter(Boolean);
 
@@ -384,8 +393,8 @@ export default function NetworkAnalyzerNodeView({
           <line x1={panelX + 16} y1={panelY + 37} x2={panelX + PANEL_W - 16} y2={panelY + 37} stroke="#e2e8f0" />
 
           {metric("POTENCIA ACTUAL", pKW, "kW", panelX + 18, panelY + 57)}
-          {metric("MEDIA ABB", avgPKW, "kW", panelX + 164, panelY + 57, avgPKW === null ? "#d97706" : "#0f172a")}
-          {metric("MÁXIMO ABB", maxPKW, "kW", panelX + 310, panelY + 57, maxPKW === null ? "#d97706" : "#0f172a")}
+          {metric(avgLabel, avgPKW, "kW", panelX + 164, panelY + 57, avgPKW === null ? "#d97706" : "#0f172a")}
+          {metric(maxLabel, maxPKW, "kW", panelX + 310, panelY + 57, maxPKW === null ? "#d97706" : "#0f172a")}
 
           <line x1={panelX + 16} y1={panelY + 105} x2={panelX + PANEL_W - 16} y2={panelY + 105} stroke="#e2e8f0" />
           <text x={panelX + 18} y={panelY + 123} fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>
@@ -393,8 +402,8 @@ export default function NetworkAnalyzerNodeView({
           </text>
 
           {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 143)}
-          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 143)}
-          {smallRow("PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
+          {smallRow(sCalculated ? "S*" : "S", sKva, "kVA", panelX + 122, panelY + 143)}
+          {smallRow(pfCalculated ? "PF*" : "PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
           {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 143)}
 
           {smallRow("V12", v12, "V", panelX + 18, panelY + 164)}
@@ -408,6 +417,12 @@ export default function NetworkAnalyzerNodeView({
           {clockStatsUnavailable && (
             <text x={panelX + 18} y={panelY + 218} fill="#d97706" style={{ fontSize: 9, fontWeight: 900 }}>
               ⚠ Media/Máximo ABB no disponibles: revisar fecha y hora del analizador
+            </text>
+          )}
+
+          {isPowermeter && !latestErr && (
+            <text x={panelX + 18} y={panelY + 218} fill="#64748b" style={{ fontSize: 9, fontWeight: 700 }}>
+              {sCalculated || pfCalculated ? "* Calculado · " : ""}{sampledStats ? `Media/máximo: ${raw.statistics.sample_count} muestras / ventana 15 min` : "Media/máximo pendientes del flujo actualizado"}
             </text>
           )}
 
