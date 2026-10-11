@@ -782,7 +782,16 @@ export default function InfraDiagram() {
 
   const edgesForRender: UIEdgeWithPorts[] = useMemo(() => {
     const base=simulateFlow(edges,nodesById).filter((e)=>nodesById[e.a]?.type!=="pump"&&nodesById[e.b]?.type!=="pump");
-    return base.map((e)=>{ const taps=pumpTapByEdge.get(e.id)??[]; const active=taps.find((tap)=>{const p=nodesById[tap.pump_node_id];return !!p&&isPumpOn(p);}); if(!active)return e; return {...e,flow:{on:true,dir:active.mode==="inject"?1:-1,strength:1}}; });
+    return base.map((e) => {
+      const taps = pumpTapByEdge.get(e.id) ?? [];
+      const active = taps.find((tap) => {
+        const p = nodesById[tap.pump_node_id];
+        return !!p && isPumpOn(p);
+      });
+      if (!active) return e;
+      // Inject/extract describes the pump branch. The main pipe follows a -> b.
+      return { ...e, flow: { on: true, dir: 1 as const, strength: 1 } };
+    });
   }, [edges, nodesById, pumpTapByEdge]);
 
   return (
