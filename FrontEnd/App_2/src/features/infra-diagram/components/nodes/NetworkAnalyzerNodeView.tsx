@@ -204,8 +204,9 @@ export default function NetworkAnalyzerNodeView({
   const raw = latest?.raw ?? null;
   const isPowermeter = String(latest?.source ?? "").startsWith("nodered_cloacas") || String(n.name ?? "").toLowerCase().includes("powermeter");
   const sampledStats = raw?.statistics?.window_seconds === 900;
-  const avgLabel = isPowermeter ? "MEDIA 15 MIN" : "MEDIA ABB";
-  const maxLabel = isPowermeter ? "MÁXIMO 15 MIN" : "MÁXIMO ABB";
+  const nativeDemand = isPowermeter && raw?.native_demand_register != null;
+  const avgLabel = isPowermeter ? (nativeDemand ? "DEMANDA EQUIPO" : "MEDIA EQUIPO") : "MEDIA ABB";
+  const maxLabel = isPowermeter ? "MÁXIMO EQUIPO" : "MÁXIMO ABB";
   const sCalculated = !!raw?.calculated?.S_VA;
   const pfCalculated = !!raw?.calculated?.PF;
 
@@ -217,12 +218,12 @@ export default function NetworkAnalyzerNodeView({
   const avgPKWRaw = firstNum(latest?.avg_p_kw);
   const maxPKWRaw = firstNum(latest?.max_p_kw);
   const invalidAbbStats = isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw);
-  const avgPKW = invalidAbbStats ? null : avgPKWRaw;
-  const maxPKW = invalidAbbStats ? null : maxPKWRaw;
+  const avgPKW = invalidAbbStats || (isPowermeter && sampledStats) ? null : avgPKWRaw;
+  const maxPKW = invalidAbbStats || (isPowermeter && sampledStats) ? null : maxPKWRaw;
 
   const qKvar = firstNum(latest?.q_kvar, rawPick(raw, ["q_kvar"]), pickSignal(signals, ["q_kvar", "kvar"]));
-  const sKva = firstNum(latest?.s_kva, rawPick(raw, ["s_kva"]), pickSignal(signals, ["s_kva", "kva"]));
-  const pf = firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
+  const sKva = isPowermeter && sCalculated ? null : firstNum(latest?.s_kva, rawPick(raw, ["s_kva"]), pickSignal(signals, ["s_kva", "kva"]));
+  const pf = isPowermeter && pfCalculated ? null : firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
   const hz = firstNum(latest?.hz, rawPick(raw, ["hz", "frequency"]), pickSignal(signals, ["hz", "frequency"]));
   const v12 = firstNum(latest?.v_l1l2, rawPick(raw, ["v_l1l2", "v12"]));
   const v23 = firstNum(latest?.v_l2l3, latest?.v_l3l2, rawPick(raw, ["v_l2l3", "v_l3l2", "v23"]));
@@ -286,9 +287,9 @@ export default function NetworkAnalyzerNodeView({
     avgPKW !== null ? `${avgLabel}: ${fmt(avgPKW, 1)} kW` : `${avgLabel}: --`,
     maxPKW !== null ? `${maxLabel}: ${fmt(maxPKW, 1)} kW` : `${maxLabel}: --`,
     pf !== null ? `FP: ${fmt(pf, 2)}${lowPf ? " (bajo)" : ""}` : "",
-    sCalculated ? "S calculada: suma de Vfase-neutro RMS × Ifase RMS" : "",
-    pfCalculated ? "PF calculado: P/S, no leído del registro Modbus" : "",
-    sampledStats ? `Media/máximo de ${raw.statistics.sample_count} muestras recibidas en los últimos 15 min; desde ${raw.statistics.first_ts}` : "",
+    
+    
+    nativeDemand ? "Demanda leída del equipo; no es máximo de potencia" : "",
     online ? "Online" : "Sin comunicación",
   ].filter(Boolean);
 
@@ -402,8 +403,8 @@ export default function NetworkAnalyzerNodeView({
           </text>
 
           {smallRow("Q", qKvar, "kVAr", panelX + 18, panelY + 143)}
-          {smallRow(sCalculated ? "S*" : "S", sKva, "kVA", panelX + 122, panelY + 143)}
-          {smallRow(pfCalculated ? "PF*" : "PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
+          {smallRow("S", sKva, "kVA", panelX + 122, panelY + 143)}
+          {smallRow("PF", pf, "PF", panelX + 226, panelY + 143, lowPf)}
           {smallRow("Hz", hz, "Hz", panelX + 330, panelY + 143)}
 
           {smallRow("V12", v12, "V", panelX + 18, panelY + 164)}
@@ -422,7 +423,7 @@ export default function NetworkAnalyzerNodeView({
 
           {isPowermeter && !latestErr && (
             <text x={panelX + 18} y={panelY + 218} fill="#64748b" style={{ fontSize: 9, fontWeight: 700 }}>
-              {sCalculated || pfCalculated ? "* Calculado · " : ""}{sampledStats ? `Media/máximo: ${raw.statistics.sample_count} muestras / ventana 15 min` : "Media/máximo pendientes del flujo actualizado"}
+              {sampledStats || sCalculated || pfCalculated ? "Actualizar flujo: hay datos calculados omitidos" : "Lectura directa · campos no informados: —"}
             </text>
           )}
 
