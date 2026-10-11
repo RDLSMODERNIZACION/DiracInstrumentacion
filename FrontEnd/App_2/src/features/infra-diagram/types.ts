@@ -92,6 +92,8 @@ export type NetworkAnalyzerLatestDTO = {
   value?: number | null;
 };
 
+export type TankCategory = "tanque" | "pozo" | "pileta_aireacion" | "pileta_sedimentacion";
+
 export type CombinedNodeDTO = {
   node_id: string;
   id: number;
@@ -106,7 +108,7 @@ export type CombinedNodeDTO = {
   state?: string | null;
   level_pct?: number | string | null;
   alarma?: string | null;
-  categoria?: "tanque" | "pozo" | null;
+  categoria?: TankCategory | null;
   orientacion?: "vertical" | "horizontal" | null;
 
   // ✅ meta viene solo en valves (pero lo declaramos opcional)
@@ -150,7 +152,7 @@ type BaseExtras = {
   state?: string | null;
   level_pct?: number | null;
   alarma?: string | null;
-  categoria?: "tanque" | "pozo" | null;
+  categoria?: TankCategory | null;
   orientacion?: "vertical" | "horizontal" | null;
 };
 

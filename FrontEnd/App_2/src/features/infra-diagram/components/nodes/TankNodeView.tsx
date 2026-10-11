@@ -1,9 +1,7 @@
 ﻿import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
-import type { TankNode } from "../../types";
-
-type TankCategory = "tanque" | "pozo";
+import type { TankNode, TankCategory } from "../../types";
 
 function hasAlarmValue(v: any) {
   if (v == null) return false;
@@ -48,8 +46,10 @@ export default function TankNodeView({
     enabled
   );
 
-  const category: TankCategory =
-    (n as any).categoria === "pozo" ? "pozo" : "tanque";
+  const category: TankCategory = n.categoria ?? "tanque";
+  const isAeration = category === "pileta_aireacion";
+  const isSedimentation = category === "pileta_sedimentacion";
+  const isTreatmentPool = isAeration || isSedimentation;
 
   const servicio =
     (n as any).servicio === "cargaderos"
@@ -112,6 +112,71 @@ export default function TankNodeView({
     `Estado: ${isOnline ? "Online" : "Sin comunicación"}`,
     hasAlarm ? `Alarma: ${n.alarma}` : "Alarma: no",
   ];
+
+  // Piletas abiertas, en planta. Sin lectura no se representa un nivel de 0%.
+  if (isTreatmentPool) {
+    const poolW = isAeration ? 220 : 360;
+    const poolH = isAeration ? 220 : 150;
+    const W = poolW + 40;
+    const H = poolH + 100;
+    const px = 20;
+    const py = 52;
+    const validLevel = levelRaw !== null && Number.isFinite(levelRaw);
+    const levelText = validLevel ? `${level.toFixed(0)}%` : "—";
+    const poolStroke = critical ? "#ef4444" : warning ? "#f59e0b" : "#64748b";
+    const poolTip = [
+      `Tipo: Pileta de ${isAeration ? "aireación" : "sedimentación"}`,
+      `Nivel: ${validLevel ? levelText : "Sin datos"}`,
+      `Estado: ${isOnline ? "Online" : "Sin comunicación"}`,
+      ...(hasAlarm ? [`Alarma: ${n.alarma}`] : []),
+    ];
+    return (
+      <g
+        transform={`translate(${n.x - W / 2}, ${n.y - H / 2})`}
+        onPointerDown={drag.onPointerDown}
+        onPointerMove={drag.onPointerMove}
+        onPointerUp={drag.onPointerUp}
+        onMouseEnter={(e) => showTip(e, { title: name, lines: poolTip })}
+        onMouseMove={(e) => showTip(e, { title: name, lines: poolTip })}
+        onMouseLeave={hideTip}
+        onClick={onClick}
+        style={{ cursor: enabled ? "move" : "default" }}
+        data-role="treatment-pool"
+      >
+        <title>{`${name} · ${validLevel ? levelText : "Sin datos"}`}</title>
+        <text x={W / 2} y={22} textAnchor="middle" fill="#0f172a" style={{ fontSize: 18, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
+        <text x={W / 2} y={40} textAnchor="middle" fill="#15803d" style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.6, pointerEvents: "none" }}>
+          {isAeration ? "AIREACIÓN · CLOACAS" : "SEDIMENTACIÓN · CLOACAS"}
+        </text>
+        <rect x={px} y={py} width={poolW} height={poolH} rx={3} fill="#e2e8f0" stroke={poolStroke} strokeWidth={3} />
+        <rect x={px + 10} y={py + 10} width={poolW - 20} height={poolH - 20} rx={1} fill="#f0fdf4" stroke="#94a3b8" strokeWidth={1.5} />
+        {validLevel && (
+          <rect x={px + 11} y={py + 10 + (poolH - 20) * (1 - level / 100)} width={poolW - 22} height={(poolH - 20) * level / 100} fill="#bbf7d0" />
+        )}
+        {isAeration ? (
+          <g stroke="#86b59a" fill="none" strokeWidth={1.5} style={{ pointerEvents: "none" }}>
+            {[0, 1, 2].map((row) => [0, 1, 2].map((col) => (
+              <g key={`${row}-${col}`} transform={`translate(${px + 45 + col * 65}, ${py + 40 + row * 65})`}>
+                <circle r={7} /><circle cx={10} cy={-11} r={3} /><circle cx={-9} cy={-16} r={2} />
+              </g>
+            )))}
+          </g>
+        ) : (
+          <g stroke="#86b59a" strokeWidth={2} style={{ pointerEvents: "none" }}>
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <line key={i} x1={px + 42 + i * 40} y1={py + 25} x2={px + 24 + i * 40} y2={py + poolH - 25} />
+            ))}
+          </g>
+        )}
+        <rect x={W / 2 - 48} y={py + poolH / 2 - 23} width={96} height={46} rx={8} fill="#ffffff" fillOpacity={0.95} stroke="#cbd5e1" />
+        <text x={W / 2} y={py + poolH / 2 + 10} textAnchor="middle" fill="#0f172a" style={{ fontSize: 29, fontWeight: 900, pointerEvents: "none" }}>{levelText}</text>
+        <circle cx={px + 17} cy={py + poolH + 23} r={4} fill={isOnline ? "#22c55e" : "#94a3b8"} />
+        <text x={px + 28} y={py + poolH + 27} fill="#64748b" style={{ fontSize: 11, fontWeight: 700, pointerEvents: "none" }}>
+          {isOnline ? "Online" : validLevel ? "Sin comunicación" : "Sin datos"}
+        </text>
+      </g>
+    );
+  }
 
   // ============================================================
   // POZO GRANDE
