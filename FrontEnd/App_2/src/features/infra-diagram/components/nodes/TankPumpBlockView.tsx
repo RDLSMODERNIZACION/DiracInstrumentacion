@@ -1,4 +1,5 @@
 import React from "react";
+import PumpHoverArea from "../PumpHoverArea";
 import type { TankNode, PumpNode } from "../../types";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import TankNodeView from "./TankNodeView";
@@ -49,6 +50,8 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
         <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
         <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
       </g>
+      <PumpHoverArea pump={pump} x={offset.x - 32} y={offset.y - 40} width={64} height={92}
+        showTip={showTip} hideTip={hideTip} />
     </g>
   );
 }

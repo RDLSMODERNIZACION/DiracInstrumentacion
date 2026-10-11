@@ -1,4 +1,5 @@
 import React from "react";
+import PumpHoverArea from "../PumpHoverArea";
 import type { ManifoldNode, PumpNode } from "../../types";
 import type useNodeDragCommon from "../../useNodeDragCommon";
 import { schematicPort } from "../../schematic";
@@ -68,6 +69,8 @@ export default function WaterIntakeNodeView({ n, pumps = [], drag, showTip, hide
         </g>)}
         <text x={137} y={106} textAnchor="middle" fill="#0369a1" style={{ fontSize: 10, fontWeight: 700 }}>SALIDA HACIA LAGUNA</text>
       </g>
+      {[0, 1].map((i) => <PumpHoverArea key={i} pump={pumps[i]} fallbackName={`Bomba ${i + 1}`}
+        x={-87 + i * 70} y={-168} width={44} height={75} showTip={showTip} hideTip={hideTip} />)}
     </g>
   );
 }

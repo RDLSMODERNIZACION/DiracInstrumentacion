@@ -1,3 +1,4 @@
+import PumpHoverArea from "../PumpHoverArea";
 import TankPumpBlockView from "./TankPumpBlockView";
 import { isCompactTank } from "../../equipmentAppearance";
 import React from "react";
@@ -523,6 +524,8 @@ export default function TankNodeView({
         <text x={0} y={6} textAnchor="middle" fill="#334155" style={{ fontSize: 17, fontWeight: 800 }}>{hasLevel ? `${level.toFixed(0)}%` : "—"}</text>
         <text x={0} y={72} textAnchor="middle" fill="#64748b" style={{ fontSize: 10 }}>{hasLevel ? (isOnline ? "Online" : "Sin comunicación") : "Sin datos"}</text>
         </g>
+        {mountedPump && <PumpHoverArea pump={mountedPump} x={-22} y={-118} width={44} height={62}
+          showTip={showTip} hideTip={hideTip} />}
       </g>
     );
   }
