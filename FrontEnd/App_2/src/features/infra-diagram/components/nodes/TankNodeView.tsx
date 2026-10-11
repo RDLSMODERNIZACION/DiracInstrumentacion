@@ -121,7 +121,7 @@ export default function TankNodeView({
     hasAlarm ? `Alarma: ${n.alarma}` : "Alarma: no",
   ];
 
-  if (n.id === "tank:27" && mountedPump) {
+  if (["tank:25", "tank:27"].includes(n.id) && mountedPump) {
     return <TankPumpBlockView n={n} pump={mountedPump} getPos={getPos} setPos={setPos}
       onDragEnd={onDragEnd} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
   }
