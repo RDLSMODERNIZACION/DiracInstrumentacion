@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
-import type { ManifoldNode } from "../../types";
+import type { ManifoldNode, PumpNode } from "../../types";
 import { isSandFilter, SAND_FILTER_RADIUS, SAND_FILTER_PORT_X } from "../../schematic";
 import ProcessNodeView from "./ProcessNodeView";
 import DosingNodeView from "./DosingNodeView";
@@ -28,9 +28,10 @@ function prettyUnit(unit: any, fallback: string) {
 }
 
 export default function ManifoldNodeView({
-  n, getPos, setPos, onDragEnd, showTip, hideTip, enabled = true, onClick,
+  n, mountedPumps, getPos, setPos, onDragEnd, showTip, hideTip, enabled = true, onClick,
 }: {
   n: ManifoldNode;
+  mountedPumps?: PumpNode[];
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -80,7 +81,7 @@ export default function ManifoldNodeView({
   }, [n.id, hasP, hasQ, pText, qText]);
 
   if (n.meta?.symbol === "water_intake") {
-    return <WaterIntakeNodeView n={n} drag={drag} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
+    return <WaterIntakeNodeView n={n} pumps={mountedPumps} drag={drag} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
   }
 
   if (n.meta?.symbol === "lagoon") {

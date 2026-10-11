@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint } from "./equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint, INTAKE_PUMPS, containedPumpIds } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -207,7 +207,7 @@ function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode
   for (const e of edges) (adj[e.a] ||= []).push(e);
 
   const seeds = Object.values(nodesById).filter((n) =>
-    isPumpOn(n) || (n.type === "tank" && !!nodesById[TANK_PUMP_PAIRS[n.id]] && isPumpOn(nodesById[TANK_PUMP_PAIRS[n.id]]))
+    isPumpOn(n) || containedPumpIds(n.id).some((id) => nodesById[id] && isPumpOn(nodesById[id]))
   );
 
   const visitedNode = new Set<string>();
@@ -534,10 +534,10 @@ export default function InfraDiagram() {
         if (!pos) return;
 
         saveLayoutToStorage(nodesByIdAsArray(nodesById));
-        const mountedPump = nodesById[TANK_PUMP_PAIRS[id]];
+        const mountedPumps = containedPumpIds(id).map((pid) => nodesById[pid]).filter(Boolean);
         await Promise.all([
           updateLayout(id, pos.x, pos.y),
-          ...(mountedPump ? [updateLayout(mountedPump.id, mountedPump.x, mountedPump.y)] : []),
+          ...mountedPumps.map((pump) => updateLayout(pump.id, pump.x, pump.y)),
         ]);
 
         log("POSITION SAVED", { id, x: pos.x, y: pos.y });
@@ -1153,8 +1153,8 @@ export default function InfraDiagram() {
                 ))}
 
                 {[...visibleNodes]
-                  .filter((n) => !Object.entries(TANK_PUMP_PAIRS).some(([tankId, pumpId]) =>
-                    n.id === pumpId && visibleNodeIds.has(tankId)))
+                  .filter((n) => ![...Object.keys(TANK_PUMP_PAIRS), ...Object.keys(INTAKE_PUMPS)].some((parentId) =>
+                    containedPumpIds(parentId).includes(n.id) && visibleNodeIds.has(parentId)))
                   .sort((a, b) => {
                     const za = a.type === "network_analyzer" ? 1 : 0;
                     const zb = b.type === "network_analyzer" ? 1 : 0;
@@ -1211,6 +1211,7 @@ export default function InfraDiagram() {
                     <ManifoldNodeView
                       key={n.id}
                       n={n as ManifoldNode}
+                      mountedPumps={(INTAKE_PUMPS[n.id] ?? []).map((id) => nodesById[id]).filter(Boolean) as PumpNode[]}
                       getPos={getPos}
                       setPos={setPos}
                       onDragEnd={() => saveNodePosition(n.id)}

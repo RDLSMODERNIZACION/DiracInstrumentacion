@@ -35,6 +35,13 @@ export function resolveMountedPumps<T extends { id: string; type: string; x: num
       result[pumpId] = { ...pump, ...mountedPumpPosition(tank) };
     }
   }
+  for (const [intakeId, pumpIds] of Object.entries(INTAKE_PUMPS)) {
+    const intake = nodes[intakeId];
+    if (intake?.type !== "manifold") continue;
+    pumpIds.forEach((pumpId, index) => {
+      if (nodes[pumpId]?.type === "pump") result[pumpId] = { ...nodes[pumpId], ...intakePumpPosition(intake, index) };
+    });
+  }
   return result;
 }
 
@@ -44,7 +51,20 @@ export function tankBlockConnectionPoint(n: { id?: string; x: number; y: number 
 }
 export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number }) {
   const pair = Object.entries(TANK_PUMP_PAIRS).find(([, pumpId]) => pumpId === n.id);
-  if (!pair) return null;
+  if (!pair) {
+    const intakePair = Object.entries(INTAKE_PUMPS).find(([, ids]) => ids.includes(n.id));
+    if (!intakePair) return null;
+    const index = intakePair[1].indexOf(n.id);
+    return { x: n.x + 65 - index * 70 + 170, y: n.y + 30 };
+  }
   const offset = mountedPumpOffset(pair[0]);
   return tankBlockConnectionPoint({ id: pair[0], x: n.x - offset.x, y: n.y - offset.y });
+}
+
+export const INTAKE_PUMPS: Record<string, string[]> = { "manifold:27": ["pump:41", "pump:42"] };
+export function containedPumpIds(parentId: string) {
+  return INTAKE_PUMPS[parentId] ?? (TANK_PUMP_PAIRS[parentId] ? [TANK_PUMP_PAIRS[parentId]] : []);
+}
+export function intakePumpPosition(intake: { x: number; y: number }, index: number) {
+  return { x: intake.x - 65 + index * 70, y: intake.y - 30 };
 }
