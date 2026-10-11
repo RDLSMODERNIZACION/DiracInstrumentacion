@@ -160,6 +160,7 @@ type BaseExtras = {
 
 // Nodo base UI
 export type UINodeBase = {
+  servicio?: "agua" | "cargaderos" | "cloacas";
   id: string; // = node_id
   name: string;
   x: number;

@@ -1,4 +1,4 @@
-import { pumpVisualScale } from "../../equipmentAppearance";
+import { pumpVisualScale, isLoadingStation, loadingStationPort } from "../../equipmentAppearance";
 import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import type { PumpNode } from "../../types";
@@ -257,6 +257,52 @@ export default function PumpNodeView({
       </g>
     </g>
   );
+
+  if (isLoadingStation(n)) {
+    const inlet = loadingStationPort({ x: 0, y: 0 }, "in");
+    const outlet = loadingStationPort({ x: 0, y: 0 }, "out");
+    const pipe = `M ${inlet.x} ${inlet.y} H -18 M 18 20 H 44 V -98 Q 44 -110 56 -110 H 130 Q 142 -110 142 -98 V ${outlet.y}`;
+    return (
+      <g transform={`translate(${n.x}, ${n.y})`} {...interactionProps} data-role="loading-station"
+        style={{ cursor: tapConnectMode ? "crosshair" : enabled ? "move" : "default", touchAction: "none" }}>
+        <title>{`${name} · Bomba y descarga al camión`}</title>
+        <rect x={-78} y={-150} width={316} height={246} fill="transparent" />
+        <text x={75} y={-130} textAnchor="middle" fill="#0f172a" style={{ fontSize: 18, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
+        <g style={{ pointerEvents: "none" }}>
+          {/* Steel feed pipe, raised loading arm and flexible discharge hose. */}
+          <path d={pipe} fill="none" stroke="#334155" strokeWidth={12} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={pipe} fill="none" stroke="#94a3b8" strokeWidth={7} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={pipe} fill="none" stroke="#e2e8f0" strokeWidth={2} strokeLinejoin="round" />
+          {[-58, -46].map((x) => <line key={x} x1={x} y1={11} x2={x} y2={29} stroke="#475569" strokeWidth={3} />)}
+          <path d="M 38 -51 L 44 -57 L 50 -51 L 44 -45 Z" fill="#f8fafc" stroke="#334155" strokeWidth={2} />
+          <path d="M 44 -57 V -65 M 35 -65 H 53" stroke="#334155" strokeWidth={3} />
+          <path d="M 142 -48 Q 137 -34 142 -16" fill="none" stroke="#334155" strokeWidth={9} />
+          <path d="M 142 -48 Q 137 -34 142 -16" fill="none" stroke="#64748b" strokeWidth={5} strokeDasharray="3 2" />
+          {online && running && <path d="M 142 -16 V 0" stroke="#38bdf8" strokeWidth={5} strokeDasharray="4 4">
+            <animate attributeName="stroke-dashoffset" from="8" to="0" dur="0.6s" repeatCount="indefinite" />
+          </path>}
+          {/* Truck is a schematic destination, not a vehicle-presence signal. */}
+          <rect x={84} y={8} width={103} height={43} rx={19} fill="#e2e8f0" stroke="#64748b" strokeWidth={2} />
+          <path d="M 104 12 V 47 M 166 12 V 47" stroke="#94a3b8" strokeWidth={2} />
+          <rect x={132} y={1} width={20} height={7} rx={2} fill="#cbd5e1" stroke="#64748b" />
+          <path d="M 190 51 V 12 H 212 L 227 31 V 51 Z" fill="#f8fafc" stroke="#475569" strokeWidth={2} />
+          <path d="M 197 19 H 210 L 219 31 H 197 Z" fill="#bae6fd" stroke="#64748b" />
+          <path d="M 82 54 H 228" stroke="#475569" strokeWidth={5} />
+          {[102, 171, 211].map((x) => <g key={x}><circle cx={x} cy={57} r={10} fill="#334155" /><circle cx={x} cy={57} r={4} fill="#cbd5e1" /></g>)}
+          <text x={153} y={87} textAnchor="middle" fill="#475569" style={{ fontSize: 12, fontWeight: 700 }}>Descarga al camión</text>
+          <text x={-66} y={45} fill="#475569" style={{ fontSize: 11 }}>Entrada</text>
+          <circle cx={inlet.x} cy={inlet.y} r={4} fill="white" stroke="#334155" strokeWidth={2} />
+          <circle cx={outlet.x} cy={outlet.y} r={4} fill="white" stroke="#334155" strokeWidth={2} />
+          <rect x={-18} y={-36} width={36} height={48} rx={10} fill={motorFill} stroke={motorStroke} strokeWidth={2.5} />
+          <circle cx={0} cy={20} r={17} fill="#f8fafc" stroke={motorStroke} strokeWidth={2.5} />
+          {fan(0, 20)}
+          <rect x={-27} y={39} width={54} height={10} rx={3} fill="#e2e8f0" stroke="#64748b" />
+          <text x={0} y={70} textAnchor="middle" fill="#334155" style={{ fontSize: 10.5, fontWeight: 800 }}>{currentText}</text>
+          <circle cx={-61} cy={-130} r={5} fill={online ? "#22c55e" : "#94a3b8"} />
+        </g>
+      </g>
+    );
+  }
 
   if (orientation === "horizontal") {
     return (
