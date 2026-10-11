@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { pumpVisualScale, smallPumpPort } from "./equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -456,7 +456,7 @@ export default function InfraDiagram() {
     for (const n of nodes) {
       if (Number.isFinite(n.x) && Number.isFinite(n.y)) m[n.id] = n;
     }
-    return m;
+    return resolveMountedPumps(m);
   }, [nodes]);
 
   useEffect(() => {
@@ -528,7 +528,11 @@ export default function InfraDiagram() {
         if (!pos) return;
 
         saveLayoutToStorage(nodesByIdAsArray(nodesById));
-        await updateLayout(id, pos.x, pos.y);
+        const mountedPump = nodesById[TANK_PUMP_PAIRS[id]];
+        await Promise.all([
+          updateLayout(id, pos.x, pos.y),
+          ...(mountedPump ? [updateLayout(mountedPump.id, mountedPump.x, mountedPump.y)] : []),
+        ]);
 
         log("POSITION SAVED", { id, x: pos.x, y: pos.y });
       } catch (e) {
@@ -1143,6 +1147,8 @@ export default function InfraDiagram() {
                 ))}
 
                 {[...visibleNodes]
+                  .filter((n) => !Object.entries(TANK_PUMP_PAIRS).some(([tankId, pumpId]) =>
+                    n.id === pumpId && visibleNodeIds.has(tankId)))
                   .sort((a, b) => {
                     const za = a.type === "network_analyzer" ? 1 : 0;
                     const zb = b.type === "network_analyzer" ? 1 : 0;
@@ -1153,6 +1159,16 @@ export default function InfraDiagram() {
                     <TankNodeView
                       key={n.id}
                       n={n as TankNode}
+                      mountedPump={nodesById[TANK_PUMP_PAIRS[n.id]] as PumpNode | undefined}
+                      pumpTapConnectMode={editMode && connectMode}
+                      pumpTapSelected={pumpTapFrom === TANK_PUMP_PAIRS[n.id]}
+                      onPumpTapSelect={handlePumpTapSelect}
+                      onMountedPumpClick={() => {
+                        const pump = nodesById[TANK_PUMP_PAIRS[n.id]];
+                        if (!pump) return;
+                        if (editMode && !connectMode) setSelectedNodeId(n.id);
+                        if (!editMode && !connectMode) maybeOpenOps(pump);
+                      }}
                       connectedPorts={edgesForRender
                         .filter((e) => visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b))
                         .flatMap((e) => [

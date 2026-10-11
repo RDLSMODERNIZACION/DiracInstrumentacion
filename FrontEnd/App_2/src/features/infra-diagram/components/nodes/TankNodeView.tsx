@@ -1,8 +1,10 @@
+import PumpNodeView from "./PumpNodeView";
+import { MOUNTED_PUMP_Y } from "../../equipmentAppearance";
 import { isCompactTank } from "../../equipmentAppearance";
 import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
-import type { TankNode, TankCategory } from "../../types";
+import type { TankNode, TankCategory, PumpNode } from "../../types";
 import { treatmentPoolGeometry, tankPortPosition, poolPortOutside } from "../../tankGeometry";
 
 function hasAlarmValue(v: any) {
@@ -13,6 +15,11 @@ function hasAlarmValue(v: any) {
 
 export default function TankNodeView({
   n,
+  mountedPump,
+  pumpTapConnectMode = false,
+  pumpTapSelected = false,
+  onPumpTapSelect,
+  onMountedPumpClick,
   connectedPorts = [],
   getPos,
   setPos,
@@ -29,6 +36,11 @@ export default function TankNodeView({
     chlorine_mg_l?: number | string | null;
     ph?: number | string | null;
   };
+  mountedPump?: PumpNode;
+  pumpTapConnectMode?: boolean;
+  pumpTapSelected?: boolean;
+  onPumpTapSelect?: (nodeId: string) => void;
+  onMountedPumpClick?: () => void;
   connectedPorts?: string[];
   getPos: any;
   setPos: any;
@@ -480,16 +492,23 @@ export default function TankNodeView({
         onMouseEnter={(e) => showTip(e, { title: name, lines: compactLines })}
         onMouseMove={(e) => showTip(e, { title: name, lines: compactLines })}
         onMouseLeave={hideTip} onClick={onClick}
-        style={{ cursor: enabled ? "move" : "default" }} data-role="compact-tank">
+        style={{ cursor: enabled ? "move" : "default" }} data-role={mountedPump ? "tank-with-pump" : "compact-tank"}>
         <title>{name}</title>
-        <text x={0} y={-68} textAnchor="middle" fill="#1e293b" style={{ fontSize: 12, fontWeight: 800 }}>{name}</text>
+        <text x={0} y={mountedPump ? -132 : -68} textAnchor="middle" fill="#1e293b" style={{ fontSize: 12, fontWeight: 800 }}>{name}</text>
         <path d="M -50 -42 L -50 42 A 50 10 0 0 0 50 42 L 50 -42 Z" fill="#f1f5f9" stroke={stroke} strokeWidth={2} />
         <defs><clipPath id={clip}><rect x={-47} y={-38} width={94} height={78} /></clipPath></defs>
         {hasLevel && <g clipPath={`url(#${clip})`}>
           <rect x={-47} y={40 - waterHeight} width={94} height={waterHeight} fill="#bae6fd" />
           <path d={`M -47 ${40 - waterHeight} L 47 ${40 - waterHeight}`} stroke="#38bdf8" strokeWidth={2} />
         </g>}
+        {mountedPump && <path d={`M 0 ${MOUNTED_PUMP_Y + 32} L 0 -42`} stroke="#64748b" strokeWidth={5} />}
         <ellipse cx={0} cy={-42} rx={50} ry={10} fill="#e2e8f0" stroke={stroke} strokeWidth={2} />
+        {mountedPump && <g transform={`translate(${-n.x}, ${-n.y})`}>
+          <PumpNodeView n={mountedPump} getPos={getPos} setPos={setPos}
+            onDragEnd={onDragEnd} showTip={showTip} hideTip={hideTip} enabled={false}
+            mounted tapConnectMode={pumpTapConnectMode} tapSelected={pumpTapSelected}
+            onTapSelect={onPumpTapSelect} onClick={onMountedPumpClick} />
+        </g>}
         <path d="M -50 42 A 50 10 0 0 0 50 42" fill="none" stroke={stroke} strokeWidth={2} />
         <text x={0} y={6} textAnchor="middle" fill="#334155" style={{ fontSize: 17, fontWeight: 800 }}>{hasLevel ? `${level.toFixed(0)}%` : "—"}</text>
         <text x={0} y={72} textAnchor="middle" fill="#64748b" style={{ fontSize: 10 }}>{hasLevel ? (isOnline ? "Online" : "Sin comunicación") : "Sin datos"}</text>

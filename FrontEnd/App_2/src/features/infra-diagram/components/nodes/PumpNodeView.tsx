@@ -61,6 +61,7 @@ export default function PumpNodeView({
   hideTip,
   enabled = true,
   onClick,
+  mounted = false,
   tapConnectMode = false,
   tapSelected = false,
   onTapSelect,
@@ -79,6 +80,7 @@ export default function PumpNodeView({
   hideTip: () => void;
   enabled?: boolean;
   onClick?: () => void;
+  mounted?: boolean;
   tapConnectMode?: boolean;
   tapSelected?: boolean;
   onTapSelect?: (nodeId: string) => void;
@@ -287,17 +289,17 @@ export default function PumpNodeView({
       style={{ cursor: tapConnectMode ? "crosshair" : enabled ? "move" : "default", touchAction: "none" }}
       opacity={online ? 1 : 0.58}
     >
-      <text x={48} y={-18} textAnchor="start" fill="#1e293b" style={{ fontSize: pumpVisualScale(n) < 1 ? 12 / pumpVisualScale(n) : 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>
+      {!mounted && <text x={48} y={-18} textAnchor="start" fill="#1e293b" style={{ fontSize: pumpVisualScale(n) < 1 ? 12 / pumpVisualScale(n) : 14, fontWeight: 850, pointerEvents: "none" }}>{name}</text>}
       <rect x={-18} y={-36} width={36} height={48} rx={10} fill={motorFill} stroke={motorStroke} strokeWidth={abnormalPower || tapSelected ? 3.2 : 2.2} />
       <path d="M -18 -28 Q 0 -45 18 -28 L 18 -21 L -18 -21 Z" fill="#dbe3ea" stroke="#64748b" strokeWidth={1.5} />
       <circle cx={0} cy={20} r={17} fill="#f8fafc" stroke={motorStroke} strokeWidth={abnormalPower || tapSelected ? 3.2 : 2.3} />
       {fan(0, 20)}
       <rect x={-27} y={39} width={54} height={10} rx={3} fill="#e2e8f0" stroke="#64748b" strokeWidth={1.5} />
-      <g style={{ pointerEvents: "none" }}>
+      {!mounted && <g style={{ pointerEvents: "none" }}>
         <rect x={-30} y={54} width={22} height={17} rx={7} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={1} />
         <text x={-19} y={66} textAnchor="middle" fill="#334155" style={{ fontSize: 10, fontWeight: 950 }}>{controlMode}</text>
         <text x={-2} y={66} textAnchor="start" fill={abnormalPower ? "#b91c1c" : running ? "#166534" : "#334155"} style={{ fontSize: 10.5, fontWeight: 900 }}>{currentText}</text>
-      </g>
+      </g>}
     </g>
   );
 }

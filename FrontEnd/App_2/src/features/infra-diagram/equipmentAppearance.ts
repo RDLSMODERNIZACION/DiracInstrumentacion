@@ -12,3 +12,21 @@ export function smallPumpPort(n: { id: string; x: number; y: number }, portId: s
   const p = offsets[portId[0]] ?? offsets.R;
   return { x: n.x + p.x * scale, y: n.y + p.y * scale };
 }
+
+export const TANK_PUMP_PAIRS: Record<string, string> = {
+  "tank:36": "pump:43", "tank:37": "pump:44", "tank:38": "pump:45",
+};
+export const MOUNTED_PUMP_Y = -90;
+export function mountedPumpPosition(tank: { x: number; y: number }) {
+  return { x: tank.x, y: tank.y + MOUNTED_PUMP_Y };
+}
+export function resolveMountedPumps<T extends { id: string; type: string; x: number; y: number }>(nodes: Record<string, T>) {
+  const result = { ...nodes };
+  for (const [tankId, pumpId] of Object.entries(TANK_PUMP_PAIRS)) {
+    const tank = nodes[tankId], pump = nodes[pumpId];
+    if (tank?.type === "tank" && pump?.type === "pump") {
+      result[pumpId] = { ...pump, ...mountedPumpPosition(tank) };
+    }
+  }
+  return result;
+}
