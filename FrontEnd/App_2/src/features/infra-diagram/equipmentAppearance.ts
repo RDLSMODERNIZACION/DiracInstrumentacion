@@ -38,8 +38,9 @@ export function resolveMountedPumps<T extends { id: string; type: string; x: num
   return result;
 }
 
-export function tankBlockConnectionPoint(n: { id?: string; x: number; y: number }) {
-  return { x: n.x + (["tank:25", "tank:27"].includes(n.id ?? "") ? 250 : 92), y: n.y };
+export function tankBlockConnectionPoint(n: { id?: string; x: number; y: number }, side: "in" | "out" = "out") {
+  const inside = ["tank:25", "tank:27"].includes(n.id ?? "") ? 140 : 44;
+  return { x: n.x + (side === "in" ? -inside : inside), y: n.y };
 }
 export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number }) {
   const pair = Object.entries(TANK_PUMP_PAIRS).find(([, pumpId]) => pumpId === n.id);

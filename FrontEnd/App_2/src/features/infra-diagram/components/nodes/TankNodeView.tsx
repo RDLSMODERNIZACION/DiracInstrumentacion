@@ -495,7 +495,7 @@ export default function TankNodeView({
         onMouseLeave={hideTip} onClick={onClick}
         style={{ cursor: enabled ? "move" : "default" }} data-role={mountedPump ? "tank-with-pump" : "compact-tank"}>
         <title>{name}</title>
-        <rect x={-72} y={-151} width={144} height={236} rx={12} fill="transparent" stroke="none" />
+        <rect x={-72} y={-151} width={144} height={236} rx={12} fill="none" stroke="none" pointerEvents="all" />
         <g style={{ pointerEvents: "none" }}>
         <text x={0} y={mountedPump ? -132 : -68} textAnchor="middle" fill="#1e293b" style={{ fontSize: 12, fontWeight: 800 }}>{name}</text>
         <path d="M -50 -42 L -50 42 A 50 10 0 0 0 50 42 L 50 -42 Z" fill="#f1f5f9" stroke={stroke} strokeWidth={2} />
@@ -514,9 +514,11 @@ export default function TankNodeView({
           <path d="M -9 20 L 9 20 M 0 11 L 0 29" stroke="#94a3b8" strokeWidth={3} />
           <rect x={-27} y={39} width={54} height={10} rx={3} fill="#e2e8f0" stroke="#64748b" />
         </g>}
-        <path d="M 30 0 L 92 0" stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
-        <path d="M 30 0 L 92 0" stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
-        <circle cx={92} cy={0} r={4} fill="white" stroke="#64748b" strokeWidth={1.5} />
+        {[-1, 1].map((side) => <g key={side}>
+          <path d={`M ${side * 56} 0 L ${side * 44} 0`} stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
+          <path d={`M ${side * 56} 0 L ${side * 44} 0`} stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
+          <circle cx={side * 44} cy={0} r={4} fill="white" stroke="#64748b" strokeWidth={1.5} />
+        </g>)}
         <path d="M -50 42 A 50 10 0 0 0 50 42" fill="none" stroke={stroke} strokeWidth={2} />
         <text x={0} y={6} textAnchor="middle" fill="#334155" style={{ fontSize: 17, fontWeight: 800 }}>{hasLevel ? `${level.toFixed(0)}%` : "—"}</text>
         <text x={0} y={72} textAnchor="middle" fill="#64748b" style={{ fontSize: 10 }}>{hasLevel ? (isOnline ? "Online" : "Sin comunicación") : "Sin datos"}</text>

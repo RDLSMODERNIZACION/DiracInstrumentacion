@@ -10,7 +10,7 @@ export function treatmentPoolGeometry(category?: TankCategory | null) {
 }
 // Shared anchors for the connection picker and the actual pipe endpoints.
 export function tankPortPosition(n: TankPosition, portId: string): Point {
-  if (isTankPumpBlock(n)) return tankBlockConnectionPoint(n);
+  if (isTankPumpBlock(n)) return tankBlockConnectionPoint(n, portId.startsWith("L") ? "in" : "out");
   const pool = treatmentPoolGeometry(n.categoria);
   const isWell = n.categoria === "pozo";
   const compact = isCompactTank(n) && (!n.categoria || n.categoria === "tanque");

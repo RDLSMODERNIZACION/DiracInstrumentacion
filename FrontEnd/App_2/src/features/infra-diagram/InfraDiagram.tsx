@@ -136,8 +136,8 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 
 function buildPorts(n: UINode) {
   if (n.type === "tank" && isTankPumpBlock(n)) return {
-    inPorts: [],
-    outPorts: [{ portId: "R2", side: "out" as const, ...tankBlockConnectionPoint(n) }],
+    inPorts: [{ portId: "L1", side: "in" as const, ...tankBlockConnectionPoint(n, "in") }],
+    outPorts: [{ portId: "R1", side: "out" as const, ...tankBlockConnectionPoint(n, "out") }],
   };
   const { ins, outs } = getNodePorts(n);
   if (isSchematicEquipment(n)) return {

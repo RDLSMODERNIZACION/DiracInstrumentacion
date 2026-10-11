@@ -32,7 +32,7 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
       onMouseEnter={(e) => showTip(e, tip)} onMouseMove={(e) => showTip(e, tip)}
       onMouseLeave={hideTip} onClick={onClick} style={{ cursor: enabled ? "move" : "default" }}>
       <title>{`${n.name} · ${pump.name}`}</title>
-      <rect x={-224} y={blockTop} width={448} height={184 - blockTop} rx={14} fill="transparent" stroke="none" />
+      <rect x={-224} y={blockTop} width={448} height={184 - blockTop} rx={14} fill="none" stroke="none" pointerEvents="all" />
       <text x={0} y={-224} textAnchor="middle" fill="#0f172a" style={{ fontSize: 20, fontWeight: 900 }}>{n.name}</text>
       <g transform={`translate(${-n.x}, ${-n.y})`} style={{ pointerEvents: "none" }}>
         <TankNodeView n={n} hideHeading getPos={getPos} setPos={setPos} onDragEnd={onDragEnd}
@@ -41,11 +41,13 @@ export default function TankPumpBlockView({ n, pump, getPos, setPos, onDragEnd, 
           showTip={showTip} hideTip={hideTip} enabled={false} />
       </g>
       <g style={{ pointerEvents: "none" }}>
-        <path d={`M 140 0 L ${connectionX} 0`} stroke="#64748b" strokeWidth={9} strokeLinecap="round" />
-        <path d={`M 140 0 L ${connectionX} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
+        {[-1, 1].map((side) => <g key={side}>
+          <path d={`M ${side * 156} 0 L ${side * connectionX} 0`} stroke="#64748b" strokeWidth={9} strokeLinecap="round" />
+          <path d={`M ${side * 156} 0 L ${side * connectionX} 0`} stroke="#cbd5e1" strokeWidth={6} strokeLinecap="round" />
+          <circle cx={side * connectionX} r={4} fill="white" stroke="#64748b" strokeWidth={1.5} />
+        </g>)}
         <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#64748b" strokeWidth={7} strokeLinecap="round" />
         <path d={`M 0 ${offset.y + 49} L 0 -108`} stroke="#cbd5e1" strokeWidth={4} strokeLinecap="round" />
-        <circle cx={connectionX} r={4} fill="white" stroke="#64748b" strokeWidth={1.5} />
       </g>
     </g>
   );
