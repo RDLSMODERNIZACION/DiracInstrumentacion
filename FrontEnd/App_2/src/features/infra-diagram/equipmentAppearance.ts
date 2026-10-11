@@ -1,4 +1,11 @@
 // Visual overrides for the new equipment in Planta Oeste. Existing equipment keeps its size.
+export function isLoadingStation(n: { type?: string; servicio?: string; name?: string | null }) {
+  return n.type === "pump" && (n.servicio === "cargaderos" || /^cargadero\b/i.test(n.name ?? ""));
+}
+// Shared by the symbol, connection handles and persisted pipe endpoints.
+export function loadingStationPort(n: { x: number; y: number }, side: "in" | "out") {
+  return { x: n.x + (side === "in" ? -66 : 142), y: n.y + (side === "in" ? 20 : -48) };
+}
 const COMPACT_TANKS = new Set(["tank:36", "tank:37", "tank:38"]);
 const SMALL_PUMPS = new Set(["pump:43", "pump:44", "pump:45"]);
 export function isCompactTank(n: { id?: string }) { return COMPACT_TANKS.has(n.id ?? ""); }

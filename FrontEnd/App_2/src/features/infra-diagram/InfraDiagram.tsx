@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint, INTAKE_PUMPS, containedPumpIds } from "./equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint, INTAKE_PUMPS, containedPumpIds, isLoadingStation, loadingStationPort } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -135,6 +135,10 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 }
 
 function buildPorts(n: UINode) {
+  if (isLoadingStation(n)) return {
+    inPorts: [{ portId: "L1", side: "in" as const, ...loadingStationPort(n, "in") }],
+    outPorts: [{ portId: "R1", side: "out" as const, ...loadingStationPort(n, "out") }],
+  };
   if (n.type === "tank" && isTankPumpBlock(n)) return {
     inPorts: [{ portId: "L1", side: "in" as const, ...tankBlockConnectionPoint(n, "in") }],
     outPorts: [{ portId: "R1", side: "out" as const, ...tankBlockConnectionPoint(n, "out") }],
