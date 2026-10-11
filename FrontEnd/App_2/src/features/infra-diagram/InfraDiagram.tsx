@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isCompactTank, tankBlockConnectionPoint } from "./equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isTankPumpBlock, tankBlockConnectionPoint } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -135,7 +135,7 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 }
 
 function buildPorts(n: UINode) {
-  if (n.type === "tank" && isCompactTank(n)) return {
+  if (n.type === "tank" && isTankPumpBlock(n)) return {
     inPorts: [],
     outPorts: [{ portId: "R2", side: "out" as const, ...tankBlockConnectionPoint(n) }],
   };
@@ -1275,7 +1275,7 @@ export default function InfraDiagram() {
                           <circle
                             key={`out-${n.id}-${p.portId}`}
                             onMouseUp={() => {
-                              if (isCompactTank(n) && connectFrom && connectFrom.nodeId !== n.id) {
+                              if (isTankPumpBlock(n) && connectFrom && connectFrom.nodeId !== n.id) {
                                 tryCreateEdge(connectFrom.nodeId, n.id, connectFrom.portId, p.portId);
                                 setConnectFrom(null);
                                 setMouseSvg(null);

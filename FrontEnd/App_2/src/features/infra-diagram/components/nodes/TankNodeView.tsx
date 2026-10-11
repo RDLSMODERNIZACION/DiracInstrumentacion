@@ -1,3 +1,4 @@
+import TankPumpBlockView from "./TankPumpBlockView";
 import { isCompactTank } from "../../equipmentAppearance";
 import React from "react";
 import useNodeDragCommon from "../../useNodeDragCommon";
@@ -119,6 +120,11 @@ export default function TankNodeView({
     `Estado: ${isOnline ? "Online" : "Sin comunicación"}`,
     hasAlarm ? `Alarma: ${n.alarma}` : "Alarma: no",
   ];
+
+  if (n.id === "tank:27" && mountedPump) {
+    return <TankPumpBlockView n={n} pump={mountedPump} getPos={getPos} setPos={setPos}
+      onDragEnd={onDragEnd} showTip={showTip} hideTip={hideTip} enabled={enabled} onClick={onClick} />;
+  }
 
   // Piletas abiertas, en planta. Sin lectura no se representa un nivel de 0%.
   if (isTreatmentPool) {

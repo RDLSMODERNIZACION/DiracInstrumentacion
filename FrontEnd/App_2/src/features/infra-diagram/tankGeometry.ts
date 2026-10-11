@@ -1,5 +1,5 @@
 import type { TankCategory } from "./types";
-import { isCompactTank, tankBlockConnectionPoint } from "./equipmentAppearance";
+import { isCompactTank, isTankPumpBlock, tankBlockConnectionPoint } from "./equipmentAppearance";
 type TankPosition = { id?: string; x: number; y: number; categoria?: TankCategory | null };
 type Point = { x: number; y: number };
 export function treatmentPoolGeometry(category?: TankCategory | null) {
@@ -10,7 +10,7 @@ export function treatmentPoolGeometry(category?: TankCategory | null) {
 }
 // Shared anchors for the connection picker and the actual pipe endpoints.
 export function tankPortPosition(n: TankPosition, portId: string): Point {
-  if (isCompactTank(n) && (!n.categoria || n.categoria === "tanque")) return tankBlockConnectionPoint(n);
+  if (isTankPumpBlock(n)) return tankBlockConnectionPoint(n);
   const pool = treatmentPoolGeometry(n.categoria);
   const isWell = n.categoria === "pozo";
   const compact = isCompactTank(n) && (!n.categoria || n.categoria === "tanque");

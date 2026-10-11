@@ -14,11 +14,17 @@ export function smallPumpPort(n: { id: string; x: number; y: number }, portId: s
 }
 
 export const TANK_PUMP_PAIRS: Record<string, string> = {
+  "tank:27": "pump:37",
   "tank:36": "pump:43", "tank:37": "pump:44", "tank:38": "pump:45",
 };
 export const MOUNTED_PUMP_Y = -90;
-export function mountedPumpPosition(tank: { x: number; y: number }) {
-  return { x: tank.x, y: tank.y + MOUNTED_PUMP_Y };
+export function mountedPumpOffset(tankId?: string) {
+  return tankId === "tank:27" ? { x: 210, y: -150 } : { x: 0, y: MOUNTED_PUMP_Y };
+}
+export function isTankPumpBlock(n: { id?: string }) { return !!TANK_PUMP_PAIRS[n.id ?? ""]; }
+export function mountedPumpPosition(tank: { id?: string; x: number; y: number }) {
+  const offset = mountedPumpOffset(tank.id);
+  return { x: tank.x + offset.x, y: tank.y + offset.y };
 }
 export function resolveMountedPumps<T extends { id: string; type: string; x: number; y: number }>(nodes: Record<string, T>) {
   const result = { ...nodes };
@@ -31,10 +37,12 @@ export function resolveMountedPumps<T extends { id: string; type: string; x: num
   return result;
 }
 
-export function tankBlockConnectionPoint(n: { x: number; y: number }) {
-  return { x: n.x + 92, y: n.y };
+export function tankBlockConnectionPoint(n: { id?: string; x: number; y: number }) {
+  return { x: n.x + (n.id === "tank:27" ? 430 : 92), y: n.y };
 }
 export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number }) {
-  return Object.values(TANK_PUMP_PAIRS).includes(n.id)
-    ? tankBlockConnectionPoint({ x: n.x, y: n.y - MOUNTED_PUMP_Y }) : null;
+  const pair = Object.entries(TANK_PUMP_PAIRS).find(([, pumpId]) => pumpId === n.id);
+  if (!pair) return null;
+  const offset = mountedPumpOffset(pair[0]);
+  return tankBlockConnectionPoint({ id: pair[0], x: n.x - offset.x, y: n.y - offset.y });
 }
