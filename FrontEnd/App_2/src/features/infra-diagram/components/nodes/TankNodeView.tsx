@@ -2,6 +2,7 @@
 import useNodeDragCommon from "../../useNodeDragCommon";
 import { toNumber } from "../../layout";
 import type { TankNode, TankCategory } from "../../types";
+import { treatmentPoolGeometry, tankPortPosition, poolPortOutside } from "../../tankGeometry";
 
 function hasAlarmValue(v: any) {
   if (v == null) return false;
@@ -11,6 +12,7 @@ function hasAlarmValue(v: any) {
 
 export default function TankNodeView({
   n,
+  connectedPorts = [],
   getPos,
   setPos,
   onDragEnd,
@@ -26,6 +28,7 @@ export default function TankNodeView({
     chlorine_mg_l?: number | string | null;
     ph?: number | string | null;
   };
+  connectedPorts?: string[];
   getPos: any;
   setPos: any;
   onDragEnd: () => void;
@@ -116,12 +119,7 @@ export default function TankNodeView({
 
   // Piletas abiertas, en planta. Sin lectura no se representa un nivel de 0%.
   if (isTreatmentPool) {
-    const poolW = isAeration ? 220 : 360;
-    const poolH = isAeration ? 220 : 150;
-    const W = poolW + 40;
-    const H = poolH + 100;
-    const px = 20;
-    const py = 52;
+    const { poolW, poolH, W, H, px, py } = treatmentPoolGeometry(category)!;
     const validLevel = levelRaw !== null && Number.isFinite(levelRaw);
     const levelText = validLevel ? `${level.toFixed(0)}%` : "—";
     const poolStroke = critical ? "#ef4444" : warning ? "#f59e0b" : "#64748b";
@@ -169,7 +167,7 @@ export default function TankNodeView({
             {[0, 1, 2, 3].map((i) => (
               <line key={i} x1={px + 70 + i * 70} x2={px + 70 + i * 70} y1={py + (i % 2 === 0 ? 11 : 40)} y2={py + poolH - (i % 2 === 0 ? 40 : 11)} />
             ))}
-            <text x={px + 24} y={py + 32} stroke="none" fill="#7c3aed" style={{ fontSize: 16, fontWeight: 800 }}>Cl₂</text>
+            <text x={W / 2} y={py + 30} textAnchor="middle" stroke="none" fill="#7c3aed" style={{ fontSize: 16, fontWeight: 800 }}>Cl₂</text>
           </g>
         ) : (
           <g stroke="#86b59a" strokeWidth={2} style={{ pointerEvents: "none" }}>
@@ -180,6 +178,23 @@ export default function TankNodeView({
         )}
         <rect x={W / 2 - 48} y={py + poolH / 2 - 23} width={96} height={46} rx={8} fill="#ffffff" fillOpacity={0.95} stroke="#cbd5e1" />
         <text x={W / 2} y={py + poolH / 2 + 10} textAnchor="middle" fill="#0f172a" style={{ fontSize: 29, fontWeight: 900, pointerEvents: "none" }}>{levelText}</text>
+        {[...new Set(connectedPorts)].map((portId) => {
+          const endpoint = tankPortPosition(n, portId);
+          const outside = poolPortOutside(n, portId);
+          if (!outside) return null;
+          const x0 = n.x - W / 2;
+          const y0 = n.y - H / 2;
+          const d = `M ${outside.x - x0} ${outside.y - y0} L ${endpoint.x - x0} ${endpoint.y - y0}`;
+          return (
+            <g key={portId} data-role="pool-pipe-connection" style={{ pointerEvents: "none" }}>
+              <path d={d} fill="none" stroke="#0f172a" strokeWidth={10} strokeLinecap="round" opacity={0.55} />
+              <path d={d} fill="none" stroke="#cbd5e1" strokeWidth={7} strokeLinecap="round" />
+              <path d={d} fill="none" stroke="#ffffff" strokeWidth={2.2} strokeLinecap="round" opacity={0.45} />
+              <circle cx={endpoint.x - x0} cy={endpoint.y - y0} r={3.6} fill="#64748b" />
+              <circle cx={endpoint.x - x0} cy={endpoint.y - y0} r={2.2} fill="#e2e8f0" />
+            </g>
+          );
+        })}
         <circle cx={px + 17} cy={py + poolH + 23} r={4} fill={isOnline ? "#22c55e" : "#94a3b8"} />
         <text x={px + 28} y={py + poolH + 27} fill="#64748b" style={{ fontSize: 11, fontWeight: 700, pointerEvents: "none" }}>
           {isOnline ? "Online" : validLevel ? "Sin comunicación" : "Sin datos"}

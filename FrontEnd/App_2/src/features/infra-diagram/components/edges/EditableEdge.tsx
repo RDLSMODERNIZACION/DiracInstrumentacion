@@ -1,6 +1,7 @@
 ﻿// src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
+import { tankPortPosition, poolPortOutside } from "../../tankGeometry";
 
 // ✅ usar API_BASE + withScope + authHeaders (para que NO pegue al dominio del frontend)
 import { API_BASE } from "@/lib/api";
@@ -121,11 +122,7 @@ function getDefaultPort(n: UINode, side: Side) {
   }
 
   if (t === "tank") {
-    const halfW = 145;
-    const portOffset = 16;
-    x = side === "in" ? (n as any).x - halfW - portOffset : (n as any).x + halfW + portOffset;
-    y = (n as any).y;
-    return { x, y };
+    return tankPortPosition(n, side === "in" ? "L1" : "R1");
   }
 
  if (t === "manifold") {
@@ -160,35 +157,7 @@ function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   const pid = String(portId);
 
   if ((n as any).type === "tank") {
-    const isWell = (n as any).categoria === "pozo";
-    const W = isWell ? 280 : 300;
-    const H = isWell ? 330 : 220;
-
-    const leftX = (n as any).x - W / 2;
-    const rightX = (n as any).x + W / 2;
-    const topY = (n as any).y - H / 2;
-    const bottomY = (n as any).y + H / 2;
-
-    switch (pid) {
-      case "L1": return { x: leftX, y: (n as any).y - 45 };
-      case "L2": return { x: leftX, y: (n as any).y };
-      case "L3": return { x: leftX, y: (n as any).y + 45 };
-
-      case "R1": return { x: rightX, y: (n as any).y - 45 };
-      case "R2": return { x: rightX, y: (n as any).y };
-      case "R3": return { x: rightX, y: (n as any).y + 45 };
-
-      case "T1": return { x: (n as any).x - 70, y: topY };
-      case "T2": return { x: (n as any).x, y: topY };
-      case "T3": return { x: (n as any).x + 70, y: topY };
-
-      case "B1": return { x: (n as any).x - 70, y: bottomY };
-      case "B2": return { x: (n as any).x, y: bottomY };
-      case "B3": return { x: (n as any).x + 70, y: bottomY };
-
-      default:
-        return getDefaultPort(n, side);
-    }
+    return tankPortPosition(n, pid);
   }
   if ((n as any).type === "pump") {
     const rOuter = 30;
@@ -547,8 +516,18 @@ export default function EditableEdge({
     if (!A || !B) return null;
 
     const base = basePath(A, B, a_port ?? null, b_port ?? null);
-    const pts: Pt[] = [{ x: base.sx, y: base.sy }, ...knots, { x: base.ex, y: base.ey }];
-    const d = knots.length ? orthogonalPath(pts) : base.d;
+    const start = { x: base.sx, y: base.sy };
+    const end = { x: base.ex, y: base.ey };
+    const exit = A.type === "tank" ? poolPortOutside(A, a_port ?? "R1") : null;
+    const entry = B.type === "tank" ? poolPortOutside(B, b_port ?? "L1") : null;
+    const s = exit ?? start;
+    const e = entry ?? end;
+    const middle = knots.length ? knots : [
+      { x: (s.x + e.x) / 2, y: s.y },
+      { x: (s.x + e.x) / 2, y: e.y },
+    ];
+    const pts: Pt[] = [start, ...(exit ? [exit] : []), ...middle, ...(entry ? [entry] : []), end];
+    const d = knots.length || exit || entry ? orthogonalPath(pts) : base.d;
 
     return { ...base, d };
   }, [A, B, a_port, b_port, knots]);

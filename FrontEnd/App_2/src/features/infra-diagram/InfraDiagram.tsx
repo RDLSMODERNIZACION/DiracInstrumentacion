@@ -25,6 +25,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
+import { tankPortPosition } from "./tankGeometry";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
 import ValveNodeView from "./components/nodes/ValveNodeView";
@@ -136,97 +137,12 @@ function buildPorts(n: UINode) {
   const { ins, outs } = getNodePorts(n);
 
   if (n.type === "tank") {
-    const isWell = (n as any).categoria === "pozo";
-
-    if (isWell) {
-      /*
-       * POZO ANCHO
-       * Casing visual aproximado: 300 px.
-       *
-       * Los puertos laterales quedan ADENTRO del cuerpo:
-       * - dos a la izquierda
-       * - dos a la derecha
-       *
-       * Esto permite ubicar hasta dos bombas por lado.
-       */
-      const insideX = 140;
-
-      const pos: Record<string, { x: number; y: number }> = {
-        L1: { x: n.x - insideX, y: n.y - 52 },
-        L2: { x: n.x - insideX, y: n.y + 52 },
-        L3: { x: n.x - insideX, y: n.y },
-
-        R1: { x: n.x + insideX, y: n.y - 52 },
-        R2: { x: n.x + insideX, y: n.y + 52 },
-        R3: { x: n.x + insideX, y: n.y },
-
-        T1: { x: n.x - 75, y: n.y - 105 },
-        T2: { x: n.x,      y: n.y - 105 },
-        T3: { x: n.x + 75, y: n.y - 105 },
-
-        B1: { x: n.x - 75, y: n.y + 105 },
-        B2: { x: n.x,      y: n.y + 105 },
-        B3: { x: n.x + 75, y: n.y + 105 },
-      };
-
-      return {
-        inPorts: ins.map((id) => ({
-          portId: id,
-          side: "in" as const,
-          ...(pos[id] ?? { x: n.x - insideX, y: n.y }),
-        })),
-        outPorts: outs.map((id) => ({
-          portId: id,
-          side: "out" as const,
-          ...(pos[id] ?? { x: n.x + insideX, y: n.y }),
-        })),
-      };
-    }
-
-    // TANQUE NORMAL
-    //
-    // Cuerpo visual:
-    //   ancho aprox. 256 px
-    //   alto aprox. 144 px
-    //
-    // Los puntos quedan metidos dentro del cuerpo para que la
-    // cañería parezca nacer desde el tanque y no desde afuera.
-    const insideX = 118;
-    const insideY = 82;
-
-    const pos: Record<string, { x: number; y: number }> = {
-      // Laterales: 3 puntos por lado, todos dentro del cuerpo
-      L1: { x: n.x - insideX, y: n.y - 42 },
-      L2: { x: n.x - insideX, y: n.y },
-      L3: { x: n.x - insideX, y: n.y + 42 },
-
-      R1: { x: n.x + insideX, y: n.y - 42 },
-      R2: { x: n.x + insideX, y: n.y },
-      R3: { x: n.x + insideX, y: n.y + 42 },
-
-      // Superior e inferior también levemente adentro
-      T1: { x: n.x - 65, y: n.y - insideY },
-      T2: { x: n.x,      y: n.y - insideY },
-      T3: { x: n.x + 65, y: n.y - insideY },
-
-      B1: { x: n.x - 65, y: n.y + insideY },
-      B2: { x: n.x,      y: n.y + insideY },
-      B3: { x: n.x + 65, y: n.y + insideY },
-    };
-
     return {
-      inPorts: ins.map((id) => ({
-        portId: id,
-        side: "in" as const,
-        ...(pos[id] ?? { x: n.x - insideX, y: n.y }),
-      })),
-      outPorts: outs.map((id) => ({
-        portId: id,
-        side: "out" as const,
-        ...(pos[id] ?? { x: n.x + insideX, y: n.y }),
-      })),
+      inPorts: ins.map((portId) => ({ portId, side: "in" as const, ...tankPortPosition(n, portId) })),
+      outPorts: outs.map((portId) => ({ portId, side: "out" as const, ...tankPortPosition(n, portId) })),
     };
   }
+
   const off = 6;
   const half = halfByType(n.type);
   const h = heightByType(n.type);
@@ -1210,6 +1126,12 @@ export default function InfraDiagram() {
                     <TankNodeView
                       key={n.id}
                       n={n as TankNode}
+                      connectedPorts={edgesForRender
+                        .filter((e) => visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b))
+                        .flatMap((e) => [
+                          ...(e.a === n.id ? [e.a_port ?? "R1"] : []),
+                          ...(e.b === n.id ? [e.b_port ?? "L1"] : []),
+                        ])}
                       getPos={getPos}
                       setPos={setPos}
                       onDragEnd={() => saveNodePosition(n.id)}
