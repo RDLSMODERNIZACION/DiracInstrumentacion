@@ -1,4 +1,4 @@
-import { pumpVisualScale, smallPumpPort } from "../../equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, mountedPumpConnectionPoint } from "../../equipmentAppearance";
 // src/features/infra-diagram/components/edges/EditableEdge.tsx
 import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import type { UINode, PortId } from "../../types";
@@ -110,6 +110,8 @@ function applyValveXForm(n: any, local: Pt): Pt {
 }
 
 function getDefaultPort(n: UINode, side: Side) {
+  const blockPort = mountedPumpConnectionPoint(n);
+  if (blockPort) return blockPort;
   if (isSchematicEquipment(n)) return schematicPort(n, side);
   const t = String((n as any).type || "").toLowerCase();
 
@@ -160,6 +162,8 @@ function getDefaultPort(n: UINode, side: Side) {
 function getPortPos(n: UINode, side: Side, portId?: PortId | null) {
   if (isSchematicEquipment(n)) return schematicPort(n, String(portId ?? "").startsWith("L") ? "in" : String(portId ?? "").startsWith("R") ? "out" : side);
   if (!portId) return getDefaultPort(n, side);
+  const blockPort = mountedPumpConnectionPoint(n);
+  if (blockPort) return blockPort;
   const pid = String(portId);
 
   if ((n as any).type === "tank") {

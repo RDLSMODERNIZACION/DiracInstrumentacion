@@ -30,3 +30,11 @@ export function resolveMountedPumps<T extends { id: string; type: string; x: num
   }
   return result;
 }
+
+export function tankBlockConnectionPoint(n: { x: number; y: number }) {
+  return { x: n.x + 92, y: n.y };
+}
+export function mountedPumpConnectionPoint(n: { id: string; x: number; y: number }) {
+  return Object.values(TANK_PUMP_PAIRS).includes(n.id)
+    ? tankBlockConnectionPoint({ x: n.x, y: n.y - MOUNTED_PUMP_Y }) : null;
+}

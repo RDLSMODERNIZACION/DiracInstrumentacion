@@ -26,7 +26,7 @@ import { getPumpAvailability, savePumpAvailability, type PumpAvailability } from
 import Tooltip from "./components/Tooltip";
 import TankNodeView from "./components/nodes/TankNodeView";
 import { tankPortPosition } from "./tankGeometry";
-import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps } from "./equipmentAppearance";
+import { pumpVisualScale, smallPumpPort, TANK_PUMP_PAIRS, resolveMountedPumps, isCompactTank, tankBlockConnectionPoint } from "./equipmentAppearance";
 import { isSchematicEquipment, schematicPort, LAGOON_SCALE, LAGOON_PORT_OFFSET } from "./schematic";
 import PumpNodeView from "./components/nodes/PumpNodeView";
 import ManifoldNodeView from "./components/nodes/ManifoldNodeView";
@@ -135,6 +135,10 @@ function getNodePorts(n: UINode): { ins: string[]; outs: string[] } {
 }
 
 function buildPorts(n: UINode) {
+  if (n.type === "tank" && isCompactTank(n)) return {
+    inPorts: [],
+    outPorts: [{ portId: "R2", side: "out" as const, ...tankBlockConnectionPoint(n) }],
+  };
   const { ins, outs } = getNodePorts(n);
   if (isSchematicEquipment(n)) return {
     inPorts: [{ portId: "L1", side: "in" as const, ...schematicPort(n, "in") }],
@@ -202,7 +206,9 @@ function simulateFlow(edges: UIEdgeWithPorts[], nodesById: Record<string, UINode
   const adj: Record<string, UIEdgeWithPorts[]> = {};
   for (const e of edges) (adj[e.a] ||= []).push(e);
 
-  const seeds = Object.values(nodesById).filter(isPumpOn);
+  const seeds = Object.values(nodesById).filter((n) =>
+    isPumpOn(n) || (n.type === "tank" && !!nodesById[TANK_PUMP_PAIRS[n.id]] && isPumpOn(nodesById[TANK_PUMP_PAIRS[n.id]]))
+  );
 
   const visitedNode = new Set<string>();
   const flowOnEdge = new Set<number>();
@@ -1160,15 +1166,6 @@ export default function InfraDiagram() {
                       key={n.id}
                       n={n as TankNode}
                       mountedPump={nodesById[TANK_PUMP_PAIRS[n.id]] as PumpNode | undefined}
-                      pumpTapConnectMode={editMode && connectMode}
-                      pumpTapSelected={pumpTapFrom === TANK_PUMP_PAIRS[n.id]}
-                      onPumpTapSelect={handlePumpTapSelect}
-                      onMountedPumpClick={() => {
-                        const pump = nodesById[TANK_PUMP_PAIRS[n.id]];
-                        if (!pump) return;
-                        if (editMode && !connectMode) setSelectedNodeId(n.id);
-                        if (!editMode && !connectMode) maybeOpenOps(pump);
-                      }}
                       connectedPorts={edgesForRender
                         .filter((e) => visibleNodeIds.has(e.a) && visibleNodeIds.has(e.b))
                         .flatMap((e) => [
@@ -1277,6 +1274,13 @@ export default function InfraDiagram() {
                         {outPorts.map((p) => (
                           <circle
                             key={`out-${n.id}-${p.portId}`}
+                            onMouseUp={() => {
+                              if (isCompactTank(n) && connectFrom && connectFrom.nodeId !== n.id) {
+                                tryCreateEdge(connectFrom.nodeId, n.id, connectFrom.portId, p.portId);
+                                setConnectFrom(null);
+                                setMouseSvg(null);
+                              }
+                            }}
                             cx={p.x}
                             cy={p.y}
                             r={5}

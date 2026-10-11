@@ -1,5 +1,5 @@
 import React from "react";
-import { pumpVisualScale } from "../equipmentAppearance";
+import { pumpVisualScale, mountedPumpConnectionPoint } from "../equipmentAppearance";
 import type { PumpPipeTap } from "../services/pumpTaps";
 import type { UINode } from "../types";
 
@@ -42,7 +42,13 @@ export default function PumpPipeTapView({
 
   let d = "";
 
-  if (orientation === "vertical") {
+  const blockPort = mountedPumpConnectionPoint(pump);
+  if (blockPort) {
+    const elbowX = blockPort.x + 18;
+    d = Math.abs(ey - blockPort.y) < 0.01
+      ? `M ${blockPort.x} ${blockPort.y} L ${ex} ${ey}`
+      : `M ${blockPort.x} ${blockPort.y} L ${elbowX} ${blockPort.y} L ${elbowX} ${ey} L ${ex} ${ey}`;
+  } else if (orientation === "vertical") {
     /*
      * BOMBA VERTICAL:
      * La cañería definitiva entra/sale SIEMPRE horizontal.
