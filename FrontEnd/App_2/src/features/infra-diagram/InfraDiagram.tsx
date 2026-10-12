@@ -288,7 +288,10 @@ export default function InfraDiagram() {
 
   const [editMode, setEditMode] = useState(false);
   const [connectMode, setConnectMode] = useState(false);
-  const [activeServicio, setActiveServicio] = useState<ServicioSCADA>("agua");
+  const [activeServicio, setActiveServicio] = useState<ServicioSCADA>(() => {
+    const service = new URLSearchParams(window.location.search).get("service");
+    return service === "cloacas" || service === "cargaderos" ? service : "agua";
+  });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedPumpAvailability, setSelectedPumpAvailability] = useState<PumpAvailability | null>(null);
   const [savingPumpAvailability, setSavingPumpAvailability] = useState(false);
@@ -840,6 +843,7 @@ export default function InfraDiagram() {
       >
         {error && (<span style={{ color: "#b91c1c" }}>Error: {(error as Error)?.message || "Error desconocido"}</span>)}
 
+        {new URLSearchParams(window.location.search).get("global_service") !== "1" && (
         <div
           style={{
             display: "flex",
@@ -876,6 +880,7 @@ export default function InfraDiagram() {
             </button>
           ))}
         </div>
+        )}
 
         {editMode && selectedNode && ["tank", "pump"].includes(selectedNode.type) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 8 }}>

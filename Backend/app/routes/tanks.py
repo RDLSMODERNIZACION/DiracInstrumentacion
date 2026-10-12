@@ -80,7 +80,7 @@ def list_tanks_config(request: Request, response: Response):
       v.name,
       v.location_id,
       v.location_name,
-      l.service_type as service_type,
+      COALESCE(t.servicio::text, l.service_type::text, 'agua') as service_type,
       l.display_order as location_display_order,
 
       t.material,
@@ -125,7 +125,8 @@ def list_tanks_config(request: Request, response: Response):
 
         st = r.get("service_type")
         # normalizamos por las dudas (y para datos viejos)
-        st = "cloacas" if str(st or "").strip().lower() == "cloacas" else "agua"
+        st = str(st or "agua").strip().lower()
+        st = st if st in {"agua", "cloacas", "cargaderos"} else "agua"
 
         out.append(
             {

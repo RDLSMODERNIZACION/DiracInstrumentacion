@@ -4,6 +4,7 @@ import type { User } from "./types";
 import { Drawer, NavItem, Badge } from "./ui";
 import { OverviewGrid } from "./pages";
 import { sevMeta, severityOf } from "./utils";
+import type { ServiceType } from "./hooks/usePlant";
 import { usePlant } from "./hooks/usePlant";
 import { TankFaceplate } from "./faceplates/TankFaceplate";
 import { PumpFaceplate } from "./faceplates/PumpFaceplate";
@@ -75,6 +76,17 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     [user?.role]
   );
 
+  const [service, setService] = React.useState<ServiceType>(() => {
+    try {
+      const saved = sessionStorage.getItem("dirac.service");
+      return saved === "cloacas" || saved === "cargaderos" ? saved : "agua";
+    } catch { return "agua"; }
+  });
+  const selectService = (next: ServiceType) => {
+    setService(next);
+    setDrawer({ type: null });
+    try { sessionStorage.setItem("dirac.service", next); } catch {}
+  };
   const [view, setView] = React.useState<View>("operaciones");
 
   const openAdministration = React.useCallback(() => {
@@ -190,6 +202,8 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
 
   const operacionesBody = (
     <OverviewGrid
+      key={service}
+      service={service}
       plant={plant}
       onOpenTank={(id) => setDrawer({ type: "tank", id })}
       onOpenPump={(id) => setDrawer({ type: "pump", id })}
@@ -206,18 +220,23 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
     </div>
   );
 
-  const app1Src = React.useMemo(() => {
-    const base = app1Base;
-    if (selectedCompanyId == null) return base;
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}company_id=${selectedCompanyId}`;
-  }, [selectedCompanyId]);
+  const serviceLocationIds = React.useMemo(() => Array.from(new Set(
+    [...(plant.tanks ?? []), ...(plant.pumps ?? [])]
+      .filter((asset: any) => asset.service_type === service)
+      .map((asset: any) => Number(asset.location_id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+  )).sort((a, b) => a - b), [plant.tanks, plant.pumps, service]);
 
-  const app2Src = React.useMemo(() => {
-    if (selectedCompanyId == null) return app2Base;
-    const sep = app2Base.includes("?") ? "&" : "?";
-    return `${app2Base}${sep}company_id=${selectedCompanyId}`;
-  }, [selectedCompanyId]);
+  const embeddedSrc = (base: string, kpi = false) => {
+    const target = new URL(base, window.location.href);
+    if (selectedCompanyId != null) target.searchParams.set("company_id", String(selectedCompanyId));
+    target.searchParams.set("service", service);
+    target.searchParams.set("global_service", "1");
+    if (kpi) target.searchParams.set("service_locations", serviceLocationIds.join(","));
+    return target.toString();
+  };
+  const app1Src = embeddedSrc(app1Base, true);
+  const app2Src = embeddedSrc(app2Base);
 
   React.useEffect(() => {
     if (selectedCompanyId != null) {
@@ -269,11 +288,21 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
           </div>
         </aside>
 
-        <main className="flex-1 min-h-screen">
-          <header className="sticky top-0 z-10 bg-white border-b border-slate-200">
+        <main className="flex-1 min-w-0 min-h-screen">
+          <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
             <div className="w-full max-w-md mx-auto px-3 py-2.5 flex items-center justify-between sm:max-w-7xl sm:px-4 sm:py-3">
               <div className="flex items-center gap-3"><div className="text-base sm:text-lg font-semibold tracking-tight">{view === "operaciones" ? "Operaciones" : view === "kpi" ? "KPIs" : "Infraestructura"}</div></div>
               <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-lg bg-slate-100 text-xs">{companyBadge}</span><LogoutButton /></div>
+            </div>
+            <div className="max-w-7xl mx-auto px-3 pb-3 sm:px-4">
+              <div role="group" aria-label="Servicio" className="flex w-full sm:w-fit rounded-lg border border-slate-300 overflow-hidden">
+                {([ ["agua", "Agua"], ["cloacas", "Cloacas"], ["cargaderos", "Cargadero de agua"] ] as const).map(([id, label]) => (
+                  <button key={id} type="button" aria-pressed={service === id} onClick={() => selectService(id)}
+                    className={`flex-1 px-3 py-2 text-sm font-medium transition sm:flex-none ${service === id ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </header>
           {mainBody}

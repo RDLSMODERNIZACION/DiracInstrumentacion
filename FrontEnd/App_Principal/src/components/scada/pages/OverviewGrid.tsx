@@ -98,6 +98,7 @@ function getServiceTypeFromAsset(a: any): ServiceType {
   for (const v of cands) {
     const s = String(v ?? "").trim().toLowerCase();
     if (s === "cloacas") return "cloacas";
+    if (s === "cargaderos") return "cargaderos";
     if (s === "agua") return "agua";
   }
   return "agua";
@@ -124,6 +125,7 @@ export function OverviewGrid({
   statusByKey,
   assetLocs,
   debug = false,
+  service = "agua",
 }: {
   plant: any;
   onOpenTank: (id: string | number) => void;
@@ -133,6 +135,7 @@ export function OverviewGrid({
   statusByKey?: Record<string, ConnStatus>;
   assetLocs?: AssetLocLink[];
   debug?: boolean;
+  service?: ServiceType;
 }) {
   const lookupStatus = (prefix: "TK" | "PU", id: string | number): ConnStatus | undefined => {
     const idStr = String(id);
@@ -193,7 +196,7 @@ export function OverviewGrid({
   const [showAll, setShowAll] = React.useState(false); // default: solo conectados
 
   // ✅ NUEVO: pestañas Agua | Cloacas
-  const [svcTab, setSvcTab] = React.useState<ServiceType>("agua");
+  const svcTab = service;
   // V18.45 - una sola ubicacion abierta a la vez
   const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
 
@@ -231,7 +234,7 @@ export function OverviewGrid({
       displayOrder: number = 999
     ): Group => {
       const key = locId != null ? `loc:${locId}` : "none";
-      let g = out.get(key);
+      let g = out.get(`${serviceType}:${key}`);
       if (!g) {
         g = {
           key,
@@ -244,7 +247,7 @@ export function OverviewGrid({
           tanks: 0,
           pumps: 0,
         };
-        out.set(key, g);
+        out.set(`${serviceType}:${key}`, g);
       } else {
         // si el grupo se creó sin serviceType y luego vemos uno, lo ajustamos
         if (g.serviceType !== "cloacas" && serviceType === "cloacas") g.serviceType = "cloacas";
@@ -313,17 +316,6 @@ export function OverviewGrid({
     return list;
   }, [plant?.tanks, plant?.pumps, linkMap]);
 
-  // ✅ NUEVO: contar por servicio para mostrar en las pestañas
-  const svcCounts = React.useMemo(() => {
-    let agua = 0;
-    let cloacas = 0;
-    for (const g of groups) {
-      if (g.serviceType === "cloacas") cloacas++;
-      else agua++;
-    }
-    return { agua, cloacas };
-  }, [groups]);
-
   const filteredGroups = React.useMemo(() => {
     const res: Group[] = [];
     for (const g of groups) {
@@ -381,34 +373,8 @@ export function OverviewGrid({
   return (
 <div className="space-y-4 sm:space-y-6">
       {/* Toolbar */}
-      <div className="sticky top-[57px] z-20 flex flex-col gap-2 p-2.5 sm:static sm:gap-4 sm:p-4 rounded-xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm">
+      <div className="sticky top-[105px] z-20 flex flex-col gap-2 p-2.5 sm:static sm:gap-4 sm:p-4 rounded-xl border border-slate-200 bg-white/95 backdrop-blur shadow-sm">
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-row sm:items-end sm:gap-4">
-          {/* ✅ NUEVO: Tabs Agua | Cloacas */}
-          <div className="flex-1 min-w-0">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Servicio</label>
-            <div className="inline-flex w-full sm:w-auto rounded-lg border border-slate-300 overflow-hidden shadow-sm">
-              <button
-                onClick={() => { setSvcTab("agua"); setOpenGroupKey(null); }}
-                className={[
-                  "flex-1 sm:flex-none px-3 py-2 text-sm transition",
-                  svcTab === "agua" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                Agua <span className="opacity-80">({svcCounts.agua})</span>
-              </button>
-              <div className="w-px bg-slate-300" />
-              <button
-                onClick={() => { setSvcTab("cloacas"); setOpenGroupKey(null); }}
-                className={[
-                  "flex-1 sm:flex-none px-3 py-2 text-sm transition",
-                  svcTab === "cloacas" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                Cloacas <span className="opacity-80">({svcCounts.cloacas})</span>
-              </button>
-            </div>
-          </div>
-
           {/* Selector ubicación */}
           <div className="flex-1 min-w-0">
             <label className="block text-xs font-medium text-slate-600 mb-1">Ubicación</label>

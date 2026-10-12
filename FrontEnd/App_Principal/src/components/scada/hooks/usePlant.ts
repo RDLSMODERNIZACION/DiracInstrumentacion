@@ -16,7 +16,7 @@ const DEFAULT_THRESHOLDS: Thresholds = {
   highCritical: 90,
 };
 
-export type ServiceType = "agua" | "cloacas";
+export type ServiceType = "agua" | "cloacas" | "cargaderos";
 
 type Tank = {
   id: number;
@@ -224,7 +224,7 @@ function normOnline(online: any, ageSec: any) {
 
 function normServiceType(x: any): ServiceType {
   const raw = String(x ?? "").trim().toLowerCase();
-  return raw === "cloacas" ? "cloacas" : "agua";
+  return raw === "cloacas" || raw === "cargaderos" ? raw : "agua";
 }
 
 function extractServiceType(r: any): ServiceType {

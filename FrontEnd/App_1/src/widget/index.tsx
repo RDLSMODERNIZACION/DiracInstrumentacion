@@ -24,6 +24,11 @@ import BaseSelectors from "./components/BaseSelectors";
 
 import type { LocOpt, PumpInfo, TankInfo } from "./types";
 
+const serviceParams = new URLSearchParams(window.location.search);
+const globalService = serviceParams.get("global_service") === "1";
+const serviceLocationIds = (serviceParams.get("service_locations") ?? "")
+  .split(",").map(Number).filter((id) => Number.isFinite(id) && id > 0);
+
 const PRINCIPAL_PUMP_IDS = [12, 13, 14, 15, 16, 17, 18, 24, 25, 26, 29, 30];
 const PRINCIPAL_TANK_IDS = [7, 8, 9, 10, 11, 12, 21];
 type CombinedOperationEvent = {
@@ -616,7 +621,7 @@ export default function Widget() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("operacion");
 
-  const [loc, setLoc] = useState<number | "all">("all");
+  const [loc, setLoc] = useState<number | "all">(globalService ? serviceLocationIds[0] : "all");
   const [locOptionsAll, setLocOptionsAll] = useState<LocOpt[]>([]);
   const locId = loc === "all" ? undefined : Number(loc);
 
@@ -637,7 +642,8 @@ export default function Widget() {
 
         setLive(data);
 
-        const optsNow = deriveLocOptions(data?.locations, data?.byLocation);
+        const optsNow = deriveLocOptions(data?.locations, data?.byLocation)
+          .filter((option) => !globalService || serviceLocationIds.includes(Number(option.id)));
         setLocOptionsAll((prev) => mergeLocOptions(prev, optsNow));
       } catch (e) {
         console.error(e);
@@ -934,6 +940,12 @@ export default function Widget() {
 
   return (
     <div className="space-y-6 p-6">
+      {globalService && tab !== "confiabilidad" && (
+        <div className="max-w-sm">
+          <LocationSelect label="Ubicación" value={loc} options={locOptionsAll}
+            onChange={(v) => { if (v !== "" && v !== "all") setLoc(v); }} />
+        </div>
+      )}
       <Tabs
         value={tab}
         onChange={setTab}
@@ -1047,9 +1059,9 @@ export default function Widget() {
                   <LocationSelect
                     label="Ubicación principal"
                     value={loc}
-                    onChange={(v) => setLoc(v as number | "all")}
+                    onChange={(v) => { if (v !== "") setLoc(v); }}
                     options={locOptionsAll}
-                    allowAll
+                    allowAll={!globalService}
                   />
                 </div>
 
@@ -1386,9 +1398,9 @@ export default function Widget() {
                   <LocationSelect
                     label="Ubicación principal"
                     value={loc}
-                    onChange={(v) => setLoc(v as number | "all")}
+                    onChange={(v) => { if (v !== "") setLoc(v); }}
                     options={locOptionsAll}
-                    allowAll
+                    allowAll={!globalService}
                   />
                 </div>
 
@@ -1636,9 +1648,9 @@ export default function Widget() {
             <LocationSelect
               label="Ubicación"
               value={loc}
-              onChange={(v) => setLoc(v as number | "all")}
+              onChange={(v) => { if (v !== "") setLoc(v); }}
               options={locOptionsAll}
-              allowAll
+              allowAll={!globalService}
             />
           </div>
 

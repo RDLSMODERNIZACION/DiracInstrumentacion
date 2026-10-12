@@ -11,7 +11,7 @@ export default function EmbeddedAppFrame({
   const [ready, setReady] = React.useState(false);
 
   return (
-    <div className="w-full h-[calc(100vh-56px)]"> {/* 56px ~ header */}
+    <div className="w-full h-[calc(100dvh-105px)]"> {/* 56px ~ header */}
       {!ready && (
         <div className="p-6 text-sm text-slate-500">
           Cargando {title}…

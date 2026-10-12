@@ -63,7 +63,7 @@ def list_pumps_config(request: Request, response: Response):
       v.name,
       v.location_id,
       v.location_name,
-      l.service_type AS service_type,
+      COALESCE(p.servicio::text, l.service_type::text, 'agua') AS service_type,
       l.display_order AS location_display_order,
 
       p.marca,
@@ -112,7 +112,8 @@ def list_pumps_config(request: Request, response: Response):
     out = []
     for r in rows:
         st = r.get("service_type")
-        st = "cloacas" if str(st or "").strip().lower() == "cloacas" else "agua"
+        st = str(st or "agua").strip().lower()
+        st = st if st in {"agua", "cloacas", "cargaderos"} else "agua"
 
         out.append(
             {
