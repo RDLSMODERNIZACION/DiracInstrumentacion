@@ -16,7 +16,7 @@ import {
   ReferenceDot,
 } from "recharts";
 
-import { getApiRoot, getApiHeaders } from "@/lib/config";
+import { getApiRoot, getApiHeaders, scopedUrl } from "@/lib/config";
 
 type Props = {
   areaId?: number;
@@ -29,6 +29,7 @@ type EnergyAreaOption = {
   company_id?: number | null;
   contracted_power_kw?: number | null;
   active?: boolean;
+  detail?: EnergyAreaDetail;
 };
 
 type EnergyAreaDetail = {
@@ -222,26 +223,28 @@ function fullDateTimeLabelFromMs(ms?: number | null) {
 
 const PF_REF = 0.96;
 
-async function fetchEnergyAreas(companyId?: number, signal?: AbortSignal): Promise<EnergyAreaOption[]> {
-  const root = getApiRoot();
-  const qs = new URLSearchParams();
-  if (companyId != null) qs.set("company_id", String(companyId));
-  const url = `${root}/energy_areas${qs.toString() ? `?${qs.toString()}` : ""}`;
+export function energyAreasForService(areas: EnergyAreaOption[], nodes: any[], service: string): EnergyAreaOption[] {
+  const allowedIds = new Set(nodes.filter((node) => node.type === "network_analyzer"
+    && (node.servicio ?? node.service_type ?? "agua") === service).map((node) => Number(node.id)));
+  // Area aggregates must contain only analyzers from the selected service.
+  return areas.filter((area) => Boolean(area.detail?.analyzers.length)
+    && area.detail!.analyzers.every((analyzer) => allowedIds.has(Number(analyzer.id))));
+}
 
-  const r = await fetch(url, {
-    method: "GET",
-    headers: getApiHeaders({ "Content-Type": undefined as any }),
-    cache: "no-store",
-    signal,
-  });
-
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`${r.status} ${r.statusText}${txt ? ` - ${txt}` : ""}`);
+async function fetchEnergyAreas(companyId?: number, signal?: AbortSignal, service = "agua"): Promise<EnergyAreaOption[]> {
+  const [areasResponse, nodesResponse] = await Promise.all([
+    fetch(scopedUrl("/energy_areas", companyId), { headers: getApiHeaders(), cache: "no-store", signal }),
+    fetch(scopedUrl("/infraestructura/get_layout_combined", companyId), { headers: getApiHeaders(), cache: "no-store", signal }),
+  ]);
+  for (const response of [areasResponse, nodesResponse]) {
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   }
-
-  const json = await r.json();
-  return Array.isArray(json) ? json : json?.value ?? [];
+  const [areaData, nodes] = await Promise.all([areasResponse.json(), nodesResponse.json()]);
+  const areas: EnergyAreaOption[] = Array.isArray(areaData) ? areaData : areaData?.value ?? [];
+  const detailed = await Promise.all(areas.map(async (area) => ({
+    ...area, detail: await fetchEnergyAreaDetail(area.id, signal),
+  })));
+  return energyAreasForService(detailed, Array.isArray(nodes) ? nodes : [], service);
 }
 
 async function fetchEnergyAreaDetail(areaId: number, signal?: AbortSignal): Promise<EnergyAreaDetail> {
@@ -367,6 +370,8 @@ function ValueBox({
 }
 
 export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId }: Props) {
+  const serviceParam = new URLSearchParams(window.location.search).get("service");
+  const service = serviceParam === "cloacas" || serviceParam === "cargaderos" ? serviceParam : "agua";
   const today = useMemo(() => isoDate(new Date()), []);
   const thisMonth = useMemo(() => today.slice(0, 7), [today]);
 
@@ -380,7 +385,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   const [monthData, setMonthData] = useState<AreaMonthKpisResponse | null>(null);
   const [dayHistory, setDayHistory] = useState<AreaHistoryResponse | null>(null);
 
-  const [loadingAreas, setLoadingAreas] = useState(false);
+  const [loadingAreas, setLoadingAreas] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingMonth, setLoadingMonth] = useState(false);
   const [loadingDay, setLoadingDay] = useState(false);
@@ -398,7 +403,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       try {
         setLoadingAreas(true);
         setAreasError(null);
-        const rows = await fetchEnergyAreas(companyId, ctrl.signal);
+        const rows = await fetchEnergyAreas(companyId, ctrl.signal, service);
         if (!alive) return;
 
         setAreas(rows);
@@ -413,8 +418,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
           return;
         }
 
-        const exists = rows.some((a) => a.id === selectedAreaId);
-        if (!exists) setSelectedAreaId(rows[0].id);
+        setSelectedAreaId((current) => rows.some((area) => area.id === current) ? current : rows[0].id);
       } catch (e: any) {
         if (!alive) return;
         setAreas([]);
@@ -435,7 +439,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       alive = false;
       ctrl.abort();
     };
-  }, [companyId]);
+  }, [companyId, service]);
 
   useEffect(() => {
     if (!selectedAreaId) {
@@ -451,7 +455,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       try {
         setLoadingDetail(true);
         setDetailError(null);
-        const json = await fetchEnergyAreaDetail(selectedAreaId, ctrl.signal);
+        const json = areas.find((area) => area.id === selectedAreaId)?.detail ?? await fetchEnergyAreaDetail(selectedAreaId, ctrl.signal);
         if (!alive) return;
         setAreaDetail(json);
       } catch (e: any) {
@@ -469,7 +473,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
       alive = false;
       ctrl.abort();
     };
-  }, [selectedAreaId]);
+  }, [selectedAreaId, areas]);
 
   useEffect(() => {
     if (!selectedAreaId) {
@@ -730,7 +734,7 @@ export default function EnergyEfficiencyPage({ areaId: initialAreaId, companyId 
   if (!loadingAreas && !areasError && areas.length === 0) {
     return (
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-800">
-        No hay áreas energéticas configuradas.
+        No hay analizadores configurados para este servicio.
       </div>
     );
   }
