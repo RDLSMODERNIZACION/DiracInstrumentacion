@@ -355,7 +355,8 @@ export default function WaterNetworkOverviewLive({
         </div>
       </section>
 
-      {/* DETALLE SUTIL ABAJO */}
+      {/* Detalle del conjunto principal */}
+      {networkGroup === "principal" && (
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3">
@@ -536,6 +537,7 @@ export default function WaterNetworkOverviewLive({
           </div>
         </div>
       </section>
+      )}
     </div>
   );
 }
