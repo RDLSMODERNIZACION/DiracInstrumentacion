@@ -80,6 +80,7 @@ type LatestReading = {
   i_l1?: number | null;
   i_l2?: number | null;
   i_l3?: number | null;
+  statistics_15m?: { source?: string; window_seconds?: number; sample_count?: number };
   raw?: any;
   source?: string | null;
 };
@@ -204,9 +205,10 @@ export default function NetworkAnalyzerNodeView({
   const raw = latest?.raw ?? null;
   const isPowermeter = String(latest?.source ?? "").startsWith("nodered_cloacas") || String(n.name ?? "").toLowerCase().includes("powermeter");
   const sampledStats = raw?.statistics?.window_seconds === 900;
+  const databaseStats = latest?.statistics_15m?.source === "database" && latest?.statistics_15m?.window_seconds === 900;
   const nativeDemand = isPowermeter && raw?.native_demand_register != null;
-  const avgLabel = isPowermeter ? (nativeDemand ? "DEMANDA EQUIPO" : "MEDIA EQUIPO") : "MEDIA ABB";
-  const maxLabel = isPowermeter ? "MÁXIMO EQUIPO" : "MÁXIMO ABB";
+  const avgLabel = isPowermeter ? (databaseStats ? "MEDIA 15 MIN" : nativeDemand ? "DEMANDA EQUIPO" : "MEDIA EQUIPO") : "MEDIA ABB";
+  const maxLabel = isPowermeter ? (databaseStats ? "MÁXIMO 15 MIN" : "MÁXIMO EQUIPO") : "MÁXIMO ABB";
   const sCalculated = !!raw?.calculated?.S_VA;
   const pfCalculated = !!raw?.calculated?.PF;
 
@@ -218,12 +220,13 @@ export default function NetworkAnalyzerNodeView({
   const avgPKWRaw = firstNum(latest?.avg_p_kw);
   const maxPKWRaw = firstNum(latest?.max_p_kw);
   const invalidAbbStats = isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw);
-  const avgPKW = invalidAbbStats || (isPowermeter && sampledStats) ? null : avgPKWRaw;
-  const maxPKW = invalidAbbStats || (isPowermeter && sampledStats) ? null : maxPKWRaw;
+  const avgPKW = invalidAbbStats || (isPowermeter && sampledStats && !databaseStats) ? null : avgPKWRaw;
+  const maxPKW = invalidAbbStats || (isPowermeter && sampledStats && !databaseStats) ? null : maxPKWRaw;
 
   const qKvar = firstNum(latest?.q_kvar, rawPick(raw, ["q_kvar"]), pickSignal(signals, ["q_kvar", "kvar"]));
   const sKva = isPowermeter && sCalculated ? null : firstNum(latest?.s_kva, rawPick(raw, ["s_kva"]), pickSignal(signals, ["s_kva", "kva"]));
-  const pf = isPowermeter && pfCalculated ? null : firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
+  const pfSigned = isPowermeter && pfCalculated ? null : firstNum(latest?.pf, rawPick(raw, ["pf", "power_factor"]), pickSignal(signals, ["pf", "power_factor"]));
+  const pf = isPowermeter && pfSigned !== null ? Math.abs(pfSigned) : pfSigned;
   const hz = firstNum(latest?.hz, rawPick(raw, ["hz", "frequency"]), pickSignal(signals, ["hz", "frequency"]));
   const v12 = firstNum(latest?.v_l1l2, rawPick(raw, ["v_l1l2", "v12"]));
   const v23 = firstNum(latest?.v_l2l3, latest?.v_l3l2, rawPick(raw, ["v_l2l3", "v_l3l2", "v23"]));
@@ -289,7 +292,7 @@ export default function NetworkAnalyzerNodeView({
     pf !== null ? `FP: ${fmt(pf, 2)}${lowPf ? " (bajo)" : ""}` : "",
     
     
-    nativeDemand ? "Demanda leída del equipo; no es máximo de potencia" : "",
+    databaseStats ? "Media de las muestras guardadas y máxima potencia registrada en los últimos 15 minutos" : nativeDemand ? "Demanda leída del equipo; no es máximo de potencia" : "",
     online ? "Online" : "Sin comunicación",
   ].filter(Boolean);
 
@@ -423,7 +426,7 @@ export default function NetworkAnalyzerNodeView({
 
           {isPowermeter && !latestErr && (
             <text x={panelX + 18} y={panelY + 218} fill="#64748b" style={{ fontSize: 9, fontWeight: 700 }}>
-              {sampledStats || sCalculated || pfCalculated ? "Actualizar flujo: hay datos calculados omitidos" : "Lectura directa · campos no informados: —"}
+              {databaseStats ? `Media/máximo 15 min · BD · ${latest?.statistics_15m?.sample_count ?? 0} muestras` : sampledStats || sCalculated || pfCalculated ? "Actualizar flujo: hay datos calculados omitidos" : "Lectura directa · campos no informados: —"}
             </text>
           )}
 

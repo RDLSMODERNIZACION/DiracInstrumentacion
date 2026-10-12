@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Body, Query
 from typing import Dict, Any, Literal, Optional
 from datetime import datetime, timezone
+import json
 
 from psycopg.rows import dict_row
 from app.db import get_conn
@@ -242,6 +243,25 @@ def insert_snapshot(
 
     ts = parse_ts(payload.get("ts"))
     n = norm_payload(payload)
+    if analyzer_id == 5 and str(n["source"]).startswith("nodered_cloacas"):
+        if n["pf"] is not None:
+            original_pf = n["pf"]
+            n["pf"] = abs(original_pf)
+            raw = n["raw"]
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (ValueError, TypeError):
+                    raw = {"original_raw": raw}
+            if not isinstance(raw, dict):
+                raw = {"original_raw": raw} if raw is not None else {}
+            raw.setdefault("pf_original_signed", original_pf)
+            raw["pf_output_policy"] = "absolute_value"
+            n["raw"] = json.dumps(raw)
+        # The latest endpoint derives these statistics from database samples.
+        for key in list(n):
+            if key.startswith(("avg_", "max_")):
+                n[key] = None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -349,6 +369,52 @@ def insert_snapshot(
 
 
 # ------------------------------------------------------------
+
+# Window ending at the latest measurement, not at request time. The frontend
+# separately marks stale measurements offline. One sample per timestamp avoids
+# giving duplicated submissions extra weight. Units fall back to legacy kW.
+POWER_WINDOW_SQL = """
+    with samples as (
+        select distinct on (ts) ts,
+            coalesce(p_w, p_kw * 1000) as p,
+            coalesce(q_var, q_kvar * 1000) as q,
+            case when coalesce(raw->'calculated'->>'S_VA', '') = ''
+                 then coalesce(s_va, s_kva * 1000) end as s
+        from public.network_analyzer_readings
+        where analyzer_id = %(analyzer_id)s
+          and ts > %(end_ts)s - interval '15 minutes'
+          and ts <= %(end_ts)s
+        order by ts, id desc
+    )
+    select avg(p) as avg_p_w, avg(p)/1000 as avg_p_kw,
+           max(p) as max_p_w, max(p)/1000 as max_p_kw,
+           avg(q) as avg_q_var, avg(q)/1000 as avg_q_kvar,
+           max(q) as max_q_var, max(q)/1000 as max_q_kvar,
+           avg(s) as avg_s_va, avg(s)/1000 as avg_s_kva,
+           max(s) as max_s_va, max(s)/1000 as max_s_kva,
+           count(p) as sample_count, min(ts) as first_ts,
+           max(ts) as last_ts
+    from samples
+"""
+
+
+def add_database_window(cur, row: Dict[str, Any]) -> None:
+    if row["analyzer_id"] != 5 or not str(row.get("source", "")).startswith("nodered_cloacas"):
+        return
+    cur.execute(POWER_WINDOW_SQL, {"analyzer_id": row["analyzer_id"], "end_ts": row["ts"]})
+    stats = cur.fetchone()
+    for key, value in stats.items():
+        if key.startswith(("avg_", "max_")):
+            row[key] = value
+    row["statistics_15m"] = {
+        "source": "database", "window_seconds": 900,
+        "method": "arithmetic_mean_and_sample_max",
+        "sample_count": stats["sample_count"],
+        "first_ts": stats["first_ts"], "last_ts": stats["last_ts"],
+    }
+    if row.get("pf") is not None:
+        row["pf"] = abs(row["pf"])
+
 # GET /components/network_analyzers/{analyzer_id}/latest
 # ------------------------------------------------------------
 @router.get("/{analyzer_id}/latest")
@@ -389,6 +455,8 @@ def get_latest_snapshot(
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(select_sql, {"analyzer_id": analyzer_id})
             row = cur.fetchone()
+            if row:
+                add_database_window(cur, row)
 
     if not row:
         raise HTTPException(status_code=404, detail="No readings found")
