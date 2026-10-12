@@ -399,8 +399,6 @@ POWER_WINDOW_SQL = """
 
 
 def add_database_window(cur, row: Dict[str, Any]) -> None:
-    if row["analyzer_id"] != 5 or not str(row.get("source", "")).startswith("nodered_cloacas"):
-        return
     cur.execute(POWER_WINDOW_SQL, {"analyzer_id": row["analyzer_id"], "end_ts": row["ts"]})
     stats = cur.fetchone()
     for key, value in stats.items():
@@ -412,7 +410,7 @@ def add_database_window(cur, row: Dict[str, Any]) -> None:
         "sample_count": stats["sample_count"],
         "first_ts": stats["first_ts"], "last_ts": stats["last_ts"],
     }
-    if row.get("pf") is not None:
+    if row["analyzer_id"] == 5 and str(row.get("source", "")).startswith("nodered_cloacas") and row.get("pf") is not None:
         row["pf"] = abs(row["pf"])
 
 # GET /components/network_analyzers/{analyzer_id}/latest

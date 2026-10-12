@@ -207,8 +207,8 @@ export default function NetworkAnalyzerNodeView({
   const sampledStats = raw?.statistics?.window_seconds === 900;
   const databaseStats = latest?.statistics_15m?.source === "database" && latest?.statistics_15m?.window_seconds === 900;
   const nativeDemand = isPowermeter && raw?.native_demand_register != null;
-  const avgLabel = isPowermeter ? (databaseStats ? "MEDIA 15 MIN" : nativeDemand ? "DEMANDA EQUIPO" : "MEDIA EQUIPO") : "MEDIA ABB";
-  const maxLabel = isPowermeter ? (databaseStats ? "MÁXIMO 15 MIN" : "MÁXIMO EQUIPO") : "MÁXIMO ABB";
+  const avgLabel = databaseStats ? "MEDIA 15 MIN" : isPowermeter ? (nativeDemand ? "DEMANDA EQUIPO" : "MEDIA EQUIPO") : "MEDIA ABB";
+  const maxLabel = databaseStats ? "MÁXIMO 15 MIN" : isPowermeter ? "MÁXIMO EQUIPO" : "MÁXIMO ABB";
   const sCalculated = !!raw?.calculated?.S_VA;
   const pfCalculated = !!raw?.calculated?.PF;
 
@@ -219,7 +219,7 @@ export default function NetworkAnalyzerNodeView({
   );
   const avgPKWRaw = firstNum(latest?.avg_p_kw);
   const maxPKWRaw = firstNum(latest?.max_p_kw);
-  const invalidAbbStats = isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw);
+  const invalidAbbStats = !databaseStats && (isInvalidAbbStat(avgPKWRaw) || isInvalidAbbStat(maxPKWRaw));
   const avgPKW = invalidAbbStats || (isPowermeter && sampledStats && !databaseStats) ? null : avgPKWRaw;
   const maxPKW = invalidAbbStats || (isPowermeter && sampledStats && !databaseStats) ? null : maxPKWRaw;
 
@@ -236,7 +236,7 @@ export default function NetworkAnalyzerNodeView({
   const i3 = firstNum(latest?.i_l3, rawPick(raw, ["i_l3", "i3"]));
 
   const lowPf = pf !== null && pf < 0.96;
-  const clockStatsUnavailable = !isPowermeter && online && (invalidAbbStats || avgPKW === null || maxPKW === null);
+  const clockStatsUnavailable = !databaseStats && !isPowermeter && online && (invalidAbbStats || avgPKW === null || maxPKW === null);
   const name = typeof n.name === "string" && n.name.trim() ? n.name.trim() : "Eléctrico";
 
   const border = !analyzerId
@@ -424,7 +424,7 @@ export default function NetworkAnalyzerNodeView({
             </text>
           )}
 
-          {isPowermeter && !latestErr && (
+          {(databaseStats || isPowermeter) && !latestErr && (
             <text x={panelX + 18} y={panelY + 218} fill="#64748b" style={{ fontSize: 9, fontWeight: 700 }}>
               {databaseStats ? `Media/máximo 15 min · BD · ${latest?.statistics_15m?.sample_count ?? 0} muestras` : sampledStats || sCalculated || pfCalculated ? "Actualizar flujo: hay datos calculados omitidos" : "Lectura directa · campos no informados: —"}
             </text>
