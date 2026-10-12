@@ -29,6 +29,14 @@ const globalService = serviceParams.get("global_service") === "1";
 const serviceLocationIds = (serviceParams.get("service_locations") ?? "")
   .split(",").map(Number).filter((id) => Number.isFinite(id) && id > 0);
 
+const readIds = (key: string) => (serviceParams.get(key) ?? "").split(",").map(Number).filter((id) => id > 0);
+const servicePumpIds = readIds("service_pumps");
+const serviceTankIds = readIds("service_tanks");
+const hasServiceAssetScope = globalService && serviceParams.has("service_pumps") && serviceParams.has("service_tanks");
+const locationOrder: Record<string, number> = (() => {
+  try { return JSON.parse(serviceParams.get("location_order") ?? "{}"); } catch { return {}; }
+})();
+
 const PRINCIPAL_PUMP_IDS = [12, 13, 14, 15, 16, 17, 18, 24, 25, 26, 29, 30];
 const PRINCIPAL_TANK_IDS = [7, 8, 9, 10, 11, 12, 21];
 type CombinedOperationEvent = {
@@ -210,7 +218,7 @@ function LocationSelect({
           }
         }}
       >
-        {allowAll && <option value="all">Todas las localidades</option>}
+        {allowAll && <option value="all">Todos</option>}
         {!allowAll && <option value="">Seleccionar localidad</option>}
 
         {options.map((o) => (
@@ -621,14 +629,16 @@ export default function Widget() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("operacion");
 
-  const [loc, setLoc] = useState<number | "all">(globalService ? serviceLocationIds[0] : "all");
+  const [loc, setLoc] = useState<number | "all">("all");
   const [locOptionsAll, setLocOptionsAll] = useState<LocOpt[]>([]);
   const locId = loc === "all" ? undefined : Number(loc);
 
+  const [networkGroup, setNetworkGroup] = useState<"all" | "principal">("all");
+
   const [pumpOptions, setPumpOptions] = useState<PumpInfo[]>([]);
   const [tankOptions, setTankOptions] = useState<TankInfo[]>([]);
-  const [selectedPumpIds, setSelectedPumpIds] = useState<number[] | "all">(PRINCIPAL_PUMP_IDS);
-  const [selectedTankIds, setSelectedTankIds] = useState<number[] | "all">(PRINCIPAL_TANK_IDS);
+  const [selectedPumpIds, setSelectedPumpIds] = useState<number[] | "all">("all");
+  const [selectedTankIds, setSelectedTankIds] = useState<number[] | "all">("all");
 
   useEffect(() => {
     let mounted = true;
@@ -643,7 +653,8 @@ export default function Widget() {
         setLive(data);
 
         const optsNow = deriveLocOptions(data?.locations, data?.byLocation)
-          .filter((option) => !globalService || serviceLocationIds.includes(Number(option.id)));
+          .filter((option) => !globalService || serviceLocationIds.includes(Number(option.id)))
+          .map((option) => ({ ...option, displayOrder: locationOrder[option.id] ?? option.displayOrder }));
         setLocOptionsAll((prev) => mergeLocOptions(prev, optsNow));
       } catch (e) {
         console.error(e);
@@ -662,8 +673,8 @@ export default function Widget() {
 
     setPumpOptions([]);
     setTankOptions([]);
-    setSelectedPumpIds(locId == null ? PRINCIPAL_PUMP_IDS : "all");
-    setSelectedTankIds(locId == null ? PRINCIPAL_TANK_IDS : "all");
+    setSelectedPumpIds(networkGroup === "principal" ? PRINCIPAL_PUMP_IDS : "all");
+    setSelectedTankIds(networkGroup === "principal" ? PRINCIPAL_TANK_IDS : "all");
 
     (async () => {
       try {
@@ -674,8 +685,8 @@ export default function Widget() {
 
         if (!mounted) return;
 
-        setPumpOptions(Array.isArray(p) ? (p as PumpInfo[]) : []);
-        setTankOptions(Array.isArray(t) ? (t as TankInfo[]) : []);
+        setPumpOptions(Array.isArray(p) ? (p as PumpInfo[]).filter((asset) => !hasServiceAssetScope || servicePumpIds.includes(asset.pump_id)) : []);
+        setTankOptions(Array.isArray(t) ? (t as TankInfo[]).filter((asset) => !hasServiceAssetScope || serviceTankIds.includes(asset.tank_id)) : []);
       } catch (e) {
         if (!mounted) return;
 
@@ -688,7 +699,18 @@ export default function Widget() {
     return () => {
       mounted = false;
     };
-  }, [locId]);
+  }, [locId, networkGroup]);
+
+  const effectivePumpIds = useMemo(() => {
+    if (!hasServiceAssetScope) return selectedPumpIds === "all" || selectedPumpIds.length ? selectedPumpIds : [-1];
+    const ids = selectedPumpIds === "all" ? servicePumpIds : selectedPumpIds.filter((id) => servicePumpIds.includes(id));
+    return ids.length ? ids : [-1];
+  }, [selectedPumpIds]);
+  const effectiveTankIds = useMemo(() => {
+    if (!hasServiceAssetScope) return selectedTankIds === "all" || selectedTankIds.length ? selectedTankIds : [-1];
+    const ids = selectedTankIds === "all" ? serviceTankIds : selectedTankIds.filter((id) => serviceTankIds.includes(id));
+    return ids.length ? ids : [-1];
+  }, [selectedTankIds]);
 
   const pollMs = tab === "operacion" ? 60_000 : 10 * 60_000;
 
@@ -699,8 +721,8 @@ export default function Widget() {
     periodHours: 24,
     bucket: "5min",
     pollMs,
-    pumpIds: selectedPumpIds === "all" ? undefined : selectedPumpIds,
-    tankIds: selectedTankIds === "all" ? undefined : selectedTankIds,
+    pumpIds: effectivePumpIds === "all" ? undefined : effectivePumpIds,
+    tankIds: effectiveTankIds === "all" ? undefined : effectiveTankIds,
 
     // Carga nombres de bombas solamente cuando hay una ubicación seleccionada.
     // En "Todas" queda apagado para no volver lento el dashboard.
@@ -722,8 +744,8 @@ export default function Widget() {
     liveWindow: liveSync.window,
     livePumpTs: liveSync.pumpTs,
     liveTankTs: liveSync.tankTs,
-    selectedPumpIds,
-    selectedTankIds,
+    selectedPumpIds: effectivePumpIds,
+    selectedTankIds: effectiveTankIds,
   });
 
   const [auditEnabled, setAuditEnabled] = useState(false);
@@ -778,7 +800,9 @@ export default function Widget() {
   }, [auditEnabled, audit2Enabled, auditLoc2, loc, auditLoc, locOptionsAll]);
 
   const byLocation = useMemo(
-    () => (Array.isArray(live?.byLocation) ? live.byLocation : []),
+    () => (Array.isArray(live?.byLocation) ? [...live.byLocation] : []).sort((a: any, b: any) =>
+      (locationOrder[a.location_id] ?? 999) - (locationOrder[b.location_id] ?? 999)
+      || String(a.location_name).localeCompare(String(b.location_name), "es", { numeric: true })),
     [live?.byLocation]
   );
 
@@ -940,12 +964,22 @@ export default function Widget() {
 
   return (
     <div className="space-y-6 p-6">
-      {globalService && tab !== "confiabilidad" && (
-        <div className="max-w-sm">
-          <LocationSelect label="Ubicación" value={loc} options={locOptionsAll}
-            onChange={(v) => { if (v !== "" && v !== "all") setLoc(v); }} />
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="w-full sm:w-72">
+          <LocationSelect label="Ubicación" value={loc} options={locOptionsAll} allowAll
+            onChange={(v) => { if (v !== "") setLoc(v); }} />
         </div>
-      )}
+        {tab === "operacion" && (
+          <div className="flex w-full flex-col gap-1 sm:w-64">
+            <label htmlFor="network-group" className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Conjunto</label>
+            <select id="network-group" value={networkGroup} onChange={(e) => setNetworkGroup(e.target.value as "all" | "principal")}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <option value="all">Todos</option>
+              <option value="principal">Impulsión y distribución</option>
+            </select>
+          </div>
+        )}
+      </div>
       <Tabs
         value={tab}
         onChange={setTab}
@@ -969,6 +1003,11 @@ export default function Widget() {
           pumpSummaryItems={liveSync.pumpsSummary?.items ?? []}
           tankSummaryItems={liveSync.tanksSummary?.items ?? []}
           locationLabel={principalLocName}
+          networkGroup={networkGroup}
+          pumpIds={effectivePumpIds}
+          tankIds={effectiveTankIds}
+          locationId={locId}
+          locationOrder={locationOrder}
                   onSelectTankIds={setSelectedTankIds}
         />
       )}
@@ -1061,7 +1100,7 @@ export default function Widget() {
                     value={loc}
                     onChange={(v) => { if (v !== "") setLoc(v); }}
                     options={locOptionsAll}
-                    allowAll={!globalService}
+                    allowAll
                   />
                 </div>
 
@@ -1400,7 +1439,7 @@ export default function Widget() {
                     value={loc}
                     onChange={(v) => { if (v !== "") setLoc(v); }}
                     options={locOptionsAll}
-                    allowAll={!globalService}
+                    allowAll
                   />
                 </div>
 
@@ -1642,23 +1681,6 @@ export default function Widget() {
       )}
 
             {/* V18.19 SELECTOR CONFIABILIDAD */}
-      {tab === "confiabilidad" && (
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="w-full max-w-sm">
-            <LocationSelect
-              label="Ubicación"
-              value={loc}
-              onChange={(v) => { if (v !== "") setLoc(v); }}
-              options={locOptionsAll}
-              allowAll={!globalService}
-            />
-          </div>
-
-          <div className="text-xs text-slate-400">
-            Filtro exclusivo de Operación y confiabilidad
-          </div>
-        </div>
-      )}
 {tab === "confiabilidad" && (
         <ReliabilityPage
           locationId={loc === "all" ? "all" : locId ?? "all"}

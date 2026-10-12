@@ -36,13 +36,13 @@ type Props = {
   pumpSummaryItems?: any[];
   tankSummaryItems?: any[];
   locationLabel?: string;
+  networkGroup?: "all" | "principal";
+  pumpIds?: number[] | "all";
+  tankIds?: number[] | "all";
+  locationId?: number;
+  locationOrder?: Record<string, number>;
   onSelectTankIds?: (ids: number[] | "all") => void;
 };
-
-// Tanques que pertenecen a DISTRIBUCIÓN.
-// El TK 160 (id 21, Planta Nueva) pertenece a IMPULSIÓN y no debe
-// mostrarse ni participar de los promedios/gráficos de tanques de distribución.
-const DISTRIBUTION_TANK_IDS = [7, 8, 9, 10, 11, 12];
 
 function cleanLocation(v?: string | null) {
   const s = String(v ?? "").trim();
@@ -99,6 +99,11 @@ export default function WaterNetworkOverviewLive({
   tankSummaryItems = [],
   locationLabel = "Todas las localidades",
   onSelectTankIds,
+  networkGroup = "principal",
+  pumpIds = "all",
+  tankIds = "all",
+  locationId,
+  locationOrder = {},
 }: Props) {
   const [availability, setAvailability] = useState<PumpAvailability[]>([]);
   const [layout, setLayout] = useState<LayoutNode[]>([]);
@@ -107,13 +112,6 @@ export default function WaterNetworkOverviewLive({
   const [editValues, setEditValues] = useState<
     Record<number, { disponible: boolean; descripcion: string }>
   >({});
-
-  // Al entrar a la vista principal dejamos seleccionado exclusivamente el
-  // conjunto de distribución. Así TK 160 / Planta Nueva no entra en el
-  // TankLevelChart ni en los promedios derivados de tankTs.
-  useEffect(() => {
-    onSelectTankIds?.(DISTRIBUTION_TANK_IDS);
-  }, [onSelectTankIds]);
 
   useEffect(() => {
     let mounted = true;
@@ -222,21 +220,19 @@ export default function WaterNetworkOverviewLive({
     return m;
   }, [tankSummaryItems]);
 
-  const availablePumpCount = useMemo(
-    () =>
-      availability.filter(
-        (p) =>
-          p.rol_red === "impulsion_principal" &&
-          p.disponible === true
-      ).length,
-    [availability]
-  );
+  const visiblePumps = useMemo(() => availability.filter((p) =>
+    (pumpIds === "all" || pumpIds.includes(Number(p.id))) &&
+    (locationId == null || Number(p.location_id ?? pumpLayout.get(Number(p.id))?.location_id) === locationId) &&
+    (networkGroup === "all" || p.rol_red === "impulsion_principal")
+  ), [availability, pumpIds, locationId, pumpLayout, networkGroup]);
+  const sortGroups = (groups: Map<string, any[]>) => Array.from(groups.entries())
+    .map(([location, rows]) => ({ location, rows: rows.sort((a, b) => a.name.localeCompare(b.name, "es", { numeric: true })) }))
+    .sort((a, b) => (locationOrder[a.rows[0]?.locationId] ?? 999) - (locationOrder[b.rows[0]?.locationId] ?? 999)
+      || a.location.localeCompare(b.location, "es", { numeric: true }));
   const pumpGroups = useMemo(() => {
     const groups = new Map<string, any[]>();
 
-    for (const p of availability.filter(
-      (x) => x.rol_red === "impulsion_principal"
-    )) {
+    for (const p of visiblePumps) {
       const node = pumpLayout.get(Number(p.id));
       const summary = pumpSummaryById.get(Number(p.id));
 
@@ -253,6 +249,7 @@ export default function WaterNetworkOverviewLive({
         id: p.id,
         name: p.name || node?.name || `Bomba ${p.id}`,
         location,
+        locationId: p.location_id ?? node?.location_id ?? summary?.location_id,
         estado: String(estado),
         disponible: p.disponible,
         descripcion: String(p.disponibilidad_descripcion ?? ""),
@@ -262,21 +259,21 @@ export default function WaterNetworkOverviewLive({
       groups.get(location)!.push(row);
     }
 
-    return Array.from(groups.entries()).map(([location, rows]) => ({
-      location,
-      rows: rows.sort((a, b) => a.name.localeCompare(b.name)),
-    }));
-  }, [availability, pumpLayout, pumpSummaryById]);
+    return sortGroups(groups);
+  }, [visiblePumps, pumpLayout, pumpSummaryById, locationOrder]);
 
   const tankGroups = useMemo(() => {
-    const PRINCIPAL = new Set(DISTRIBUTION_TANK_IDS);
+    const visibleIds = tankIds === "all"
+      ? Array.from(new Set([...tankLayout.keys(), ...tankSummaryById.keys()]))
+      : tankIds;
     const groups = new Map<string, any[]>();
 
-    for (const id of PRINCIPAL) {
+    for (const id of visibleIds) {
       const node = tankLayout.get(id);
       const summary = tankSummaryById.get(id);
 
       if (!node && !summary) continue;
+      if (locationId != null && Number(node?.location_id ?? summary?.location_id) !== locationId) continue;
 
       const location = cleanLocation(
         node?.location_name ?? summary?.location_name
@@ -298,6 +295,7 @@ export default function WaterNetworkOverviewLive({
           node?.name ??
           `Tanque ${id}`,
         location,
+        locationId: node?.location_id ?? summary?.location_id,
         level: Number.isFinite(level) ? level : null,
       };
 
@@ -305,20 +303,17 @@ export default function WaterNetworkOverviewLive({
       groups.get(location)!.push(row);
     }
 
-    return Array.from(groups.entries()).map(([location, rows]) => ({
-      location,
-      rows: rows.sort((a, b) => a.name.localeCompare(b.name)),
-    }));
-  }, [tankLayout, tankSummaryById]);
+    return sortGroups(groups);
+  }, [tankLayout, tankSummaryById, tankIds, locationId, locationOrder]);
 
   return (
     <div className="space-y-5">
       <div>
         <div className="text-2xl font-bold text-slate-900">
-          Estado principal de la red
+          {networkGroup === "principal" ? "Estado principal de la red" : "Estado de la red"}
         </div>
         <div className="mt-1 text-sm text-slate-500">
-          Impulsión y distribución · {locationLabel}
+          {networkGroup === "principal" ? "Impulsión y distribución" : "Todos los equipos"} · {locationLabel}
         </div>
       </div>
 
@@ -334,10 +329,9 @@ export default function WaterNetworkOverviewLive({
           <OpsPumpsProfile
             pumpsTs={pumpTs}
             timelineItems={pumpTimelineItems}
-            availablePumpCount={availablePumpCount}
-            max={12}
+            max={visiblePumps.length || undefined}
             syncId="red-principal-sync"
-            title="Impulsión · Bombas principales · 24 h"
+            title={networkGroup === "principal" ? "Impulsión · Bombas principales · 24 h" : "Bombas · 24 h"}
             tz="America/Argentina/Buenos_Aires"
             xDomain={xDomain}
             xTicks={xTicks}
@@ -350,7 +344,7 @@ export default function WaterNetworkOverviewLive({
           <TankLevelChart
             ts={tankTs}
             syncId="red-principal-sync"
-            title="Distribución · Tanques principales · 24 h"
+            title={networkGroup === "principal" ? "Impulsión y distribución · Tanques principales · 24 h" : "Tanques · 24 h"}
             tz="America/Argentina/Buenos_Aires"
             xDomain={xDomain}
             xTicks={xTicks}
@@ -366,7 +360,7 @@ export default function WaterNetworkOverviewLive({
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3">
             <div className="text-sm font-bold text-slate-800">
-              Bombas de impulsión
+              {networkGroup === "principal" ? "Bombas de impulsión" : "Bombas"}
             </div>
             <div className="text-xs text-slate-400">
               Agrupadas por localidad · disponibilidad y detalle
@@ -486,14 +480,14 @@ export default function WaterNetworkOverviewLive({
           <div className="mb-3">
             <button
               type="button"
-              onClick={() => onSelectTankIds?.(DISTRIBUTION_TANK_IDS)}
+              onClick={() => onSelectTankIds?.(networkGroup === "principal" ? [7, 8, 9, 10, 11, 12, 21] : "all")}
               className="text-left text-sm font-bold text-slate-800 transition hover:text-blue-700"
-              title="Ver todos los tanques principales de distribución"
+              title="Ver el conjunto de tanques"
             >
-              Tanques de distribución
+              {networkGroup === "principal" ? "Tanques principales de impulsión y distribución" : "Tanques"}
             </button>
             <div className="text-xs text-slate-400">
-              Principales: Hormigón, TK 1000, TK1, TK2, TK3 y Pulmón
+              {networkGroup === "principal" ? "Hormigón, TK 1000, TK1, TK2, TK3, Pulmón y TK 160 de Planta Nueva" : "Todos los tanques de la selección"}
             </div>
           </div>
 

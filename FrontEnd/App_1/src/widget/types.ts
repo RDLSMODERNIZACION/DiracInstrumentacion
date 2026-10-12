@@ -1,4 +1,4 @@
-export type LocOpt = { id: number; name: string };
+export type LocOpt = { id: number; name: string; displayOrder?: number };
 
 export type PumpInfo = {
   pump_id: number;

@@ -29,7 +29,9 @@ function normalizeLoc(row: any): LocOpt | null {
   const name = String(nameRaw).trim();
 
   if (!id || !name) return null;
-  return { id, name };
+  const orderRaw = row.displayOrder ?? row.location_display_order ?? row.display_order;
+  const order = orderRaw == null ? NaN : Number(orderRaw);
+  return { id, name, displayOrder: Number.isFinite(order) ? order : undefined };
 }
 
 export function deriveLocOptions(liveLocations: any, byLocation: any): LocOpt[] {
@@ -51,26 +53,19 @@ export function deriveLocOptions(liveLocations: any, byLocation: any): LocOpt[] 
 }
 
 export function mergeLocOptions(prev: LocOpt[], next: LocOpt[]): LocOpt[] {
-  const m = new Map<number, string>();
-  for (const o of prev) m.set(o.id, o.name);
-  for (const o of next) {
-    const cur = m.get(o.id);
-    if (!cur || (o.name && o.name.length > cur.length)) {
-      m.set(o.id, o.name);
-    }
+  const m = new Map<number, LocOpt>();
+  for (const o of [...prev, ...next]) {
+    const current = m.get(o.id);
+    m.set(o.id, { ...current, ...o, displayOrder: o.displayOrder ?? current?.displayOrder });
   }
-  return sortByName(Array.from(m, ([id, name]) => ({ id, name })));
+  return sortByName(Array.from(m.values()));
 }
 
 function uniqueById(arr: LocOpt[]): LocOpt[] {
-  const m = new Map<number, string>();
-  arr.forEach((o) => {
-    if (!m.has(o.id)) m.set(o.id, o.name);
-  });
-  return Array.from(m, ([id, name]) => ({ id, name }));
+  return Array.from(new Map(arr.map((o) => [o.id, o])).values());
 }
 
 function sortByName(arr: LocOpt[]): LocOpt[] {
-  // uso "es" para ordenar mejor en castellano
-  return [...arr].sort((a, b) => a.name.localeCompare(b.name, "es"));
+  return [...arr].sort((a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999)
+    || a.name.localeCompare(b.name, "es", { numeric: true, sensitivity: "base" }));
 }

@@ -227,12 +227,26 @@ export default function ScadaApp({ initialUser, allowedLocationIds, selectedComp
       .filter((id) => Number.isFinite(id) && id > 0)
   )).sort((a, b) => a - b), [plant.tanks, plant.pumps, service]);
 
+  const serviceAssets = React.useMemo(() => ({
+    pumps: (plant.pumps ?? []).filter((asset: any) => asset.service_type === service),
+    tanks: (plant.tanks ?? []).filter((asset: any) => asset.service_type === service),
+  }), [plant.pumps, plant.tanks, service]);
+  const locationOrder = React.useMemo(() => Object.fromEntries(
+    [...serviceAssets.pumps, ...serviceAssets.tanks].map((asset: any) =>
+      [asset.location_id, Number(asset.location_display_order ?? 999)])
+  ), [serviceAssets]);
+
   const embeddedSrc = (base: string, kpi = false) => {
     const target = new URL(base, window.location.href);
     if (selectedCompanyId != null) target.searchParams.set("company_id", String(selectedCompanyId));
     target.searchParams.set("service", service);
     target.searchParams.set("global_service", "1");
-    if (kpi) target.searchParams.set("service_locations", serviceLocationIds.join(","));
+    if (kpi) {
+      target.searchParams.set("service_locations", serviceLocationIds.join(","));
+      target.searchParams.set("service_pumps", serviceAssets.pumps.map((asset: any) => asset.id).sort((a: number, b: number) => a - b).join(","));
+      target.searchParams.set("service_tanks", serviceAssets.tanks.map((asset: any) => asset.id).sort((a: number, b: number) => a - b).join(","));
+      target.searchParams.set("location_order", JSON.stringify(locationOrder));
+    }
     return target.toString();
   };
   const app1Src = embeddedSrc(app1Base, true);

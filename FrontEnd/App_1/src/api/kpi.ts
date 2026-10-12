@@ -375,13 +375,21 @@ function locKey(id: number | string | null, name: string | null) {
  * - por defecto: devuelve cache rápido y refresca bg
  * - si necesitás “esperar sí o sí”: opts.force=true
  */
+function serviceRows<T extends { pump_id?: number; tank_id?: number }>(rows: T[], key: "pump_id" | "tank_id") {
+  const params = new URLSearchParams(window.location.search);
+  const scopeKey = key === "pump_id" ? "service_pumps" : "service_tanks";
+  if (params.get("global_service") !== "1" || !params.has(scopeKey)) return rows;
+  const allowed = new Set((params.get(scopeKey) ?? "").split(",").map(Number).filter((id) => id > 0));
+  return rows.filter((row) => allowed.has(Number(row[key])));
+}
+
 export const getPumps = (opts?: {
   force?: boolean;
   ttlMs?: number;
   staleMs?: number;
   timeoutMs?: number;
   background?: boolean;
-}) => httpSWR<Pump[]>("kpi:pumps:status", "/kpi/pumps/status", opts);
+}) => httpSWR<Pump[]>("kpi:pumps:status", "/kpi/pumps/status", opts).then((rows) => serviceRows(rows, "pump_id"));
 
 export const getTanks = (opts?: {
   force?: boolean;
@@ -389,7 +397,7 @@ export const getTanks = (opts?: {
   staleMs?: number;
   timeoutMs?: number;
   background?: boolean;
-}) => httpSWR<Tank[]>("kpi:tanks:latest", "/kpi/tanks/latest", opts);
+}) => httpSWR<Tank[]>("kpi:tanks:latest", "/kpi/tanks/latest", opts).then((rows) => serviceRows(rows, "tank_id"));
 
 /** opcional: warmup para disparar refresh temprano sin bloquear UI */
 export function warmupKpiSnapshots() {
