@@ -8,6 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from app.db import get_conn, close_pool
+from app.platform_access import require_platform_access
 from app.security import require_owner
 
 # ===== Telegram reporter (30 min) =====
@@ -77,6 +78,7 @@ enable_docs = os.getenv("ENABLE_DOCS", "1") == "1"
 app = FastAPI(
     title="Backend MIN API",
     version=(os.getenv("RENDER_GIT_COMMIT", "")[:8] or "dev"),
+    dependencies=[Depends(require_platform_access)],
     docs_url="/docs" if enable_docs else None,
     openapi_url="/openapi.json" if enable_docs else None,
 )
