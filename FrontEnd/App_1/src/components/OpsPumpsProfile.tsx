@@ -446,27 +446,16 @@ function CustomTooltip({
   label,
   payload,
   tz,
-  availablePumpCount,
 }: {
   active?: boolean;
   label?: any;
   payload?: any[];
   tz: string;
-  availablePumpCount?: number;
 }) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload as ChartRow | undefined;
   if (!row) return null;
-
-  const onCount =
-    typeof row.on === "number" && Number.isFinite(row.on) ? row.on : 0;
-
-  const available =
-    typeof availablePumpCount === "number" &&
-    Number.isFinite(availablePumpCount)
-      ? availablePumpCount
-      : 0;
 
   return (
     <div className="w-[320px] rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-lg">
@@ -474,32 +463,54 @@ function CustomTooltip({
         {fmtDateTime(Number(label ?? row.ms), tz)}
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      <div className="mb-3 grid grid-cols-3 gap-2">
         <div className="rounded-lg bg-emerald-50 px-3 py-2">
           <div className="text-[11px] font-medium text-emerald-700">
             Bombas encendidas
           </div>
           <div className="mt-1 text-2xl font-bold text-emerald-800">
-            {fmtInt(onCount)}
+            {fmtInt(row.on)}
           </div>
         </div>
 
-        <div className="rounded-lg bg-blue-50 px-3 py-2">
-          <div className="text-[11px] font-medium text-blue-700">
-            Bombas disponibles
+        <div className="rounded-lg bg-slate-100 px-3 py-2">
+          <div className="text-[11px] font-medium text-slate-600">
+            Bombas apagadas
           </div>
-          <div className="mt-1 text-2xl font-bold text-blue-800">
-            {fmtInt(available)}
+          <div className="mt-1 text-2xl font-bold text-slate-800">
+            {fmtInt(row.off)}
+          </div>
+        </div>
+        <div className="rounded-lg bg-red-50 px-3 py-2">
+          <div className="text-[11px] font-medium text-red-700">
+            Sin comunicación
+          </div>
+          <div className="mt-1 text-2xl font-bold text-red-800">
+            {fmtInt(row.offline)}
           </div>
         </div>
       </div>
 
-      <PumpNamesBlock
-        title="Encendidas en este minuto"
-        names={row.activePumpNames}
-        empty="No hay bombas encendidas registradas para este minuto."
-        colorClass="text-emerald-700"
-      />
+      <div className="max-h-64 space-y-2 overflow-y-auto">
+        <PumpNamesBlock
+          title="Encendidas en este minuto"
+          names={row.activePumpNames}
+          empty="No hay bombas encendidas registradas para este minuto."
+          colorClass="text-emerald-700"
+        />
+        <PumpNamesBlock
+          title="Apagadas en este minuto"
+          names={row.stoppedPumpNames}
+          empty="Sin detalle de bombas apagadas para este minuto."
+          colorClass="text-slate-600"
+        />
+        <PumpNamesBlock
+          title="Sin comunicación en este minuto"
+          names={row.offlinePumpNames}
+          empty="Sin detalle de bombas sin comunicación para este minuto."
+          colorClass="text-red-700"
+        />
+      </div>
     </div>
   );
 }
@@ -517,7 +528,6 @@ export default function OpsPumpsProfile({
   onHoverX,
   showBrushIf = 0,
   timelineItems = [],
-  availablePumpCount = 0,
 }: {
   pumpsTs?: PumpsTs;
   comparePumpsTs?: PumpsTs;
@@ -624,18 +634,17 @@ export default function OpsPumpsProfile({
 
   const yMax = useMemo(() => {
     const maxOn = Math.max(...merged.map((d) => Number(d.on ?? 0)), 0);
+    const maxOff = Math.max(...merged.map((d) => Number(d.off ?? 0)), 0);
     const maxOffline = hasOffline
       ? Math.max(...merged.map((d) => Number(d.offline ?? 0)), 0)
       : 0;
     const maxCmp = Math.max(...merged.map((d) => Number(d.onCmp ?? 0)), 0);
 
-    return Math.max(max ?? 0, maxOn, maxOffline, maxCmp, 1);
+    return Math.max(max ?? 0, maxOn, maxOff, maxOffline, maxCmp, 1);
   }, [merged, max, hasOffline]);
 
   const shouldShowBrush =
     showBrushIf > 0 && merged.length > showBrushIf && !xDomain;
-
-  const hasTimelineDetail = timelineItems.length > 0;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -645,7 +654,7 @@ export default function OpsPumpsProfile({
 
           <div className="mt-1 text-xs text-slate-400">
             Tocá o pasá por un punto del gráfico para ver qué bombas estaban
-            encendidas en ese minuto.
+            encendidas, apagadas o sin comunicación en ese minuto.
           </div>
         </div>
 
@@ -746,7 +755,7 @@ export default function OpsPumpsProfile({
               />
 
               <Tooltip
-                content={(props: any) => <CustomTooltip {...props} tz={tz} availablePumpCount={availablePumpCount} />}
+                content={(props: any) => <CustomTooltip {...props} tz={tz} />}
               />
 
               <Legend
@@ -765,6 +774,16 @@ export default function OpsPumpsProfile({
                 strokeWidth={2.75}
                 isAnimationActive={false}
                 connectNulls
+              />
+
+              <Line
+                type="stepAfter"
+                dataKey="off"
+                name="Bombas OFF"
+                stroke="#64748b"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
               />
 
               {hasOffline && (
