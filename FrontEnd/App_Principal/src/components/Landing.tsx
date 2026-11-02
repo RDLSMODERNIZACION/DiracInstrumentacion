@@ -105,10 +105,10 @@ export default function Landing() {
         <div className="dl-shell dl-nav-inner">
           <a className="dl-brand" href="#inicio"><img src={LOGO_SRC} alt="DIRAC" /><span className="dl-brand-copy"><strong>DIRAC</strong><span>Servicios Energía</span></span></a>
           <div className="dl-links"><a href="#equipo">Nuestro equipo</a><a href="#productos">Catálogo</a><a href="#empresa">Empresa</a><a href="#contacto">Contacto</a></div>
-          <Link className="dl-login desktop" to="/login">Ingresar al panel</Link>
+          <Link className="dl-login desktop" to="/instrumentacionlogin">Ingresar al panel</Link>
           <button className="dl-menu-btn" onClick={() => setMobileOpen((v) => !v)} aria-label="Abrir menú">{mobileOpen ? <X size={24}/> : <Menu size={24}/>}</button>
         </div>
-        {mobileOpen && <div className="dl-mobile"><a href="#equipo" onClick={() => setMobileOpen(false)}>Nuestro equipo</a><a href="#productos" onClick={() => setMobileOpen(false)}>Catálogo</a><a href="#empresa" onClick={() => setMobileOpen(false)}>Empresa</a><a href="#contacto" onClick={() => setMobileOpen(false)}>Contacto</a><Link className="dl-login" to="/login">Ingresar al panel</Link></div>}
+        {mobileOpen && <div className="dl-mobile"><a href="#equipo" onClick={() => setMobileOpen(false)}>Nuestro equipo</a><a href="#productos" onClick={() => setMobileOpen(false)}>Catálogo</a><a href="#empresa" onClick={() => setMobileOpen(false)}>Empresa</a><a href="#contacto" onClick={() => setMobileOpen(false)}>Contacto</a><Link className="dl-login" to="/instrumentacionlogin">Ingresar al panel</Link></div>}
       </nav>
 
       <main id="inicio">

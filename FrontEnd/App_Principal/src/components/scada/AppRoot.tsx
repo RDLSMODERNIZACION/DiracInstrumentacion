@@ -185,7 +185,8 @@ export default function AppRoot() {
     return (
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login onSuccess={() => {}} />} />
+        <Route path="/instrumentacionlogin" element={<Login />} />
+        <Route path="/login" element={<Navigate to="/instrumentacionlogin" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
@@ -205,6 +206,7 @@ export default function AppRoot() {
     <>
       <ActivityTracker section={trackedSection} />
       <Routes>
+        <Route path="/instrumentacionlogin" element={<Navigate to="/" replace />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/actividad" element={<ActivityPanel />} />
 

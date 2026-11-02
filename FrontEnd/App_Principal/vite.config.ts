@@ -20,7 +20,7 @@ export default defineConfig({
     proxy: {
       // Sirve /instrumentacion desde el proyecto remoto, pero
       // mapeando a su raíz para evitar el loop
-      '^/instrumentacion(/.*)?': {
+      '^/instrumentacion(/.*)?$': {
         target: INSTRUMENTACION_TARGET,
         changeOrigin: true,
         ws: true,
