@@ -1,3 +1,8 @@
+Acceso directo a instrumentación: `/instrumentacionlogin`.
+La ruta `/login` redirige al nuevo acceso para conservar enlaces anteriores.
+Si ya hay una sesión iniciada, ambos accesos llevan al panel.
+Vercel sirve estas rutas desde `index.html` para permitir enlaces directos y recargas.
+
 Scada/
   App_Principal/
     src/

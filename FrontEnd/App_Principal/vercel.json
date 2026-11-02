@@ -1,6 +1,14 @@
 {
   "routes": [
     {
+      "src": "/instrumentacionlogin/?",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/login/?",
+      "dest": "/index.html"
+    },
+    {
       "src": "/ahorroenergetico",
       "dest": "https://ahorro-energetico.vercel.app/ahorroenergetico"
     },
